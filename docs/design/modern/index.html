@@ -1,0 +1,713 @@
+<title>账本新设计语言</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Nunito:wght@600;700;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a design review sheet. Intro + recommendation, then each direction as
+   principles → tokens → seven 393×852 phone frames; phones carry their own tokens. */
+:root {
+  --doc-bg: #ebe9e4;
+  --doc-panel: #f6f5f2;
+  --doc-ink: #1a1815;
+  --doc-ink-2: #55504a;
+  --doc-ink-3: #85807a;
+  --doc-line: #d9d5ce;
+  --doc-pick: #0f6e5a;
+  --f-sans: -apple-system, "SF Pro Text", Inter, "PingFang SC", "Noto Sans SC", "WenQuanYi Zen Hei", sans-serif;
+  --f-disp: -apple-system, "SF Pro Display", "Inter Display", Inter, "PingFang SC", "Noto Sans SC", sans-serif;
+  --f-round: ui-rounded, "SF Pro Rounded", Nunito, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+  --f-serif: "Source Serif 4", "Songti SC", Georgia, serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --doc-bg: #141413; --doc-panel: #1c1b1a; --doc-ink: #f1eee9; --doc-ink-2: #c3bdb4; --doc-ink-3: #8f8981; --doc-line: #2e2c29; --doc-pick: #5cc4ae; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --doc-bg: #141413; --doc-panel: #1c1b1a; --doc-ink: #f1eee9; --doc-ink-2: #c3bdb4; --doc-ink-3: #8f8981; --doc-line: #2e2c29; --doc-pick: #5cc4ae; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--doc-bg); color: var(--doc-ink); font-family: var(--f-sans); font-size: 14px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 1520px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 80px; }
+h1 { font-family: var(--f-disp); font-size: 34px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 14px; text-wrap: balance; }
+h2 { font-family: var(--f-disp); font-size: 26px; letter-spacing: -0.015em; margin: 0 0 6px; text-wrap: balance; }
+h3 { font-size: 15px; margin: 0 0 8px; }
+p { margin: 0 0 10px; max-width: 68ch; color: var(--doc-ink-2); }
+.lede { font-size: 15.5px; color: var(--doc-ink-2); }
+.eyebrow { font-size: 12px; letter-spacing: .06em; color: var(--doc-ink-3); margin-bottom: 6px; }
+
+.toolbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 0; background: var(--doc-bg); border-bottom: 1px solid var(--doc-line); margin: 28px 0 36px; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 21; background: var(--doc-bg); }
+.toolbar a, .toolbar button { font: 500 13px var(--f-sans); color: var(--doc-ink); background: var(--doc-panel); border: 1px solid var(--doc-line); border-radius: 999px; padding: 6px 14px; text-decoration: none; cursor: pointer; }
+.toolbar button[aria-pressed="true"] { background: var(--doc-ink); color: var(--doc-bg); border-color: var(--doc-ink); }
+.toolbar .sp { flex: 1; }
+.toolbar button:focus-visible, .toolbar a:focus-visible { outline: 2px solid var(--doc-pick); outline-offset: 2px; }
+
+.pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin: 22px 0 6px; }
+.pick > div { background: var(--doc-panel); border: 1px solid var(--doc-line); border-radius: 16px; padding: 18px 20px; min-width: 0; }
+.pick .rec { border-color: var(--doc-pick); box-shadow: inset 0 0 0 1px var(--doc-pick); }
+.pick .badge { display: inline-block; font-size: 11.5px; font-weight: 600; color: var(--doc-pick); border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; margin-left: 6px; vertical-align: 2px; }
+.pick ul { margin: 6px 0 0; padding-left: 18px; color: var(--doc-ink-2); }
+
+section.dir { padding-top: 26px; margin-top: 40px; border-top: 1px solid var(--doc-line); }
+.spec { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin: 20px 0 30px; }
+.spec > div { background: var(--doc-panel); border: 1px solid var(--doc-line); border-radius: 16px; padding: 16px 18px; min-width: 0; }
+.spec ol, .spec ul { margin: 0; padding-left: 18px; color: var(--doc-ink-2); }
+.spec li { margin-bottom: 4px; }
+.spec li b { color: var(--doc-ink); font-weight: 600; }
+.sw { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 10px; align-items: center; font-size: 12.5px; }
+.sw .n { color: var(--doc-ink-2); }
+.sw .c { display: flex; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 11.5px; color: var(--doc-ink-3); }
+.sw .c i { width: 18px; height: 18px; border-radius: 6px; border: 1px solid var(--doc-line); display: inline-block; }
+.sw .h { font-size: 11px; color: var(--doc-ink-3); }
+.typespec div { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; border-bottom: 1px solid var(--doc-line); padding: 6px 0; }
+.typespec div:last-child { border: 0; }
+.typespec small { color: var(--doc-ink-3); font-size: 11.5px; white-space: nowrap; }
+
+.frames { display: flex; flex-wrap: wrap; gap: 34px 30px; }
+.fr { display: flex; flex-direction: column; gap: 8px; }
+.fr .cap { font-size: 12.5px; color: var(--doc-ink-3); }
+.fr .cap b { color: var(--doc-ink); font-weight: 600; margin-right: 6px; }
+@media (max-width: 440px) { .fr .ph { zoom: .86; } }
+
+table.cmp { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.tblwrap { overflow-x: auto; margin-top: 14px; }
+table.cmp th, table.cmp td { text-align: left; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--doc-line); vertical-align: top; }
+table.cmp th { font-weight: 500; color: var(--doc-ink-3); font-size: 12.5px; }
+table.cmp td:first-child { color: var(--doc-ink-2); white-space: nowrap; }
+
+/* ===================== phone ===================== */
+.ph {
+  /* direction A light (default) */
+  --bg: #f3f1ec; --card: #ffffff; --card-2: #f4f2ed; --ink: #17140f; --ink-2: #4b453d; --ink-3: #8a8277;
+  --line: rgba(23,20,15,.08); --in: #0f6e5a; --out: #a4492a; --in-tint: #e2efea; --out-tint: #f5e6df;
+  --accent: #17140f; --on-accent: #ffffff; --glass: rgba(255,255,255,.62); --glass-edge: rgba(255,255,255,.75); --glass-sh: rgba(40,30,20,.10);
+  --hl: rgba(255,255,255,.7); --press: rgba(23,20,15,.05);
+  --r-card: 22px; --r-ctl: 14px; --num: var(--f-disp);
+  width: 393px; height: 852px; border-radius: 56px; position: relative; overflow: hidden; flex: none;
+  background: var(--bg); color: var(--ink); font-family: var(--f-sans);
+  box-shadow: 0 0 0 10px #0d0c0b, 0 0 0 11px #2a2826, 0 24px 60px rgba(0,0,0,.18);
+  margin: 11px; font-size: 15px; line-height: 1.35;
+}
+.ph.A.dk { --bg: #0e0d0c; --card: #1a1917; --card-2: #24221f; --ink: #f4f1ec; --ink-2: #c9c1b6; --ink-3: #8e867c;
+  --line: rgba(255,255,255,.08); --in: #5cc4ae; --out: #e08a62; --in-tint: rgba(92,196,174,.14); --out-tint: rgba(224,138,98,.14);
+  --accent: #f4f1ec; --on-accent: #17140f; --glass: rgba(40,38,35,.55); --glass-edge: rgba(255,255,255,.14); --glass-sh: rgba(0,0,0,.45); --hl: rgba(255,255,255,.10); --press: rgba(255,255,255,.06); }
+.ph.B { --bg: #f1f2f6; --card: #ffffff; --card-2: #f1f2f6; --ink: #0c0e13; --ink-2: #4a4f5b; --ink-3: #8a8f9b;
+  --line: rgba(12,14,30,.07); --in: #13985a; --out: #e2533d; --in-tint: #e3f5eb; --out-tint: #fde9e5;
+  --accent: #2f4be0; --on-accent: #ffffff; --acc-tint: #e8ecfd; --hero: #2f4be0; --glass: rgba(255,255,255,.6); --glass-edge: rgba(255,255,255,.8); --glass-sh: rgba(20,30,80,.12); --hl: rgba(255,255,255,.75); --press: rgba(12,14,30,.05);
+  --r-card: 26px; --r-ctl: 16px; --num: var(--f-round); }
+.ph.B.dk { --bg: #000000; --card: #16171b; --card-2: #22232a; --ink: #f5f6f8; --ink-2: #c3c6cf; --ink-3: #8b8f9a;
+  --line: rgba(255,255,255,.08); --in: #3ccf86; --out: #ff7a63; --in-tint: rgba(60,207,134,.15); --out-tint: rgba(255,122,99,.15);
+  --accent: #6f86ff; --on-accent: #ffffff; --acc-tint: rgba(111,134,255,.18); --hero: #3248c8; --glass: rgba(36,37,44,.58); --glass-edge: rgba(255,255,255,.12); --glass-sh: rgba(0,0,0,.6); --hl: rgba(255,255,255,.10); --press: rgba(255,255,255,.06); }
+
+.ph * { box-sizing: border-box; }
+.ph .tnum, .ph .amt, .ph .big { font-variant-numeric: tabular-nums; }
+.ph svg { display: block; }
+.ph .ic { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+.sb { height: 54px; display: flex; align-items: center; justify-content: space-between; padding: 6px 34px 0 46px; font: 600 16px var(--f-disp); }
+.sb .r { display: flex; gap: 6px; align-items: center; }
+.island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 124px; height: 36px; border-radius: 20px; background: #000; z-index: 30; }
+
+.body { position: absolute; inset: 0; overflow: hidden; }
+.scroll { padding: 0 16px 140px; display: flex; flex-direction: column; gap: 12px; }
+
+.glass { background: var(--glass); backdrop-filter: blur(22px) saturate(1.8); -webkit-backdrop-filter: blur(22px) saturate(1.8);
+  border: .5px solid var(--glass-edge); box-shadow: 0 8px 28px var(--glass-sh), inset 0 1px 0 var(--hl); }
+
+.top { display: flex; align-items: center; gap: 8px; padding: 6px 16px 10px; position: relative; z-index: 5; }
+.top .t { font: 700 30px/1.1 var(--f-disp); letter-spacing: -0.02em; flex: 1; }
+.top .t.sm { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+.chip { height: 40px; border-radius: 20px; display: inline-flex; align-items: center; gap: 4px; padding: 0 14px; font-size: 14.5px; font-weight: 500; color: var(--ink); }
+.chip .ic { width: 15px; height: 15px; stroke-width: 2; }
+.circ { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--ink); position: relative; flex: none; }
+.circ .dot { position: absolute; top: 8px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--in); border: 1.5px solid var(--card); }
+
+.card { background: var(--card); border-radius: var(--r-card); padding: 16px 18px; position: relative; }
+.A .card { box-shadow: 0 0 0 .5px var(--line); }
+.B .card { box-shadow: 0 1px 2px rgba(10,20,60,.04); }
+.B.dk .card { box-shadow: none; }
+.hd { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.hd .l { font-size: 15px; font-weight: 600; }
+.hd .r { font-size: 12.5px; color: var(--ink-3); display: flex; align-items: center; gap: 2px; }
+.hd .r .ic { width: 13px; height: 13px; stroke-width: 2; }
+.lbl { font-size: 12.5px; color: var(--ink-3); }
+.meta { font-size: 12.5px; color: var(--ink-3); }
+.mono { font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-3); letter-spacing: -.01em; }
+.in { color: var(--in); } .out { color: var(--out); } .mut { color: var(--ink-3); }
+.tag { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 8px; border-radius: 11px; font-size: 11.5px; font-weight: 600; }
+.tag.ok { background: var(--in-tint); color: var(--in); }
+.tag.wait { background: var(--out-tint); color: var(--out); }
+.tag .ic { width: 12px; height: 12px; stroke-width: 2.4; }
+
+.big { font: 600 38px/1.05 var(--num); letter-spacing: -0.025em; }
+.big .cur { font-size: .55em; color: var(--ink-3); font-weight: 500; margin-right: 3px; letter-spacing: 0; }
+.B .big { font-weight: 700; }
+.amt { font: 500 15.5px var(--num); letter-spacing: -0.01em; white-space: nowrap; }
+.B .amt { font-weight: 700; font-size: 16px; }
+.dbl { height: 4px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); opacity: .9; }
+
+.kv { display: flex; justify-content: space-between; align-items: baseline; padding: 5px 0; }
+.kv .k { color: var(--ink-2); font-size: 14.5px; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.split.three { grid-template-columns: 1fr 1fr 1fr; }
+.stat .v { font: 600 17px var(--num); letter-spacing: -0.015em; margin-top: 2px; white-space: nowrap; }
+.B .stat .v { font-weight: 700; }
+
+.bar { height: 8px; border-radius: 4px; background: var(--card-2); display: flex; overflow: hidden; gap: 2px; }
+.bar i { display: block; height: 100%; border-radius: 4px; }
+.legend { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--ink-2); margin-top: 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 8px; height: 8px; border-radius: 3px; display: inline-block; }
+
+.cat { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; flex: none; background: var(--card-2); color: var(--ink-2); }
+.cat .ic { width: 18px; height: 18px; stroke-width: 1.7; }
+.B .cat { border-radius: 50%; width: 36px; height: 36px; color: #fff; }
+.B .cat .ic { stroke-width: 2; }
+
+.row { display: flex; align-items: center; gap: 12px; padding: 10px 0; position: relative; }
+.row + .row::before { content: ""; position: absolute; top: 0; left: 46px; right: 0; height: .5px; background: var(--line); }
+.B .row + .row::before { left: 48px; }
+.row .mid { flex: 1; min-width: 0; }
+.row .ttl { font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .sub { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.row .end { text-align: right; }
+.row .end .sub { margin-top: 1px; }
+.minibar { height: 4px; border-radius: 2px; background: var(--card-2); margin-top: 6px; overflow: hidden; }
+.minibar i { display: block; height: 100%; border-radius: 2px; background: var(--ink-2); }
+
+.pills { display: flex; gap: 8px; }
+.pill { height: 34px; padding: 0 14px; border-radius: 17px; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; background: var(--card); color: var(--ink-2); box-shadow: 0 0 0 .5px var(--line); white-space: nowrap; }
+.pill small { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.pill.on { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+.pill.on small { color: inherit; opacity: .7; }
+.search { height: 40px; border-radius: 20px; display: flex; align-items: center; gap: 8px; padding: 0 14px; color: var(--ink-3); font-size: 15px; background: var(--card); box-shadow: 0 0 0 .5px var(--line); }
+.search .ic { width: 17px; height: 17px; }
+
+.day { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 4px 0; font-size: 13px; color: var(--ink-3); }
+.day b { color: var(--ink); font-weight: 600; font-size: 14px; margin-right: 6px; }
+.B .day b { font-size: 15px; }
+
+/* tab bar */
+.tabs { position: absolute; left: 16px; right: 82px; bottom: 28px; height: 62px; border-radius: 31px; display: flex; align-items: center; padding: 4px; z-index: 10; }
+.tab { flex: 1; height: 54px; border-radius: 27px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 10.5px; font-weight: 500; color: var(--ink-2); }
+.tab .ic { width: 22px; height: 22px; }
+.tab.on { background: var(--press); color: var(--ink); }
+.B .tab.on { color: var(--accent); background: var(--acc-tint); }
+.fab { position: absolute; right: 16px; bottom: 28px; width: 62px; height: 62px; border-radius: 50%; display: grid; place-items: center; z-index: 10; color: var(--ink); }
+.fab .ic { width: 24px; height: 24px; }
+.home-ind { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 136px; height: 5px; border-radius: 3px; background: var(--ink); opacity: .85; z-index: 12; }
+
+/* buttons */
+.btn { height: 50px; border-radius: 25px; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 16px; font-weight: 600; background: var(--accent); color: var(--on-accent); }
+.btn.sec { background: var(--card-2); color: var(--ink); }
+
+/* sheet */
+.dim { position: absolute; inset: 0; background: rgba(0,0,0,.28); z-index: 15; }
+.sheet { position: absolute; left: 8px; right: 8px; top: 62px; bottom: 8px; border-radius: 38px; background: var(--bg); z-index: 16; padding: 8px 16px 0; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.grab { width: 38px; height: 5px; border-radius: 3px; background: var(--ink-3); opacity: .45; margin: 0 auto 2px; }
+.seg { display: flex; padding: 3px; border-radius: 18px; height: 38px; }
+.seg span { flex: 1; display: grid; place-items: center; border-radius: 15px; font-size: 14px; font-weight: 500; color: var(--ink-2); }
+.seg span.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.B .seg span.on { background: var(--accent); color: #fff; }
+.cats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 4px; }
+.cats div { display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-2); padding: 6px 0; border-radius: 14px; }
+.cats div.on { background: var(--card); color: var(--ink); box-shadow: 0 0 0 1.5px var(--ink); }
+.B .cats div.on { box-shadow: 0 0 0 2px var(--accent); }
+.keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: auto; padding-bottom: 30px; }
+.keys span { height: 48px; border-radius: 14px; display: grid; place-items: center; font: 500 21px var(--num); background: var(--card); }
+.keys span.op { color: var(--ink-2); font-size: 16px; }
+.keys span.go { grid-row: span 2; height: auto; background: var(--accent); color: var(--on-accent); font-size: 16px; font-weight: 600; font-family: var(--f-sans); }
+.field { display: flex; align-items: center; gap: 10px; padding: 10px 0; font-size: 14.5px; }
+.field + .field { border-top: .5px solid var(--line); }
+.field .k { color: var(--ink-3); width: 64px; flex: none; }
+.field .v { flex: 1; min-width: 0; }
+.field .ic { width: 15px; height: 15px; color: var(--ink-3); }
+
+/* import */
+.chk { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--ink-3); display: grid; place-items: center; flex: none; }
+.chk.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.chk .ic { width: 13px; height: 13px; stroke-width: 2.8; }
+.sugg { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 11px; background: var(--card-2); font-size: 12px; color: var(--ink-2); }
+.sugg .ic { width: 12px; height: 12px; }
+.sugg.need { background: var(--out-tint); color: var(--out); }
+.dock { position: absolute; left: 12px; right: 12px; bottom: 26px; border-radius: 30px; padding: 12px 12px 12px 20px; display: flex; align-items: center; gap: 12px; z-index: 10; }
+.dock .mid { flex: 1; }
+.dock .btn { height: 46px; padding: 0 22px; }
+
+/* agent */
+.msg-u { align-self: flex-end; max-width: 78%; background: var(--card); padding: 10px 14px; border-radius: 20px 20px 6px 20px; font-size: 15.5px; box-shadow: 0 0 0 .5px var(--line); }
+.B .msg-u { background: var(--accent); color: #fff; box-shadow: none; }
+.tool { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px 0 8px; border-radius: 15px; background: var(--card-2); font-size: 12.5px; color: var(--ink-2); }
+.tool .ic { width: 15px; height: 15px; }
+.tool .ok { width: 18px; height: 18px; border-radius: 50%; background: var(--in-tint); color: var(--in); display: grid; place-items: center; }
+.tool .ok .ic { width: 11px; height: 11px; stroke-width: 3; }
+.prose { font: 400 17px/1.62 var(--f-serif); color: var(--ink); letter-spacing: .003em; }
+.prose b { font-weight: 600; }
+.B .prose { font: 400 16px/1.6 var(--f-sans); }
+.B .prose b { font-weight: 650; }
+.fol { display: flex; gap: 8px; flex-wrap: wrap; }
+.fol span { height: 32px; padding: 0 12px; border-radius: 16px; display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px; color: var(--ink-2); box-shadow: 0 0 0 .5px var(--line); background: var(--card); }
+.fol .ic { width: 14px; height: 14px; }
+.composer { position: absolute; left: 12px; right: 12px; bottom: 26px; border-radius: 28px; padding: 8px; display: flex; align-items: center; gap: 6px; z-index: 10; }
+.composer .f { flex: 1; color: var(--ink-3); font-size: 16px; padding-left: 4px; }
+.composer .circ { width: 40px; height: 40px; }
+.composer .send { background: var(--accent); color: var(--on-accent); }
+
+/* bento + ring */
+.bento { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.bento .card { padding: 14px 16px; min-height: 108px; display: flex; flex-direction: column; justify-content: space-between; }
+.bico { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; }
+.bico .ic { width: 15px; height: 15px; stroke-width: 2.2; }
+.hero-b { background: var(--hero) !important; color: #fff; overflow: hidden; }
+.hero-b .lbl, .hero-b .meta { color: rgba(255,255,255,.72); }
+.hero-b .big .cur { color: rgba(255,255,255,.7); }
+.hero-b .rule-tex { position: absolute; inset: 0; background-image: repeating-linear-gradient(to bottom, transparent 0 27px, rgba(255,255,255,.07) 27px 28px); pointer-events: none; }
+.hero-b .tag { background: rgba(255,255,255,.18); color: #fff; }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">LEDGER · iOS 设计语言提案 · 2026 年 11 月</div>
+  <h1>让账本看起来属于 iOS 26，又仍然是一本账</h1>
+  <p class="lede">现在的「结平」是印刷账本的思路：没有卡片、没有图标、没有强调色，层级全靠字重和细线。它干净，但在 Liquid Glass 的玻璃栏下面显得平、旧、信息密而难扫。下面是两个更现代的方向。两者都保留现有页面的全部内容（结算区、留存率、收支结算、支出分类、最近流水、导入复核、助手），只改视觉语言。</p>
+
+  <div class="pick">
+    <div class="rec">
+      <h3>方向 A · 纸本卡片 <span class="badge">推荐</span></h3>
+      <p>结平的进化版。暖纸底色、墨色和青绿 / 赭色两种方向色都保留，但把通栏色带换成圆角卡片，加入单色分类图标、更大的数字和更圆润的图表。净值下面的双线留着当签名。</p>
+      <ul><li>和现有玻璃栏、Source Serif 回复、已核平这些已有决定完全兼容</li><li>改动集中在颜色 token、卡片容器和行样式，迁移成本最低</li><li>依旧克制，适合每天看、数字很多的账本</li></ul>
+    </div>
+    <div>
+      <h3>方向 B · 清透原生</h3>
+      <p>更大胆的换装。冷灰底色、群青强调色、彩色分类圆标、圆体数字、便当式数据方块。看起来像 Apple 钱包和现代记账 App。</p>
+      <ul><li>辨识度和「新」感最强，图表和分类一眼可分</li><li>引入一个品牌色和九个分类色，需要新的配色规则</li><li>和现在的品牌气质断开，几乎每个页面都要重画</li></ul>
+    </div>
+  </div>
+
+  <nav class="toolbar" aria-label="视图">
+    <a href="#dir-a">方向 A · 纸本卡片</a>
+    <a href="#dir-b">方向 B · 清透原生</a>
+    <a href="#compare">对比</a>
+    <span class="sp"></span>
+    <button type="button" id="t-light" aria-pressed="true">手机浅色</button>
+    <button type="button" id="t-dark" aria-pressed="false">手机深色</button>
+  </nav>
+
+  <section class="dir" id="dir-a">
+    <div class="eyebrow">方向 A · 推荐</div>
+    <h2>纸本卡片</h2>
+    <p>一张卡就是一个结算单元。卡片取代通栏色带和满屏细线，让玻璃栏下面始终只有一种底色在折射；方向色仍然只给金额用，交互用墨色。</p>
+    <div class="spec">
+      <div>
+        <h3>原则</h3>
+        <ol>
+          <li><b>卡片分组，不用线分组。</b>一屏 3 到 5 张卡，卡内行与行之间只用缩进的半像素线。</li>
+          <li><b>数字先行。</b>每张卡最上面是一个大数字，明细在下面。</li>
+          <li><b>方向色只属于金额。</b>收入青绿、支出赭色，按钮和选中态用墨色，不加品牌色。</li>
+          <li><b>图标单色。</b>分类图标统一灰底墨线，帮助扫读，但不抢颜色。</li>
+          <li><b>保留双线。</b>净值和已核平的合计下面仍是那条双线，是结平留下的签名。</li>
+        </ol>
+      </div>
+      <div>
+        <h3>配色</h3>
+        <div class="sw">
+          <span class="h">token</span><span class="h">浅色</span><span class="h">深色</span>
+          <span class="n">bg 页面</span><span class="c"><i style="background:#f3f1ec"></i>#F3F1EC</span><span class="c"><i style="background:#0e0d0c"></i>#0E0D0C</span>
+          <span class="n">card 卡片</span><span class="c"><i style="background:#ffffff"></i>#FFFFFF</span><span class="c"><i style="background:#1a1917"></i>#1A1917</span>
+          <span class="n">card-2 内嵌/图标底</span><span class="c"><i style="background:#f4f2ed"></i>#F4F2ED</span><span class="c"><i style="background:#24221f"></i>#24221F</span>
+          <span class="n">ink 正文/主按钮</span><span class="c"><i style="background:#17140f"></i>#17140F</span><span class="c"><i style="background:#f4f1ec"></i>#F4F1EC</span>
+          <span class="n">ink-3 次要</span><span class="c"><i style="background:#8a8277"></i>#8A8277</span><span class="c"><i style="background:#8e867c"></i>#8E867C</span>
+          <span class="n">in 收入</span><span class="c"><i style="background:#0f6e5a"></i>#0F6E5A</span><span class="c"><i style="background:#5cc4ae"></i>#5CC4AE</span>
+          <span class="n">out 支出</span><span class="c"><i style="background:#a4492a"></i>#A4492A</span><span class="c"><i style="background:#e08a62"></i>#E08A62</span>
+        </div>
+      </div>
+      <div>
+        <h3>字体与尺寸</h3>
+        <div class="typespec">
+          <div><span style="font:600 26px var(--f-disp);letter-spacing:-.02em">¥169,170.20</span><small>大数字 38 · Semibold · SF Pro</small></div>
+          <div><span style="font:700 20px var(--f-disp)">概览</span><small>页面大标题 30 · Bold</small></div>
+          <div><span style="font-size:15px;font-weight:600">支出分类</span><small>卡片标题 15 · Semibold</small></div>
+          <div><span style="font-size:15px;font-weight:500">城市书房</span><small>行标题 15 · Medium</small></div>
+          <div><span style="font:400 16px var(--f-serif)">8 月一共花了 847.80。</span><small>助手回答 17 · Source Serif 4</small></div>
+          <div><span class="mono" style="font-family:var(--f-mono);font-size:12px;color:var(--doc-ink-3)">Assets:Cash:Daily</span><small>账户路径 11.5 · Plex Mono</small></div>
+        </div>
+        <p style="margin-top:10px;font-size:12.5px">正文从 IBM Plex Sans 换成系统 SF Pro（中文仍是苹方），换来动态字号和等宽数字；Plex Mono 只留给账户路径和 beancount 原文。</p>
+      </div>
+      <div>
+        <h3>间距、圆角、动效</h3>
+        <ul>
+          <li><b>间距</b> 页边 16，卡间 12，卡内边 16 × 18，行高最少 44。</li>
+          <li><b>圆角</b> 卡片 22，按钮和输入 14 或胶囊，分类图标 11，全部用连续圆角。</li>
+          <li><b>层次</b> 卡片只有 0.5 像素描边，不加投影；投影只给玻璃层。</li>
+          <li><b>动效</b> 卡片按下缩到 0.98；数字切换期间时滚动过渡（contentTransition numericText）；弹窗用系统 spring，0.35 秒。</li>
+          <li><b>玻璃</b> 顶栏胶囊、标签栏、搜索、底部操作栏和输入框继续用 Liquid Glass，内容层不用。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="frames" id="frames-A"></div>
+  </section>
+
+  <section class="dir" id="dir-b">
+    <div class="eyebrow">方向 B</div>
+    <h2>清透原生</h2>
+    <p>贴近系统原生 App 的做法：冷灰分组底、白卡、一个群青品牌色负责交互和净值卡，分类用彩色圆标区分，数字换成圆体。信息一眼可分，代价是色彩规则变多。</p>
+    <div class="spec">
+      <div>
+        <h3>原则</h3>
+        <ol>
+          <li><b>一个品牌色。</b>群青只用于主按钮、选中态和首页净值卡。</li>
+          <li><b>分类有颜色。</b>每个分类一个固定色相，图标、环图、条形图共用。</li>
+          <li><b>便当式概览。</b>首页用 2 × 2 数据方块代替结算表，点开再看明细。</li>
+          <li><b>圆体数字。</b>金额用 SF Pro Rounded Bold，更友好也更醒目。</li>
+          <li><b>支出不标红。</b>支出保持墨色带负号，红色只留给超预算这类真正的警示。</li>
+        </ol>
+      </div>
+      <div>
+        <h3>配色</h3>
+        <div class="sw">
+          <span class="h">token</span><span class="h">浅色</span><span class="h">深色</span>
+          <span class="n">bg 页面</span><span class="c"><i style="background:#f1f2f6"></i>#F1F2F6</span><span class="c"><i style="background:#000"></i>#000000</span>
+          <span class="n">card 卡片</span><span class="c"><i style="background:#fff"></i>#FFFFFF</span><span class="c"><i style="background:#16171b"></i>#16171B</span>
+          <span class="n">accent 群青</span><span class="c"><i style="background:#2f4be0"></i>#2F4BE0</span><span class="c"><i style="background:#6f86ff"></i>#6F86FF</span>
+          <span class="n">ink 正文</span><span class="c"><i style="background:#0c0e13"></i>#0C0E13</span><span class="c"><i style="background:#f5f6f8"></i>#F5F6F8</span>
+          <span class="n">in 收入</span><span class="c"><i style="background:#13985a"></i>#13985A</span><span class="c"><i style="background:#3ccf86"></i>#3CCF86</span>
+          <span class="n">warn 警示</span><span class="c"><i style="background:#e2533d"></i>#E2533D</span><span class="c"><i style="background:#ff7a63"></i>#FF7A63</span>
+          <span class="n">分类色</span><span class="c" style="grid-column:span 2" id="b-cats"></span>
+        </div>
+      </div>
+      <div>
+        <h3>字体与尺寸</h3>
+        <div class="typespec">
+          <div><span style="font:700 26px var(--f-round);letter-spacing:-.02em">¥169,170.20</span><small>大数字 38 · Bold · SF Pro Rounded</small></div>
+          <div><span style="font:700 20px var(--f-disp)">概览</span><small>页面大标题 30 · Bold</small></div>
+          <div><span style="font:700 15px var(--f-round)">−328.00</span><small>行金额 16 · Rounded Bold</small></div>
+          <div><span style="font-size:15px;font-weight:500">城市书房</span><small>行标题 15 · Medium</small></div>
+          <div><span style="font-size:15px">8 月一共花了 847.80。</span><small>助手回答 16 · SF Pro</small></div>
+        </div>
+      </div>
+      <div>
+        <h3>间距、圆角、动效</h3>
+        <ul>
+          <li><b>间距</b> 页边 16，卡间 12，方块内边 14 × 16。</li>
+          <li><b>圆角</b> 卡片 26，按钮胶囊，分类图标正圆。</li>
+          <li><b>动效</b> 首页净值卡随下拉轻微视差；环图和条形图首次出现时从 0 长出（0.6 秒，可关）；其余同方向 A。</li>
+          <li><b>净值卡纹理</b> 群青底上一层 7% 白的横格线，取自账簿的格纸，是这个方向唯一的装饰。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="frames" id="frames-B"></div>
+  </section>
+
+  <section class="dir" id="compare">
+    <h2>对比与建议</h2>
+    <p>推荐方向 A。它解决了「不够现代」最直接的几个原因：没有容器、没有图标、数字不够大、图表太硬，同时不推翻已经定下的玻璃控件、Source Serif 回复和两种方向色。方向 B 更醒目，但要为品牌色和分类色重新定一套规则，账本的「核对感」也会变弱。也可以混用：用 A 作为基础，只借 B 的彩色分类图标。</p>
+    <div class="tblwrap">
+      <table class="cmp">
+        <thead><tr><th></th><th>现在 · 结平</th><th>A · 纸本卡片</th><th>B · 清透原生</th></tr></thead>
+        <tbody>
+          <tr><td>分组</td><td>通栏色带 + 满屏细线</td><td>圆角卡片，卡内缩进细线</td><td>圆角卡片 + 2×2 数据方块</td></tr>
+          <tr><td>底色</td><td>暖白 #FBFAF8 / 米色色带</td><td>暖灰 #F3F1EC + 白卡</td><td>冷灰 #F1F2F6 + 白卡</td></tr>
+          <tr><td>强调色</td><td>无</td><td>无，交互用墨色</td><td>群青 #2F4BE0</td></tr>
+          <tr><td>方向色</td><td>青绿收入、赭色支出</td><td>保留</td><td>绿色收入，支出墨色</td></tr>
+          <tr><td>分类</td><td>只有文字</td><td>单色图标</td><td>彩色圆标 + 环图</td></tr>
+          <tr><td>数字</td><td>Plex Sans 21</td><td>SF Pro Semibold 38</td><td>SF Pro Rounded Bold 38</td></tr>
+          <tr><td>图表</td><td>方柱、硬折线</td><td>圆头柱、带面积的折线</td><td>圆头柱、环图、品牌色面积</td></tr>
+          <tr><td>助手回答</td><td>Source Serif 4</td><td>保留</td><td>改回 SF Pro</td></tr>
+          <tr><td>改动量</td><td></td><td>中：token、卡片、行样式、图表</td><td>大：几乎所有页面</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin-top:14px">选定方向后，下一步先把这一版设计稿扩到其余页面（账户、更多、设置、弹窗、空态），再改代码；所有数据都是示例。</p>
+  </section>
+</div>
+
+<script>
+(function () {
+  const P = {
+    home: 'M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z',
+    list: 'M5 7h14M5 12h14M5 17h9',
+    wallet: 'M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5zM4 10h16M15.5 14.5h1',
+    more: 'M6 12h.01M12 12h.01M18 12h.01',
+    search: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM15.5 15.5 20 20',
+    sync: 'M19 8.5A7.5 7.5 0 0 0 5.6 7M5 4v3.2h3.2M5 15.5A7.5 7.5 0 0 0 18.4 17M19 20v-3.2h-3.2',
+    plus: 'M12 5v14M5 12h14',
+    chevD: 'M7 10l5 5 5-5', chevR: 'M10 7l5 5-5 5', back: 'M15 5l-7 7 7 7',
+    rent: 'M4 11 12 5l8 6M6 10v9h12v-9M10 19v-5h4v5',
+    groc: 'M4 9h16l-1.5 9.5a1.5 1.5 0 0 1-1.5 1.3H7a1.5 1.5 0 0 1-1.5-1.3zM8.5 9l3.5-5 3.5 5',
+    transit: 'M7 4h10a2 2 0 0 1 2 2v8a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V6a2 2 0 0 1 2-2zM5 11h14M8.5 20l1.5-3M15.5 20 14 17',
+    book: 'M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19',
+    dining: 'M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10M16 3v18M16 3c-2 1-3 3.5-3 6.5V13h3',
+    invest: 'M4 17l5-5 4 3 7-8M15 7h5v5',
+    salary: 'M4 8.5A1.5 1.5 0 0 1 5.5 7h13A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5zM9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M4 12.5h16',
+    refund: 'M6 3h12v18l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4L6 21zM9 8h6M9 12h6M9 16h3',
+    transfer: 'M5 9h13l-3.5-3.5M19 15H6l3.5 3.5',
+    shop: 'M5 8h14l-1 12H6zM9 8V6.5a3 3 0 0 1 6 0V8',
+    fun: 'M4 6h16v12H4zM8 6v12M16 6v12M4 10h4M4 14h4M16 10h4M16 14h4',
+    grid: 'M5 5h5v5H5zM14 5h5v5h-5zM5 14h5v5H5zM14 14h5v5h-5z',
+    mic: 'M12 4a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3zM6 11.5a6 6 0 0 0 12 0M12 17.5V20',
+    up: 'M12 19V5M6 11l6-6 6 6',
+    check: 'M5 12.5l4.5 4.5L19 7',
+    x: 'M6 6l12 12M18 6 6 18',
+    sparkle: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z',
+    compose: 'M12 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19h11a1.5 1.5 0 0 0 1.5-1.5V12M17.5 4.5l2 2L13 13l-2.6.6.6-2.6z',
+    clock: 'M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 8v4l2.5 2',
+    db: 'M12 4c4 0 7 1.1 7 2.5S16 9 12 9 5 7.9 5 6.5 8 4 12 4zM5 6.5v11C5 18.9 8 20 12 20s7-1.1 7-2.5v-11M5 12c0 1.4 3 2.5 7 2.5s7-1.1 7-2.5',
+    del: 'M9 6h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5-6zM12 10l4 4M16 10l-4 4',
+    cal: 'M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 17.5zM5 10h14M9 3v4M15 3v4',
+    store: 'M4 9l1.5-4h13L20 9M4 9v10h16V9M10 19v-4h4v4',
+    down: 'M12 5v14M6 13l6 6 6-6',
+    arrowUpR: 'M12 19V5M6 11l6-6 6 6',
+    ring: 'M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16z',
+    filter: 'M4 6h16M7 12h10M10 18h4',
+  };
+  const ic = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${P[n]}"/></svg>`;
+  const CAT = {
+    rent: { n: '住房 › 房租', i: 'rent', h: '#6c63e0' },
+    groc: { n: '食材', i: 'groc', h: '#7cae1e' },
+    transit: { n: '交通 › 公共交通', i: 'transit', h: '#1d8fe1' },
+    book: { n: '图书', i: 'book', h: '#e8962b' },
+    dining: { n: '餐饮', i: 'dining', h: '#ee5d4e' },
+    invest: { n: '投资', i: 'invest', h: '#0e9c95' },
+    salary: { n: '工资', i: 'salary', h: '#2f9e5b' },
+    refund: { n: '报销', i: 'refund', h: '#7a7f8c' },
+    shop: { n: '购物', i: 'shop', h: '#d9488f' },
+    fun: { n: '娱乐', i: 'fun', h: '#9b5de5' },
+  };
+  const cat = (d, k) => `<span class="cat" ${d === 'B' ? `style="background:${CAT[k].h}"` : ''}>${ic(CAT[k].i)}</span>`;
+  const fmt = (n, sign = false) => {
+    const s = Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (n < 0 ? '−' : sign && n > 0 ? '+' : '') + s;
+  };
+
+  const sb = () => `<div class="island"></div><div class="sb"><span>9:41</span><span class="r">
+    <svg width="18" height="12" viewBox="0 0 18 12"><rect x="0" y="8" width="3" height="4" rx="1" fill="currentColor"/><rect x="5" y="5.5" width="3" height="6.5" rx="1" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="1" fill="currentColor"/><rect x="15" y="0" width="3" height="12" rx="1" fill="currentColor"/></svg>
+    <svg width="16" height="12" viewBox="0 0 16 12"><path d="M8 11.5 5.6 9a3.4 3.4 0 0 1 4.8 0zM3.4 6.8a6.5 6.5 0 0 1 9.2 0l-1.4 1.4a4.5 4.5 0 0 0-6.4 0zM1 4.4a10 10 0 0 1 14 0l-1.4 1.4a8 8 0 0 0-11.2 0z" fill="currentColor"/></svg>
+    <svg width="27" height="13" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.8" fill="none" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="20" height="9" rx="2.5" fill="currentColor"/><path d="M25 4.5v4c.8-.3 1.3-1.1 1.3-2s-.5-1.7-1.3-2z" fill="currentColor" opacity=".45"/></svg></span></div>`;
+
+  const tabs = (on) => `<div class="tabs glass">${[['home', '概览'], ['list', '流水'], ['wallet', '账户'], ['more', '更多']].map(([i, l]) =>
+    `<div class="tab ${l === on ? 'on' : ''}">${ic(i)}<span>${l}</span></div>`).join('')}</div>
+    <div class="fab glass">${ic('search')}</div>`;
+  const top = (title, { back = false, chip = '8 月', actions = ['sync'], sm = false } = {}) => `<div class="top">
+    ${back ? `<div class="circ glass">${ic('back')}</div>` : ''}
+    <div class="t ${sm || back ? 'sm' : ''}">${title}</div>
+    ${chip ? `<div class="chip glass">${chip}${ic('chevD')}</div>` : ''}
+    ${actions.map(a => `<div class="circ glass">${ic(a)}${a === 'sync' ? '<i class="dot"></i>' : ''}</div>`).join('')}
+  </div>`;
+  const phone = (d, inner) => `<div class="ph ${d}"><div class="body">${sb()}${inner}</div><div class="home-ind"></div></div>`;
+
+  // ---------- charts ----------
+  const NW = [96.4, 107.2, 118.9, 131.6, 149.1, 169.2];
+  const spark = (w, h, stroke, fillTop, fillOp = .18) => {
+    const min = 90, max = 175, xs = i => 4 + i * (w - 8) / 5, ys = v => h - 4 - (v - min) / (max - min) * (h - 8);
+    const pts = NW.map((v, i) => `${xs(i).toFixed(1)},${ys(v).toFixed(1)}`);
+    const id = 'g' + Math.random().toString(36).slice(2, 8);
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${fillTop}" stop-opacity="${fillOp}"/><stop offset="1" stop-color="${fillTop}" stop-opacity="0"/></linearGradient></defs>
+      <path d="M${pts.join(' L')} L${xs(5)},${h} L${xs(0)},${h} Z" fill="url(#${id})"/>
+      <path d="M${pts.join(' L')}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="${xs(5)}" cy="${ys(169.2)}" r="3.5" fill="${stroke}"/></svg>`;
+  };
+  const MON = ['3月', '4月', '5月', '6月', '7月', '8月'];
+  const INC = [48000, 48600, 48000, 50200, 48900, 50500];
+  const EXP = [7210, 6830, 5920, 7640, 8120, 5551.8];
+  const bars = (d) => {
+    const W = 325, H = 170, base = 140, top = 12, max = 60000, sc = v => (v / max) * (base - top);
+    const step = (W - 34) / 6, bw = 12;
+    let g = '';
+    [0, 20000, 40000, 60000].forEach(t => {
+      const y = base - sc(t);
+      g += `<line x1="34" x2="${W}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="1"/><text x="0" y="${y + 4}" font-size="10.5" fill="var(--ink-3)">${t ? t / 10000 + '万' : '0'}</text>`;
+    });
+    const ci = d === 'B' ? 'var(--accent)' : 'var(--in)';
+    const ce = d === 'B' ? 'var(--ink-3)' : 'var(--out)';
+    MON.forEach((m, i) => {
+      const x = 34 + step * i + step / 2 - bw - 1;
+      const hi = sc(INC[i]), he = sc(EXP[i]);
+      const op = i === 5 ? 1 : .55;
+      g += `<rect x="${x}" y="${base - hi}" width="${bw}" height="${hi}" rx="${bw / 2}" fill="${ci}" opacity="${op}"/>`;
+      g += `<rect x="${x + bw + 2}" y="${base - he}" width="${bw}" height="${he}" rx="${bw / 2}" fill="${ce}" opacity="${op}"/>`;
+      g += `<text x="${x + bw + 1}" y="${base + 20}" font-size="11" text-anchor="middle" fill="${i === 5 ? 'var(--ink)' : 'var(--ink-3)'}" font-weight="${i === 5 ? 600 : 400}">${m}</text>`;
+    });
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="font-family:var(--f-sans)">${g}</svg>
+      <div class="legend"><span><i style="background:${ci}"></i>收入</span><span><i style="background:${ce}"></i>支出</span><span class="mut">转账不计收支</span></div>`;
+  };
+  const line = (d) => {
+    const W = 325, H = 150, base = 120, top = 10, min = 80, max = 180, sc = v => base - (v - min) / (max - min) * (base - top);
+    const step = (W - 46) / 5, xs = i => 34 + 6 + step * i;
+    let g = '';
+    [100, 140, 180].forEach(t => { g += `<line x1="34" x2="${W}" y1="${sc(t)}" y2="${sc(t)}" stroke="var(--line)"/><text x="0" y="${sc(t) + 4}" font-size="10.5" fill="var(--ink-3)">${t / 10}万</text>`; });
+    const c = d === 'B' ? 'var(--accent)' : 'var(--ink)';
+    const pts = NW.map((v, i) => `${xs(i)},${sc(v)}`);
+    const id = 'l' + d + Math.random().toString(36).slice(2, 6);
+    g += `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c}" stop-opacity=".16"/><stop offset="1" stop-color="${c}" stop-opacity="0"/></linearGradient></defs>`;
+    g += `<path d="M${pts.join(' L')} L${xs(5)},${base} L${xs(0)},${base} Z" fill="url(#${id})"/>`;
+    g += `<path d="M${pts.join(' L')}" fill="none" stroke="${c}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    g += `<circle cx="${xs(5)}" cy="${sc(169.2)}" r="5" fill="var(--card)" stroke="${c}" stroke-width="2.2"/>`;
+    MON.forEach((m, i) => { g += `<text x="${xs(i)}" y="${base + 20}" font-size="11" text-anchor="middle" fill="var(--ink-3)">${m}</text>`; });
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="font-family:var(--f-sans)">${g}</svg>`;
+  };
+  const SPEND = [['rent', 3800, 68.4], ['groc', 611.8, 11.0], ['transit', 576, 10.4], ['book', 328, 5.9], ['dining', 236, 4.3]];
+  const donut = () => {
+    const R = 46, C = 2 * Math.PI * R; let off = 0, g = '';
+    SPEND.forEach(([k, , p]) => { const len = C * p / 100; g += `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${CAT[k].h}" stroke-width="16" stroke-dasharray="${Math.max(len - 2, 0.5)} ${C}" stroke-dashoffset="${-off}" transform="rotate(-90 60 60)"/>`; off += len; });
+    return `<svg width="120" height="120" viewBox="0 0 120 120">${g}<text x="60" y="56" text-anchor="middle" font-size="11" fill="var(--ink-3)" font-family="var(--f-sans)">8 月支出</text><text x="60" y="74" text-anchor="middle" font-size="15" font-weight="700" fill="var(--ink)" font-family="var(--f-round)">5,551.80</text></svg>`;
+  };
+  const ring = (p, c) => { const R = 22, C = 2 * Math.PI * R; return `<svg width="56" height="56" viewBox="0 0 56 56"><circle cx="28" cy="28" r="${R}" fill="none" stroke="var(--card-2)" stroke-width="7"/><circle cx="28" cy="28" r="${R}" fill="none" stroke="${c}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${C * p} ${C}" transform="rotate(-90 28 28)"/></svg>`; };
+
+  // ---------- data ----------
+  const TX = [
+    { day: '8月28日', wd: '周五', sum: '支出 328.00', items: [{ k: 'book', t: '城市书房', s: '图书 · 年度阅读计划', a: -328 }] },
+    { day: '8月26日', wd: '周三', sum: '支出 186.80', items: [{ k: 'groc', t: '青禾市场', s: '食材 · 周末食材', a: -186.8 }] },
+    { day: '8月24日', wd: '周一', sum: '转账，不计收支', items: [{ k: 'invest', t: '全球指数基金', s: '日常账户 → 全球指数基金 · 月度定投', a: 15000, tr: true }] },
+    { day: '8月21日', wd: '周五', sum: '支出 576.00', items: [{ k: 'transit', t: '云端出行', s: '交通 › 公共交通 · 差旅交通', a: -576 }] },
+    { day: '8月18日', wd: '周二', sum: '收入 48,000.00', items: [{ k: 'salary', t: '工资', s: '收入 › 工资 · 八月薪资', a: 48000 }] },
+    { day: '8月2日', wd: '周日', sum: '收入 2,500.00', items: [{ k: 'refund', t: '报销款', s: '收入 › 其他 · 七月差旅报销', a: 2500 }] },
+  ];
+  const amtCls = (it) => it.tr ? 'mut' : it.a > 0 ? 'in' : '';
+  const txRow = (d, it) => `<div class="row">${cat(d, it.k)}<div class="mid"><div class="ttl">${it.t}</div><div class="sub">${it.s}</div></div>
+    <div class="end"><div class="amt ${amtCls(it)}">${fmt(it.a, !it.tr)}</div>${it.tr ? '<div class="sub">转账</div>' : ''}</div></div>`;
+
+  // ---------- screens ----------
+  const S = {};
+  S.home = (d) => d === 'A' ? `${top('概览')}<div class="scroll">
+    <div class="card">
+      <div class="hd" style="margin-bottom:6px"><span class="lbl">净值 · 2026-08-31</span><span class="tag ok">${ic('check')}已核平</span></div>
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:8px">
+        <div class="big"><span class="cur">¥</span>169,170.20</div>${spark(92, 40, 'var(--in)', 'var(--in)')}
+      </div>
+      <div class="dbl" style="margin:14px 0 10px"></div>
+      <div class="split"><div class="stat"><div class="lbl">资产</div><div class="v">172,069.20</div></div><div class="stat"><div class="lbl">负债</div><div class="v">−2,899.00</div></div></div>
+    </div>
+    <div class="card">
+      <div class="hd"><span class="l">8 月收支</span><span class="r">期初净资产 124,222.00</span></div>
+      <div class="split three">
+        <div class="stat"><div class="lbl">收入</div><div class="v in">+50,500.00</div></div>
+        <div class="stat"><div class="lbl">支出</div><div class="v">−5,551.80</div></div>
+        <div class="stat"><div class="lbl">净结余</div><div class="v in">+44,948.20</div></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin:16px 0 8px"><span class="lbl">留存率 · 净结余 ÷ 收入</span><span style="font:600 17px var(--num)">89.0<small class="mut" style="font-size:12px"> %</small></span></div>
+      <div class="bar"><i style="width:89%;background:var(--in)"></i><i style="flex:1;background:var(--out)"></i></div>
+      <div class="legend"><span><i style="background:var(--in)"></i>留存 44,948.20</span><span><i style="background:var(--out)"></i>支出 5,551.80</span></div>
+    </div>
+    <div class="card">
+      <div class="hd"><span class="l">支出分类</span><span class="r">5,551.80 CNY</span></div>
+      ${SPEND.slice(0, 3).map(([k, a, p]) => `<div class="row">${cat(d, k)}<div class="mid"><div class="ttl" style="display:flex;justify-content:space-between"><span>${CAT[k].n}</span><span class="amt">${fmt(a)}</span></div><div class="minibar"><i style="width:${p}%"></i></div></div><span class="meta tnum" style="width:42px;text-align:right">${p.toFixed(1)}%</span></div>`).join('')}
+    </div>
+  </div>${tabs('概览')}` : `${top('概览')}<div class="scroll">
+    <div class="card hero-b"><div class="rule-tex"></div>
+      <div class="hd" style="margin-bottom:6px;position:relative"><span class="lbl">净值 · 2026-08-31</span><span class="tag">${ic('check')}已核平</span></div>
+      <div class="big" style="position:relative"><span class="cur">¥</span>169,170.20</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:12px;position:relative">
+        <div class="split" style="gap:22px"><div><div class="lbl">资产</div><div style="font:700 16px var(--f-round)">172,069.20</div></div><div><div class="lbl">负债</div><div style="font:700 16px var(--f-round)">−2,899.00</div></div></div>
+        ${spark(96, 44, '#ffffff', '#ffffff', .25)}
+      </div>
+    </div>
+    <div class="bento">
+      <div class="card"><div class="bico" style="background:var(--in-tint);color:var(--in)">${ic('down')}</div><div><div class="lbl">8 月收入</div><div class="stat"><div class="v in">+50,500.00</div></div></div></div>
+      <div class="card"><div class="bico" style="background:var(--card-2);color:var(--ink-2)">${ic('arrowUpR')}</div><div><div class="lbl">8 月支出</div><div class="stat"><div class="v">−5,551.80</div></div></div></div>
+      <div class="card" style="flex-direction:row;align-items:center;gap:10px">${ring(.89, 'var(--accent)')}<div><div class="lbl">留存率</div><div style="font:700 22px var(--f-round)">89.0<small class="mut" style="font-size:13px">%</small></div></div></div>
+      <div class="card"><div class="lbl">净结余</div><div><div class="stat"><div class="v in">+44,948.20</div></div><div class="meta">期初 124,222.00</div></div></div>
+    </div>
+    <div class="card">
+      <div class="hd"><span class="l">支出分类</span><span class="r">全部${ic('chevR')}</span></div>
+      <div style="display:flex;gap:16px;align-items:center">${donut()}<div style="flex:1;display:flex;flex-direction:column;gap:6px">${SPEND.map(([k, , p]) => `<div style="display:flex;align-items:center;gap:8px;font-size:13px"><i style="width:8px;height:8px;border-radius:50%;background:${CAT[k].h}"></i><span style="flex:1">${CAT[k].n.split(' › ').pop()}</span><span class="mut tnum">${p.toFixed(1)}%</span></div>`).join('')}</div></div>
+    </div>
+  </div>${tabs('概览')}`;
+
+  S.home2 = (d) => `<div class="top"><div class="t sm" style="flex:1">概览</div><div class="chip glass">8 月${ic('chevD')}</div><div class="circ glass">${ic('sync')}<i class="dot"></i></div></div>
+    <div class="scroll" style="margin-top:-2px">
+    ${d === 'A' ? `<div class="card">
+      <div class="hd"><span class="l">支出分类</span><span class="r">5,551.80 CNY</span></div>
+      ${SPEND.map(([k, a, p]) => `<div class="row">${cat(d, k)}<div class="mid"><div class="ttl" style="display:flex;justify-content:space-between"><span>${CAT[k].n}</span><span class="amt">${fmt(a)}</span></div><div class="minibar"><i style="width:${p}%"></i></div></div><span class="meta tnum" style="width:42px;text-align:right">${p.toFixed(1)}%</span></div>`).join('')}
+    </div>` : `<div class="card">
+      <div class="hd"><span class="l">支出分类</span><span class="r">5,551.80 CNY</span></div>
+      ${SPEND.map(([k, a, p]) => `<div class="row">${cat(d, k)}<div class="mid"><div class="ttl" style="display:flex;justify-content:space-between"><span>${CAT[k].n}</span><span class="amt">${fmt(a)}</span></div><div class="minibar"><i style="width:${p}%;background:${CAT[k].h}"></i></div></div><span class="meta tnum" style="width:42px;text-align:right">${p.toFixed(1)}%</span></div>`).join('')}
+    </div>`}
+    <div class="card">
+      <div class="hd"><span class="l">最近流水</span><span class="r">全部 10 笔${ic('chevR')}</span></div>
+      ${TX.slice(0, 5).map(g => txRow(d, g.items[0])).join('')}
+    </div>
+  </div>${tabs('概览')}`;
+
+  S.tx = (d) => `${top('流水', { actions: ['plus'] })}<div class="scroll">
+    <div class="search">${ic('search')}商户、备注或标签</div>
+    <div class="pills"><span class="pill on">全部 <small>10</small></span><span class="pill">支出 <small>6</small></span><span class="pill">收入 <small>2</small></span><span class="pill">转账 <small>2</small></span></div>
+    ${TX.slice(0, 5).map(g => `<div class="day"><span><b>${g.day}</b>${g.wd}</span><span class="tnum">${g.sum}</span></div><div class="card" style="padding:4px 16px">${g.items.map(it => txRow(d, it)).join('')}</div>`).join('')}
+  </div>${tabs('流水')}`;
+
+  S.add = (d) => `${top('流水', { actions: ['plus'] })}<div class="dim"></div><div class="sheet">
+    <div class="grab"></div>
+    <div style="display:flex;align-items:center;gap:8px"><div class="circ" style="background:var(--card-2)">${ic('x')}</div><div style="flex:1;text-align:center;font-weight:600;font-size:16px">记一笔</div><div class="chip" style="background:var(--card-2);height:36px;font-size:13.5px">${ic('sparkle')}一句话</div></div>
+    <div class="seg" style="background:var(--card-2)"><span class="on">支出</span><span>收入</span><span>转账</span></div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;padding:2px 4px">
+      <div class="big" style="font-size:44px"><span class="cur">¥</span>86.50</div><span class="meta">CNY ${ic('chevD').replace('class="ic ', 'style="display:inline;width:12px;height:12px;vertical-align:-1px" class="ic ')}</span>
+    </div>
+    <div class="cats">${['dining', 'groc', 'transit', 'rent', 'book', 'shop', 'fun', 'grid'].map((k, i) => `<div class="${i === 0 ? 'on' : ''}">${k === 'grid' ? `<span class="cat" style="background:var(--card-2);color:var(--ink-2)">${ic('grid')}</span>` : cat(d, k)}<span>${k === 'grid' ? '更多' : CAT[k].n.split(' › ')[0]}</span></div>`).join('')}</div>
+    <div class="card" style="padding:2px 16px">
+      <div class="field"><span class="k">付款</span><span class="v">日常账户 <span class="mono">Assets:Cash:Daily</span></span>${ic('chevR')}</div>
+      <div class="field"><span class="k">日期</span><span class="v">今天 · 8月31日</span>${ic('cal')}</div>
+      <div class="field"><span class="k">商户</span><span class="v">楠记面馆</span></div>
+    </div>
+    <div class="keys">${['1', '2', '3', '⌫', '4', '5', '6', '+', '7', '8', '9', 'GO', '.', '0', '00'].map(k => k === 'GO' ? '<span class="go">完成</span>' : k === '⌫' ? `<span class="op">${ic('del')}</span>` : k === '+' ? '<span class="op">＋ −</span>' : `<span>${k}</span>`).join('')}</div>
+  </div>`;
+
+  const IMP = [
+    { t: '楠记面馆', s: '8月30日 · 支付宝 · 余利宝', a: -42, k: 'dining', c: '餐饮', on: true },
+    { t: '盒马鲜生', s: '8月29日 · 支付宝 · 花呗', a: -126.4, k: 'groc', c: '食材', on: true },
+    { t: '上海地铁', s: '8月29日 · 支付宝 · 余利宝', a: -6, k: 'transit', c: '公共交通', on: true },
+    { t: '转账给 王**', s: '8月27日 · 支付宝 · 余利宝', a: -300, need: true },
+    { t: '余额宝收益', s: '8月27日 · 支付宝', a: 3.12, k: 'invest', c: '利息收入', on: true },
+    { t: '京东 · 电子书', s: '8月26日 · 支付宝 · 招行信用卡', a: -38.9, k: 'book', c: '图书', on: true },
+  ];
+  S.imp = (d) => `${top('导入复核', { back: true, chip: '支付宝 · 8 月', actions: [] })}<div class="scroll">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end"><div><div class="lbl">已识别</div><div class="big" style="font-size:32px">42<span class="cur" style="margin-left:4px">条</span></div></div>
+      <div style="text-align:right"><div class="tag ok">${ic('check')}38 已匹配</div><div style="height:6px"></div><div class="tag wait">4 待确认</div></div></div>
+      <div class="bar" style="margin-top:14px"><i style="width:90.5%;background:${d === 'B' ? 'var(--accent)' : 'var(--in)'}"></i><i style="flex:1;background:var(--out)"></i></div>
+      <div class="legend"><span>重复 0 · 已跳过 3</span><span class="tnum">合计 −4,982.30</span></div>
+    </div>
+    <div class="pills"><span class="pill on">待确认 <small>4</small></span><span class="pill">全部 <small>42</small></span><span class="pill">已匹配 <small>38</small></span></div>
+    <div class="card" style="padding:4px 16px">${IMP.map(it => `<div class="row" style="align-items:flex-start;padding:12px 0"><span class="chk ${it.on ? 'on' : ''}" style="margin-top:2px">${it.on ? ic('check') : ''}</span><div class="mid"><div class="ttl">${it.t}</div><div class="sub">${it.s}</div><div style="margin-top:6px">${it.need ? `<span class="sugg need">选择分类${ic('chevR')}</span>` : `<span class="sugg">${d === 'B' ? `<i style="width:8px;height:8px;border-radius:50%;background:${CAT[it.k].h}"></i>` : ic(CAT[it.k].i)}${it.c}</span>`}</div></div><div class="amt ${it.a > 0 ? 'in' : ''}">${fmt(it.a, true)}</div></div>`).join('')}</div>
+  </div><div class="dock glass"><div class="mid"><div style="font-weight:600">已选 38 条</div><div class="meta tnum">合计 −4,982.30 · bean-check 通过</div></div><div class="btn">写入账本</div></div>`;
+
+  S.agent = (d) => `${top('账本助手', { back: true, chip: 'Sonnet · 中', actions: ['compose'] })}<div class="scroll" style="gap:14px;padding-top:6px">
+    <div class="msg-u">8 月吃饭花了多少？跟 7 月比呢</div>
+    <div class="tool"><span class="ok">${ic('check')}</span>读取账本 · 2 次查询${ic('chevR')}</div>
+    <div class="prose">8 月「餐饮」和「食材」合计 <b>847.80</b>，比 7 月的 1,126.40 少了 <b>24.7%</b>。</div>
+    <div class="card" style="padding:14px 16px">
+      <div class="hd" style="margin-bottom:12px"><span class="l" style="font-size:14px">吃饭支出 · 7 月 vs 8 月</span><span class="r">CNY</span></div>
+      ${[['dining', '餐饮', 575.4, 236], ['groc', '食材', 551, 611.8]].map(([k, n, a7, a8]) => `<div style="display:grid;grid-template-columns:38px 1fr;gap:10px;align-items:center;margin-bottom:10px"><span style="font-size:13px;color:var(--ink-2)">${n}</span><div style="display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;align-items:center;gap:8px"><i style="height:10px;border-radius:5px;width:${a7 / 650 * 200}px;background:var(--ink-3);opacity:.45"></i><span class="meta tnum">7月 ${fmt(a7)}</span></div>
+        <div style="display:flex;align-items:center;gap:8px"><i style="height:10px;border-radius:5px;width:${a8 / 650 * 200}px;background:${d === 'B' ? CAT[k].h : 'var(--ink)'}"></i><span class="tnum" style="font-size:12.5px;font-weight:600">8月 ${fmt(a8)}</span></div></div></div>`).join('')}
+    </div>
+    <div class="prose">减少几乎都来自外出就餐：8 月只有 3 笔，7 月有 9 笔。食材反而多了 60.80。</div>
+    <div class="fol"><span>${ic('list')}查看 12 笔流水</span><span>按商户拆开</span><span>9 月预算建议</span></div>
+  </div><div class="composer glass"><div class="circ" style="background:var(--card-2)">${ic('plus')}</div><div class="f">问问账本…</div><div class="circ">${ic('mic')}</div><div class="circ send">${ic('up')}</div></div>`;
+
+  S.stats = (d) => `${top('收支分析', { back: true })}<div class="scroll">
+    <div class="${d === 'B' ? 'bento' : 'card'}" ${d === 'A' ? 'style="padding:6px 18px"' : ''}>
+      ${d === 'A' ? `<div class="split" style="row-gap:0">
+        ${[['收入', '50,500.00', 'in', '所选区间'], ['支出', '5,551.80', '', '所选区间'], ['净结余', '+44,948.20', 'in', '收入 − 支出'], ['日均支出', '179.09', '', '31 天']].map(([l, v, c, m], i) => `<div class="stat" style="padding:12px 0;${i < 2 ? 'border-bottom:.5px solid var(--line);' : ''}"><div class="lbl">${l}</div><div class="v ${c}" style="font-size:21px">${v}</div><div class="meta">${m}</div></div>`).join('')}
+      </div>` : [['down', '收入', '50,500.00', 'in', 'var(--in-tint)', 'var(--in)'], ['arrowUpR', '支出', '5,551.80', '', 'var(--card-2)', 'var(--ink-2)'], ['sparkle', '净结余', '+44,948.20', 'in', 'var(--acc-tint)', 'var(--accent)'], ['cal', '日均支出', '179.09', '', 'var(--card-2)', 'var(--ink-2)']].map(([i, l, v, c, bg, fg]) => `<div class="card" style="min-height:96px"><div class="bico" style="background:${bg};color:${fg}">${ic(i)}</div><div><div class="lbl">${l}</div><div class="stat"><div class="v ${c}" style="font-size:19px">${v}</div></div></div></div>`).join('')}
+    </div>
+    <div class="card"><div class="hd"><span class="l">月度收支</span><span class="r">CNY</span></div>${bars(d)}</div>
+    <div class="card"><div class="hd"><span class="l">净值走势</span><span class="r">月末 · CNY</span></div>${line(d)}</div>
+  </div>${tabs('更多')}`;
+
+  const LIST = [['home', '概览 · 首屏'], ['home2', '概览 · 下滑'], ['tx', '流水'], ['add', '记一笔'], ['imp', '导入复核'], ['agent', '账本助手'], ['stats', '收支分析']];
+  ['A', 'B'].forEach(d => {
+    document.getElementById('frames-' + d).innerHTML = LIST.map(([k, cap]) =>
+      `<div class="fr" data-screen="${k}"><div class="cap"><b>${cap}</b>方向 ${d}</div>${phone(d, S[k](d))}</div>`).join('');
+  });
+  document.getElementById('b-cats').innerHTML = ['rent', 'groc', 'transit', 'book', 'dining', 'invest', 'salary', 'shop', 'fun'].map(k => `<i title="${CAT[k].n}" style="background:${CAT[k].h};border:0;border-radius:50%"></i>`).join('');
+
+  const setTheme = (dark) => {
+    document.querySelectorAll('.ph').forEach(p => p.classList.toggle('dk', dark));
+    document.getElementById('t-light').setAttribute('aria-pressed', String(!dark));
+    document.getElementById('t-dark').setAttribute('aria-pressed', String(dark));
+    try { localStorage.setItem('ph-theme', dark ? 'dark' : 'light'); } catch (e) {}
+  };
+  document.getElementById('t-light').addEventListener('click', () => setTheme(false));
+  document.getElementById('t-dark').addEventListener('click', () => setTheme(true));
+  let saved = null; try { saved = localStorage.getItem('ph-theme'); } catch (e) {}
+  if (saved === 'dark' || new URLSearchParams(location.search).get('ph') === 'dark') setTheme(true);
+})();
+</script>
