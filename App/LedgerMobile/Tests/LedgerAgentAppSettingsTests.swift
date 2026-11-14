@@ -143,7 +143,7 @@ final class LedgerAgentAppSettingsTests: XCTestCase {
 
     // MARK: Applying
 
-    func testEachSectionApplies() throws {
+    func testEachSectionApplies() async throws {
         let defaults = try defaults()
         seed(defaults)
         let store = FakeAppSettings(defaults: defaults)
@@ -184,7 +184,7 @@ final class LedgerAgentAppSettingsTests: XCTestCase {
         XCTAssertEqual(now.reports.sections.first { $0.id == "coverage" }?.visible, false)
     }
 
-    func testBadValuesAreRefusedSectionBySectionAndChangeNothing() throws {
+    func testBadValuesAreRefusedSectionBySectionAndChangeNothing() async throws {
         let defaults = try defaults()
         seed(defaults)
         let store = FakeAppSettings(defaults: defaults)
@@ -210,7 +210,7 @@ final class LedgerAgentAppSettingsTests: XCTestCase {
         XCTAssertEqual(store.host.snapshot().reminders.bookkeeping.time, "21:30")
     }
 
-    func testTheSameValuesWriteNothing() throws {
+    func testTheSameValuesWriteNothing() async throws {
         let defaults = try defaults()
         seed(defaults)
         let store = FakeAppSettings(defaults: defaults)
@@ -221,7 +221,7 @@ final class LedgerAgentAppSettingsTests: XCTestCase {
         XCTAssertEqual(store.host.snapshot(), before)
     }
 
-    func testUndoOfASectionRestoresWhatWasThere() throws {
+    func testUndoOfASectionRestoresWhatWasThere() async throws {
         let defaults = try defaults()
         seed(defaults)
         let store = FakeAppSettings(defaults: defaults)
