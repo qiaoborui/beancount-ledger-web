@@ -5,9 +5,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// 账本助手 — a conversation over the local ledger. It opens as a chat, not a
-/// page: no heading over the conversation, two round buttons on the bar
-/// (history left, model settings right), a centred mark and one question when
-/// nothing has been asked yet, and a floating capsule dock at the bottom.
+/// page: no heading over the conversation, round buttons on the bar (history
+/// left, 新对话 and model settings right), a greeting for the time of day with
+/// the recommended starters when nothing has been asked yet, and a floating
+/// capsule dock at the bottom. No logo: the page is the ledger's, not a
+/// model provider's.
 /// The design is `docs/design/ios-balanced/agent.html`: questions sit in a
 /// sunken block on the right, replies run on the page with a collapsible list
 /// of the reads behind them. The Agent edits a private draft of the ledger;
@@ -106,10 +108,11 @@ private struct LedgerAgentChatScreen: View {
             if settings.isReady { chat } else { LedgerAgentIntro { settingsPresented = true } }
         }
         .background(BalancedPalette.page)
-        // No heading over a conversation: the bar is two round buttons, the
-        // way the assistant reads as a chat rather than a page. History sits
-        // on the left, model settings on the right; a conversation's name and
-        // its rename live in the history sheet, where the sessions are.
+        // No heading over a conversation: the bar is a row of round buttons,
+        // the way the assistant reads as a chat rather than a page. History
+        // sits on the left, 新对话 and model settings on the right; a
+        // conversation's name and its rename live in the history sheet, where
+        // the sessions are.
         .terminalPageChrome(String(localized: "账本助手"), isRoot: isRoot, showsSync: false,
                             actions: AnyView(actions), balanced: true, showsTitle: false,
                             leadingActions: settings.isReady ? AnyView(historyButton) : nil)
@@ -169,6 +172,7 @@ private struct LedgerAgentChatScreen: View {
             conversation.isOnScreen = true
             LedgerAgentBackgroundRun.shared.conversationSeen()
             resumeIfInterrupted()
+            greetingNow = Date()
         }
         .onDisappear { conversation.isOnScreen = false }
         // A turn the system cut short goes on by itself once the user is
@@ -177,6 +181,10 @@ private struct LedgerAgentChatScreen: View {
             if phase == .active {
                 resumeIfInterrupted()
                 refreshInbox()
+                // The empty state's greeting is read from this clock, so a
+                // page left open across 11:00, 13:00 or 18:00 says the right
+                // thing when the user comes back instead of at launch.
+                greetingNow = Date()
             }
             if phase == .background { awaySince = Date() }
             if phase == .active, let away = awaySince {
@@ -185,10 +193,11 @@ private struct LedgerAgentChatScreen: View {
             }
         }
         // A conversation reopened from the history is recapped on arrival,
-        // and an empty one offers fresh suggestions.
+        // and an empty one offers fresh suggestions — unless they are hidden,
+        // in which case fetching them would be a model call nobody reads.
         .task(id: conversation.id) {
             if conversation.restored { recapIfWanted() }
-            if conversation.messages.isEmpty { refreshStarters() }
+            if conversation.messages.isEmpty, settings.suggestions { refreshStarters() }
             // Answers that landed while another conversation was on screen
             // get their name here.
             nameSession()
@@ -196,6 +205,12 @@ private struct LedgerAgentChatScreen: View {
         .onChange(of: conversation.messages.count) { _, _ in
             predictNext()
             nameSession()
+        }
+        // Turning the recommendations back on fills the empty state again;
+        // the starters are cached per ledger, so this is only a fetch the
+        // first time.
+        .onChange(of: settings.suggestions) { _, on in
+            if on, conversation.messages.isEmpty { refreshStarters() }
         }
         .onChange(of: session.privacyShielded) { _, shielded in
             if !shielded {
@@ -287,13 +302,39 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
-    /// Settings, and the close button when the assistant is a full-screen
-    /// sheet. 新对话 moved into the history sheet: the top bar keeps two
-    /// buttons, and starting over is where the saved conversations are.
+    /// Nothing asked, nothing running and no draft waiting: the conversation
+    /// as it is when the page opens or after 新对话. One opened from history
+    /// has messages, so it is never fresh.
+    private var conversationIsFresh: Bool {
+        conversation.messages.isEmpty && !conversation.isRunning && conversation.pending == nil
+    }
+
+    /// The first button follows the conversation, then settings, then the
+    /// close button when the assistant is a full-screen sheet. A fresh
+    /// conversation has nothing to leave behind, so its first button is the
+    /// app's own amount privacy (the same `toggleAmounts` as every other
+    /// page's eye, not a separate "do not keep this chat" mode); once there
+    /// is something on the page it becomes 新对话, one tap from the
+    /// conversation it replaces.
     private var actions: some View {
         HStack(spacing: 0) {
             // The bar's trailing cluster already supplies one glass capsule
             // for its controls, so these are plain buttons inside it.
+            if conversationIsFresh {
+                circleButton(session.amountsVisible ? "eye.slash" : "eye",
+                             label: session.amountsVisible ? "隐藏金额" : "显示金额",
+                             identifier: "ledger-agent-privacy", drawsGlass: false) {
+                    LedgerFeedback.selection()
+                    session.toggleAmounts()
+                }
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
+            } else {
+                circleButton("square.and.pencil", label: "新对话", identifier: "ledger-agent-new",
+                             drawsGlass: false) {
+                    sessions.startNew()
+                }
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
             circleButton("slider.horizontal.3", label: "模型与密钥", identifier: "ledger-agent-settings",
                          drawsGlass: false) {
                 settingsPresented = true
@@ -303,6 +344,7 @@ private struct LedgerAgentChatScreen: View {
                              action: onClose)
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: conversationIsFresh)
     }
 
     // MARK: Conversation
@@ -331,6 +373,8 @@ private struct LedgerAgentChatScreen: View {
     /// The height the conversation rests in, so the empty state can sit in
     /// the middle of the page rather than at its top.
     @State private var emptyHeight: CGFloat = 0
+    /// When the empty state last read the clock for its greeting.
+    @State private var greetingNow = Date()
 
     private var showsJumpButton: Bool {
         // Not while the page is on its way down to a growing reply.
@@ -771,24 +815,23 @@ private struct LedgerAgentChatScreen: View {
     /// A recap is written when the user comes back after this long.
     private static let recapAfterAbsence: TimeInterval = 10 * 60
 
-    /// The page before the first question: a centred mark and one short
-    /// question, the way a chat app opens, then the starters as pills. The
-    /// paragraphs that explained the assistant are now the single line under
-    /// the question; the attach hint lives on the ＋ in the dock.
+    /// The page before the first question: a greeting for the time of day,
+    /// one question that carries it on, and the starters as pills. No mark
+    /// over it — the assistant is not a brand to put on the page — so the
+    /// block is a plain centred column. The starters, and the refresh beside
+    /// them, follow the 显示推荐问题 switch.
     private var emptyState: some View {
         VStack(spacing: 8) {
-            LedgerAgentSpark()
-                .frame(width: 36, height: 36)
-                .accessibilityHidden(true)
-            Text("想查什么？").balancedFont(size: 21, weight: .medium)
+            Text(Self.greeting(at: greetingNow))
+                // The reading serif, as claude.ai sets its replies: Source
+                // Serif 4 for Latin, falling through to PingFang for CJK.
+                .font(BalancedReading.font(.regular, size: 24, relativeTo: .title2))
                 .foregroundStyle(BalancedPalette.secondary)
                 .multilineTextAlignment(.center)
-                .padding(.top, 6)
-            Text("可以查账，也可以上传账单对账；改账先出草稿，你确认后才写入。")
-                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
-                .multilineTextAlignment(.center).lineSpacing(2)
-                .padding(.top, 2)
-            if settings.assists || !starters.suggestions.isEmpty {
+            Text("今天想查点什么？").balancedFont(size: 15)
+                .foregroundStyle(BalancedPalette.meta)
+                .multilineTextAlignment(.center)
+            if settings.suggestions, settings.assists || !starters.suggestions.isEmpty {
                 HStack(spacing: 4) {
                     Text("试试").balancedFont(size: 12.5, weight: .medium)
                         .foregroundStyle(BalancedPalette.meta)
@@ -823,6 +866,20 @@ private struct LedgerAgentChatScreen: View {
         }
         .frame(maxWidth: .infinity, minHeight: max(0, emptyHeight - 52), alignment: .center)
         .padding(.vertical, 16)
+    }
+
+    /// The empty state's greeting. Only the hour matters, and only the user's
+    /// own clock: 05-11 早上好, 11-13 中午好, 13-18 下午好, 18-05 晚上好.
+    /// `greetingNow` is refreshed on appear and on every return to the
+    /// foreground, so the boundary is crossed when the page is looked at
+    /// again rather than frozen at launch.
+    private static func greeting(at date: Date) -> String {
+        switch Calendar.current.component(.hour, from: date) {
+        case 5..<11: String(localized: "早上好")
+        case 11..<13: String(localized: "中午好")
+        case 13..<18: String(localized: "下午好")
+        default: String(localized: "晚上好")
+        }
     }
 
     private func failure(_ error: LedgerAgentError, question: String) -> some View {
@@ -861,10 +918,26 @@ private struct LedgerAgentChatScreen: View {
     /// about to get, so it is not read as Return.
     @State private var newlineRequested = false
 
-    /// The floating capsule dock: an attach circle, the field, and a solid
-    /// send circle, 16pt in from either edge. The chips and hints above it
-    /// stay outside the capsule so a tall draft or an attachment never hides
-    /// them, and the whole stack rides the keyboard through `safeAreaInset`.
+    /// The dock has something to send: a draft with text in it, a question
+    /// being edited, or an attachment chosen or being read. It is two rows
+    /// then, and one row otherwise, so the model is chosen for a question
+    /// that exists and never over an empty field. Focus plays no part: a tap
+    /// in the field leaves it one row until the first character, and a menu
+    /// on the second row taking focus cannot fold that row away. It goes
+    /// back to one row when the question is sent or the text is deleted.
+    private var composerExpanded: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editedQuestion != nil
+            || !conversation.staged.isEmpty || attaching
+    }
+
+    /// The floating dock, 16pt in from either edge. At rest it is one row:
+    /// the attach circle, the field and the solid send circle. With
+    /// something to send it grows a second row under the field with the model and thinking chip
+    /// and the context meter, and the field takes the row's whole width. The
+    /// send circle is one view pinned to the bottom trailing corner in both
+    /// states, so it never moves or changes identity; each row leaves room
+    /// for it in turn. The hints and attachment chips above stay outside the
+    /// dock, and the whole stack rides the keyboard through `safeAreaInset`.
     private var composer: some View {
         VStack(spacing: 8) {
             if sessions.busyElsewhere {
@@ -872,67 +945,46 @@ private struct LedgerAgentChatScreen: View {
                     .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 6)
-            } else {
-                LedgerAgentQuickSwitch(usage: conversation.usage) { settingsPresented = true }
-                    .padding(.horizontal, 2)
             }
             if editedQuestion != nil { editBanner }
             if !conversation.staged.isEmpty || attaching || attachError != nil { stagedFiles }
-            HStack(alignment: .bottom, spacing: 4) {
-                attachMenu
-                TextField(text: $draft, prompt: Text(ghost ?? placeholder)
-                    .foregroundStyle(ghost == nil ? BalancedPalette.meta : BalancedPalette.edge), axis: .vertical) {
-                    Text(placeholder)
-                }
-                    .balancedFont(size: 15)
-                    .lineLimit(1...5)
-                    .focused($composerFocused)
-                    .submitLabel(.send)
-                    // Return sends and Shift-Return starts a new line; the
-                    // software keyboard's Return arrives as a newline instead
-                    // and is read in `composerChanged`.
-                    .onKeyPress(.return, phases: .down) { press in
-                        if press.modifiers.contains(.shift) {
-                            newlineRequested = true
-                            return .ignored
+            VStack(spacing: 4) {
+                HStack(alignment: .bottom, spacing: 4) {
+                    attachMenu
+                    composerField
+                    if let ghost {
+                        // Puts the suggestion in the field for editing; the
+                        // send button sends it as it is.
+                        Button { draft = ghost; composerFocused = true } label: {
+                            Image(systemName: "text.insert").font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(BalancedPalette.meta)
+                                .frame(width: 32, height: 40)
+                                .contentShape(Rectangle())
                         }
-                        submit()
-                        return .handled
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("编辑建议：\(ghost)")
+                        .accessibilityIdentifier("ledger-agent-ghost-edit")
                     }
-                    .padding(.vertical, 11)
-                    .accessibilityIdentifier("ledger-agent-input")
-                if let ghost {
-                    // Puts the suggestion in the field for editing; the send
-                    // button sends it as it is.
-                    Button { draft = ghost; composerFocused = true } label: {
-                        Image(systemName: "text.insert").font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(BalancedPalette.meta)
-                            .frame(width: 32, height: 40)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("编辑建议：\(ghost)")
-                    .accessibilityIdentifier("ledger-agent-ghost-edit")
                 }
-                Button {
-                    if conversation.isRunning { conversation.stop() } else { submit() }
-                } label: {
-                    Image(systemName: conversation.isRunning ? "stop.fill" : "arrow.up")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(BalancedPalette.page)
-                        .frame(width: 40, height: 40)
-                        .background(Circle().fill(BalancedPalette.ink))
-                        .contentShape(Circle())
+                .padding(.trailing, composerExpanded ? 0 : Self.sendReserve)
+                if composerExpanded {
+                    // Not in the hierarchy at rest, so nothing empty is left
+                    // for VoiceOver or a keyboard to land on.
+                    LedgerAgentQuickSwitch(usage: conversation.usage) { settingsPresented = true }
+                        .frame(minHeight: 40)
+                        .padding(.leading, 4)
+                        .padding(.trailing, Self.sendReserve)
+                        .transition(.opacity)
                 }
-                .buttonStyle(.plain)
-                .disabled(!conversation.isRunning && !canSend)
-                .opacity(!conversation.isRunning && !canSend ? 0.38 : 1)
-                .accessibilityLabel(conversation.isRunning ? "停止" : "发送")
-                .accessibilityIdentifier("ledger-agent-send")
             }
-            .padding(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+            .overlay(alignment: .bottomTrailing) { sendButton }
+            .padding(8)
             .modifier(LedgerAgentDock())
         }
+        // The dock is anchored to the bottom, so the second row opens upward
+        // under the field. Only this change is animated here; the keyboard
+        // moves the inset with the system's own animation.
+        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: composerExpanded)
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
         .padding(.top, 4)
@@ -940,6 +992,51 @@ private struct LedgerAgentChatScreen: View {
         // at another one.
         .onAppear { if draft.isEmpty { draft = sessions.unsentText(for: conversation.id) } }
         .onChange(of: draft) { old, new in composerChanged(old: old, new: new) }
+    }
+
+    /// The send circle's 40pt and the row's 4pt gap before it.
+    private static let sendReserve: CGFloat = 44
+
+    private var composerField: some View {
+        TextField(text: $draft, prompt: Text(ghost ?? placeholder)
+            .foregroundStyle(ghost == nil ? BalancedPalette.meta : BalancedPalette.edge), axis: .vertical) {
+            Text(placeholder)
+        }
+            .balancedFont(size: 15)
+            .lineLimit(1...5)
+            .focused($composerFocused)
+            .submitLabel(.send)
+            // Return sends and Shift-Return starts a new line; the
+            // software keyboard's Return arrives as a newline instead
+            // and is read in `composerChanged`.
+            .onKeyPress(.return, phases: .down) { press in
+                if press.modifiers.contains(.shift) {
+                    newlineRequested = true
+                    return .ignored
+                }
+                submit()
+                return .handled
+            }
+            .padding(.vertical, 11)
+            .accessibilityIdentifier("ledger-agent-input")
+    }
+
+    private var sendButton: some View {
+        Button {
+            if conversation.isRunning { conversation.stop() } else { submit() }
+        } label: {
+            Image(systemName: conversation.isRunning ? "stop.fill" : "arrow.up")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(BalancedPalette.page)
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(BalancedPalette.ink))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!conversation.isRunning && !canSend)
+        .opacity(!conversation.isRunning && !canSend ? 0.38 : 1)
+        .accessibilityLabel(conversation.isRunning ? "停止" : "发送")
+        .accessibilityIdentifier("ledger-agent-send")
     }
 
     /// Sends what the composer holds, or the suggestion shown in it.
@@ -988,8 +1085,11 @@ private struct LedgerAgentChatScreen: View {
     private var ghost: String? { ghost(for: draft) }
 
     private func ghost(for text: String) -> String? {
-        guard settings.assists, text.isEmpty, conversation.staged.isEmpty, !conversation.isRunning,
-              !sessions.busyElsewhere, editedQuestion == nil else { return nil }
+        // The same 显示推荐问题 switch as the empty state's starters: hiding
+        // the recommendations but leaving one floating in the field would
+        // contradict the switch, so the field keeps only its placeholder.
+        guard settings.suggestions, settings.assists, text.isEmpty, conversation.staged.isEmpty,
+              !conversation.isRunning, !sessions.busyElsewhere, editedQuestion == nil else { return nil }
         if conversation.messages.isEmpty { return starters.isDynamic ? starters.suggestions.first : nil }
         guard case .idle = conversation.phase else { return nil }
         return conversation.nextSuggestion
@@ -998,8 +1098,10 @@ private struct LedgerAgentChatScreen: View {
     // MARK: Suggestions and recap
 
     private func refreshStarters(force: Bool = false) {
-        guard settings.assists, settings.hasKey, let repository = session.localRepository, !session.privacyShielded,
-              let key = try? settings.apiKey() else { return }
+        // Hidden recommendations are not fetched either: this is the only
+        // path that spends a model call on the starters.
+        guard settings.suggestions, settings.assists, settings.hasKey, let repository = session.localRepository,
+              !session.privacyShielded, let key = try? settings.apiKey() else { return }
         let choice = settings.choice, usesMemory = settings.usesMemory
         let recent = sessions.recentQuestions()
         let workspace = repository.workspace
@@ -1015,7 +1117,9 @@ private struct LedgerAgentChatScreen: View {
     }
 
     private func predictNext() {
-        guard settings.assists, settings.hasKey, let repository = session.localRepository,
+        // Only the composer's ghost reads the prediction, so it follows the
+        // same switch: no ghost, no request.
+        guard settings.suggestions, settings.assists, settings.hasKey, let repository = session.localRepository,
               let key = try? settings.apiKey() else { return }
         let choice = settings.choice, usesMemory = settings.usesMemory
         conversation.predictNext { history in
@@ -2263,8 +2367,10 @@ struct LedgerAgentSettingsView: View {
                     .accessibilityIdentifier("ledger-agent-uses-memory")
                 Toggle("智能建议、回顾与命名", isOn: Binding(get: { settings.assists }, set: { settings.setAssists($0) }))
                     .accessibilityIdentifier("ledger-agent-assists")
+                Toggle("显示推荐问题", isOn: Binding(get: { settings.suggestions }, set: { settings.setSuggestions($0) }))
+                    .accessibilityIdentifier("ledger-agent-suggestions")
             } header: { Text("记忆与建议") } footer: {
-                Text("记忆是这本账的 memory.md：你的偏好、常用的账户和分类、常做的事。助手每次回答都会读，你说「记住」或纠正它时会自己更新。只存在本机，不随 Git 同步。智能建议会根据账本和记忆生成「试试」、在输入框里预测下一句、回来时总结对话，并在聊过两个来回后给这段对话起一个名字，起名失败会在下次回答后再试，每次都是一个不带思考的小请求。")
+                Text("记忆是这本账的 memory.md：你的偏好、常用的账户和分类、常做的事。助手每次回答都会读，你说「记住」或纠正它时会自己更新。只存在本机，不随 Git 同步。智能建议会根据账本和记忆生成「试试」、在输入框里预测下一句、回来时总结对话，并在聊过两个来回后给这段对话起一个名字，起名失败会在下次回答后再试，每次都是一个不带思考的小请求。「显示推荐问题」单独控制空态里的「试试」和输入框里的下一句建议，关掉后不再为它们请求模型，回顾和命名照常。")
             }
             Section {
                 Toggle("后台保持运行", isOn: Binding(get: { settings.keepsAwake }, set: { settings.setKeepsAwake($0) }))
@@ -2424,9 +2530,11 @@ private struct LedgerAgentModelPicker: View {
     }
 }
 
-/// The chat page's switcher: starred models and the current model's
-/// thinking levels, each one tap away. A turn already running keeps the
-/// model and effort it was sent with.
+/// The composer's second row: starred models and the current model's
+/// thinking levels, each one tap away, drawn as one chip that reads
+/// "model effort" with a menu under each half, and the context meter at the
+/// trailing end. A turn already running keeps the model and effort it was
+/// sent with.
 private struct LedgerAgentQuickSwitch: View {
     @ObservedObject private var settings = LedgerAgentSettings.shared
     /// The conversation's latest usage; the meter shows once it is known.
@@ -2435,12 +2543,23 @@ private struct LedgerAgentQuickSwitch: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Menu { models } label: { chip(settings.modelTitle) }
+            HStack(spacing: 0) {
+                Menu { models } label: {
+                    half(settings.modelTitle, tint: BalancedPalette.ink, leading: 12, trailing: 4)
+                }
                 .accessibilityLabel(String(localized: "模型：\(settings.modelTitle)"))
                 .accessibilityIdentifier("ledger-agent-quick-model")
-            Menu { thinking } label: { chip(String(localized: "思考 \(settings.effectiveThinking.title)")) }
+                Menu { thinking } label: {
+                    half(settings.effectiveThinking.title, tint: BalancedPalette.meta, leading: 4, trailing: 12)
+                }
+                // A long model name gives way before the effort does.
+                .layoutPriority(1)
                 .accessibilityLabel(String(localized: "思考强度：\(settings.effectiveThinking.title)"))
                 .accessibilityIdentifier("ledger-agent-quick-thinking")
+            }
+            // A tint rather than the sunken fill, which is what the dock
+            // itself is drawn in before iOS 26.
+            .background(Capsule().fill(BalancedPalette.meta.opacity(0.1)))
             Spacer(minLength: 0)
             if let usage, usage.fraction != nil { LedgerAgentContextMeter(usage: usage) }
         }
@@ -2487,17 +2606,15 @@ private struct LedgerAgentQuickSwitch: View {
         }
     }
 
-    private func chip(_ title: String) -> some View {
-        HStack(spacing: 3) {
-            Text(verbatim: title).lineLimit(1)
-            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-        }
-        .balancedFont(size: 12)
-        .foregroundStyle(BalancedPalette.meta)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(Capsule().fill(BalancedPalette.meta.opacity(0.1)))
-        .contentShape(Capsule())
+    /// One half of the chip; the two share the capsule drawn behind them.
+    private func half(_ title: String, tint: Color, leading: CGFloat, trailing: CGFloat) -> some View {
+        Text(verbatim: title).lineLimit(1)
+            .balancedFont(size: 13)
+            .foregroundStyle(tint)
+            .padding(.leading, leading)
+            .padding(.trailing, trailing)
+            .frame(minHeight: 32)
+            .contentShape(Rectangle())
     }
 }
 
@@ -2550,46 +2667,23 @@ private struct LedgerAgentCircleGlass: ViewModifier {
     }
 }
 
-/// The composer's floating capsule: glass on iOS 26, the sunken well the
-/// earlier system uses elsewhere. `LedgerGlass.dockRadius` is a rounded
-/// rectangle for the import dock; a chat composer is a capsule, so its corner
-/// stays half its height however tall a multi-line draft makes it.
+/// The composer's floating dock: glass on iOS 26, the sunken well the
+/// earlier system uses elsewhere. Its corner is half the one-row height, so
+/// at rest it is a capsule, and it keeps that corner when the second row or
+/// a multi-line draft makes it taller; a true capsule that tall would cut
+/// into the chip and the send circle in its corners.
 private struct LedgerAgentDock: ViewModifier {
+    private static let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+
     @ViewBuilder func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassEffect(.regular, in: Capsule())
+            content.glassEffect(.regular, in: Self.shape)
         } else {
             content
-                .background(Capsule().fill(BalancedPalette.sunken))
-                .overlay(Capsule().stroke(BalancedPalette.rule, lineWidth: 1))
+                .background(Self.shape.fill(BalancedPalette.sunken))
+                .overlay(Self.shape.stroke(BalancedPalette.rule, lineWidth: 1))
         }
     }
 }
 
-/// The empty state's mark: eight spokes around a centre, the assistant's own
-/// glyph. Balanced has no accent colour — chroma means direction — so this is
-/// drawn in the palette's one warm tone and used only as decoration, never as
-/// a control; the app mark itself lives in the widget target and is a page
-/// with an L, not this star.
-private struct LedgerAgentSpark: View {
-    var color: Color = BalancedPalette.expense
-
-    var body: some View {
-        GeometryReader { geometry in
-            let side = min(geometry.size.width, geometry.size.height)
-            ZStack {
-                ForEach(0..<8, id: \.self) { index in
-                    Capsule()
-                        .fill(color)
-                        .frame(width: side * 0.10, height: side * 0.46)
-                        .offset(y: -side * 0.21)
-                        .rotationEffect(.degrees(Double(index) * 45))
-                }
-            }
-            .frame(width: side, height: side)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .accessibilityHidden(true)
-    }
-}
 #endif

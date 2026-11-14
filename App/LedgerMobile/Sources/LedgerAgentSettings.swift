@@ -27,6 +27,11 @@ final class LedgerAgentSettings: ObservableObject {
     /// Whether the screen asks the model for suggestions, the next question
     /// and recaps on its own. On by default; each is a small extra request.
     @Published private(set) var assists: Bool
+    /// Whether the page shows recommended questions at all: the empty
+    /// state's starters, its refresh, and the suggestion the composer shows
+    /// in place of the placeholder. On by default, and separate from
+    /// `assists`, so recaps and naming can stay on with the suggestions off.
+    @Published private(set) var suggestions: Bool
     /// The provider's own list, fetched on request and kept until relaunch;
     /// keyed by `listKey`.
     @Published private(set) var listed: [String: [LedgerAgentListedModel]] = [:]
@@ -44,6 +49,7 @@ final class LedgerAgentSettings: ObservableObject {
     private let autoWritesKey = "ledger.agent.auto-write"
     private let usesMemoryKey = "ledger.agent.memory"
     private let assistsKey = "ledger.agent.assists"
+    private let suggestionsKey = "ledger.agent.suggestions"
     /// Each model's context window from the provider's list, by `identity`,
     /// so a turn after relaunch knows it without fetching the list again.
     private let contextWindowsKey = "ledger.agent.context-windows"
@@ -92,6 +98,7 @@ final class LedgerAgentSettings: ObservableObject {
         autoWrites = defaults.bool(forKey: autoWritesKey)
         usesMemory = defaults.object(forKey: usesMemoryKey) as? Bool ?? true
         assists = defaults.object(forKey: assistsKey) as? Bool ?? true
+        suggestions = defaults.object(forKey: suggestionsKey) as? Bool ?? true
         contextWindows = defaults.dictionary(forKey: contextWindowsKey) as? [String: Int] ?? [:]
         maxOutputs = defaults.dictionary(forKey: maxOutputTokensKey) as? [String: Int] ?? [:]
         hasKey = (try? keyStore(choice.provider).load()) != nil
@@ -208,6 +215,12 @@ final class LedgerAgentSettings: ObservableObject {
         guard on != assists else { return }
         assists = on
         defaults.set(on, forKey: assistsKey)
+    }
+
+    func setSuggestions(_ on: Bool) {
+        guard on != suggestions else { return }
+        suggestions = on
+        defaults.set(on, forKey: suggestionsKey)
     }
 
     var modelTitle: String { title(for: choice) }
