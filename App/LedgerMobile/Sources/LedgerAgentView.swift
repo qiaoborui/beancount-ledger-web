@@ -8,8 +8,8 @@ import UniformTypeIdentifiers
 /// page: no heading over the conversation, round buttons on the bar (history
 /// left, 新对话 and model settings right), a greeting for the time of day with
 /// the recommended starters when nothing has been asked yet, and a floating
-/// capsule dock at the bottom. No logo: the page is the ledger's, not a
-/// model provider's.
+/// capsule dock at the bottom. The mark over the greeting is the app's own,
+/// never a model provider's.
 /// The design is `docs/design/ios-balanced/agent.html`: questions sit in a
 /// sunken block on the right, replies run on the page with a collapsible list
 /// of the reads behind them. The Agent edits a private draft of the ledger;
@@ -111,7 +111,7 @@ private struct LedgerAgentChatScreen: View {
         // No heading over a conversation: the bar is a row of round buttons,
         // the way the assistant reads as a chat rather than a page. History
         // sits on the left, 新对话 and model settings on the right; a
-        // conversation's name and its rename live in the history sheet, where
+        // conversation's name and its rename live in the history drawer, where
         // the sessions are.
         .terminalPageChrome(String(localized: "账本助手"), isRoot: isRoot, showsSync: false,
                             actions: AnyView(actions), balanced: true, showsTitle: false,
@@ -129,11 +129,12 @@ private struct LedgerAgentChatScreen: View {
             NavigationStack { LedgerAgentMemoryView() }
                 .ledgerPrivacyProtectedSheet()
         }
-        .sheet(isPresented: $historyPresented) {
-            NavigationStack { LedgerAgentHistoryView(sharesText: session.amountsVisible) }
-                .presentationDetents([.medium, .large])
-                .ledgerPrivacyProtectedSheet()
+        // History is a drawer over the page, not a sheet. It is applied
+        // after the chrome so it covers the top bar and the dock as well.
+        .ledgerAgentHistoryDrawer(isPresented: $historyPresented, sharesText: session.amountsVisible) {
+            settingsPresented = true
         }
+        .onChange(of: historyPresented) { _, shown in if shown { composerFocused = false } }
         .fileImporter(isPresented: $choosingFiles, allowedContentTypes: LedgerAgentAttachments.pickerTypes,
                       allowsMultipleSelection: true) { result in
             switch result {
@@ -683,7 +684,10 @@ private struct LedgerAgentChatScreen: View {
         switch result {
         case let .needsConfirmation(warning): confirming = BranchConfirmation(action: action, warning: warning)
         case .started:
-            if case .edit = action { finishEditing() }
+            if case .edit = action {
+                finishEditing()
+                composerSent()
+            }
         case .refused: break
         }
     }
@@ -815,22 +819,34 @@ private struct LedgerAgentChatScreen: View {
     /// A recap is written when the user comes back after this long.
     private static let recapAfterAbsence: TimeInterval = 10 * 60
 
-    /// The page before the first question: a greeting for the time of day,
-    /// one question that carries it on, and the starters as pills. No mark
-    /// over it — the assistant is not a brand to put on the page — so the
-    /// block is a plain centred column. The starters, and the refresh beside
-    /// them, follow the 显示推荐问题 switch.
+    /// The page before the first question: the app's own mark, a greeting
+    /// for the time of day, one question that carries it on, and the starters
+    /// as pills, all on one centre line. The mark is the launch screen's
+    /// (`LedgerMarkCanvas`, drawn finished), not a model provider's. The
+    /// starters, and the refresh beside them, follow the 显示推荐问题 switch.
     private var emptyState: some View {
         VStack(spacing: 8) {
+            // The mark fills the middle 40 of its 64-unit canvas, centred, so
+            // a 60pt frame draws it about 38pt across and leaves 11pt of its
+            // own margin above the greeting; the negative padding takes back
+            // the stack's spacing so that margin is the whole gap. A fixed
+            // size: it is a mark, not text, and a centred column keeps it
+            // over the greeting at any type size.
+            LedgerMarkCanvas(progress: 1)
+                .frame(width: 60, height: 60)
+                .padding(.bottom, -8)
+                .accessibilityHidden(true)
             Text(Self.greeting(at: greetingNow))
                 // The reading serif, as claude.ai sets its replies: Source
                 // Serif 4 for Latin, falling through to PingFang for CJK.
-                .font(BalancedReading.font(.regular, size: 24, relativeTo: .title2))
+                .font(BalancedReading.font(.regular, size: 30, relativeTo: .title))
                 .foregroundStyle(BalancedPalette.secondary)
                 .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
             Text("今天想查点什么？").balancedFont(size: 15)
                 .foregroundStyle(BalancedPalette.meta)
                 .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
             if settings.suggestions, settings.assists || !starters.suggestions.isEmpty {
                 HStack(spacing: 4) {
                     Text("试试").balancedFont(size: 12.5, weight: .medium)
@@ -918,16 +934,28 @@ private struct LedgerAgentChatScreen: View {
     /// about to get, so it is not read as Return.
     @State private var newlineRequested = false
 
-    /// The dock has something to send: a draft with text in it, a question
-    /// being edited, or an attachment chosen or being read. It is two rows
-    /// then, and one row otherwise, so the model is chosen for a question
-    /// that exists and never over an empty field. Focus plays no part: a tap
-    /// in the field leaves it one row until the first character, and a menu
-    /// on the second row taking focus cannot fold that row away. It goes
-    /// back to one row when the question is sent or the text is deleted.
+    /// The dock is in use: the field is or has been focused, or there is
+    /// something to send (a draft, a question being edited, an attachment
+    /// chosen or being read). It is two rows then, and one row otherwise.
+    ///
+    /// A tap in the field opens the second row at once, before anything is
+    /// typed, and `composerOpened` keeps it open from then on: the keyboard
+    /// going away, or a menu on that row taking focus, does not fold it.
+    /// Only a question going out folds it again (`composerSent`).
     private var composerExpanded: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editedQuestion != nil
+        composerOpened || composerFocused || !draft.isEmpty || editedQuestion != nil
             || !conversation.staged.isEmpty || attaching
+    }
+
+    /// The field has been focused since the last question went out.
+    @State private var composerOpened = false
+
+    /// A question went out: the dock returns to one row. The focus goes with
+    /// it, since a focused field is an open dock, so the keyboard comes down
+    /// and the answer has the page.
+    private func composerSent() {
+        composerOpened = false
+        composerFocused = false
     }
 
     /// The floating dock, 16pt in from either edge. At rest it is one row:
@@ -985,6 +1013,7 @@ private struct LedgerAgentChatScreen: View {
         // under the field. Only this change is animated here; the keyboard
         // moves the inset with the system's own animation.
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: composerExpanded)
+        .onChange(of: composerFocused) { _, focused in if focused { composerOpened = true } }
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
         .padding(.top, 4)
@@ -1393,7 +1422,10 @@ private struct LedgerAgentChatScreen: View {
         if question.isEmpty, !conversation.staged.isEmpty { question = Self.reconcileQuestion }
         guard !question.isEmpty, !conversation.isRunning, let reporting = turnReporting() else { return }
         let started = conversation.send(question, reporting: reporting)
-        if started, clearsComposer { draft = "" }
+        if started, clearsComposer {
+            draft = ""
+            composerSent()
+        }
     }
 
     /// How a turn of this conversation runs: the native loop over the local
