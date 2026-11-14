@@ -354,11 +354,10 @@ func (s *onboardingSession) present() (string, error) {
 func (s *onboardingSession) tools() []agent.AgentTool {
 	kinds := append([]string{}, onboardingKindOrder...)
 	categoryKind := map[string]any{"type": "string", "enum": []string{"income", "expense"}, "description": "income 是收入分类，expense 是支出分类"}
-	category := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "account"},
-		"properties": map[string]any{
-			"name":    map[string]any{"type": "string", "description": "给用户看的中文名称，如 餐饮"},
-			"account": map[string]any{"type": "string", "description": "英文路径，收入以 Income: 开头，支出以 Expenses: 开头，如 Expenses:Food"},
-		}}
+	category := objectParameters(map[string]any{
+		"name":    map[string]any{"type": "string", "description": "给用户看的中文名称，如 餐饮"},
+		"account": map[string]any{"type": "string", "description": "英文路径，收入以 Income: 开头，支出以 Expenses: 开头，如 Expenses:Food"},
+	}, "name", "account")
 	categories := func(kind string, draft *onboardingDraftV1) *[]onboardingCategoryV1 {
 		if kind == "income" {
 			return &draft.IncomeCategories
@@ -540,11 +539,7 @@ type onboardingTool struct {
 func (t onboardingTool) Name() string  { return t.name }
 func (t onboardingTool) Label() string { return t.label }
 func (t onboardingTool) Schema() ai.ToolSchema {
-	parameters := map[string]any{"type": "object", "properties": t.properties, "additionalProperties": false}
-	if len(t.required) > 0 {
-		parameters["required"] = t.required
-	}
-	return ai.ToolSchema{Name: t.name, Description: t.description, Parameters: parameters}
+	return ai.ToolSchema{Name: t.name, Description: t.description, Parameters: objectParameters(t.properties, t.required...)}
 }
 func (onboardingTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
 

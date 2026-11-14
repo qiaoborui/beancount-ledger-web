@@ -334,20 +334,17 @@ func (h *historyIndex) tools() []agent.AgentTool {
 	integerParameter := func(description string, minimum, maximum int) map[string]any {
 		return map[string]any{"type": "integer", "description": description, "minimum": minimum, "maximum": maximum}
 	}
-	object := func(properties map[string]any, required ...string) map[string]any {
-		return map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false}
-	}
 	return []agent.AgentTool{
 		fileTool{name: "list_saved_conversations", title: "查看历史对话",
 			description: "列出本机保存的其他对话（不含当前这次），按最后更新时间从新到旧。每条给出 conversation id、起止时间、轮次和截断后的首个提问与最后一条回复。用户提到之前聊过的内容、需要回忆旧结论时用它，然后可以用 read_saved_conversation 读细节。",
-			parameters: object(map[string]any{
+			parameters: objectParameters(map[string]any{
 				"limit": integerParameter(fmt.Sprintf("返回多少条，默认 %d", savedConversationDefault), 1, savedConversationMax),
 				"query": stringParameter("可选关键词，只在首个提问和最后一条回复里匹配"),
 			}),
 			run: h.list},
 		fileTool{name: "read_saved_conversation", title: "读取历史对话",
 			description: "按 conversation id 读取一段历史对话的消息。只用于回忆上下文：账本数据和金额仍要重新查询，历史里的旧草稿不等于已经写入。",
-			parameters: object(map[string]any{
+			parameters: objectParameters(map[string]any{
 				"conversation": stringParameter("list_saved_conversations 返回的 conversation id，原样传回"),
 				"limit":        integerParameter(fmt.Sprintf("读取最近多少条消息，默认 %d", savedMessageLimit), 1, savedMessageLimit),
 			}, "conversation"),
