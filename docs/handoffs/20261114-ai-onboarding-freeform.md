@@ -4,6 +4,10 @@
 - Last updated: 2026-11-14 17:30 (+08:00)
 - Branch: `codex/ai-onboarding-freeform`, based on `main` at `8ef3888b`
 - PR: #698 (draft), opened from this branch
+- Rebased onto `main` at `7aca30ca` after A (#697) and B (#699) merged: no
+  conflicts. A's `LedgerAgentSettingsView(modelOnly: true)` in the onboarding
+  page and B's app-settings additions to `LedgerAgent*`/`LedgerSession` are
+  kept; the greeting and its hand-off are appended after them.
 - Part of the AI-native ledger assistant batch (sub-task C); the shared
   conventions live in the coordinator's `00-common.md`.
 
