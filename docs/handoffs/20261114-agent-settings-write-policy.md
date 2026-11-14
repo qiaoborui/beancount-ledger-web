@@ -3,7 +3,7 @@
 - Status: active (draft PR open, CI `Gate` green, waiting for review)
 - Last updated: 2026-11-14 (+08:00)
 - Branch: `codex/ios-agent-settings-write-policy`, based on `main` at `8ef3888b`; PR #697 (draft)
-- Code covered: commits `49eaf005`, `8dcb46ab`, `a831caae`, `0dab48a3`
+- Code covered: commits `49eaf005`, `8dcb46ab`, `a831caae`, `0dab48a3`, `f39133b0` (branch head)
 - Task: subtask A of the AI-native 账本助手 work (see the parent notes in the
   maintainer's local handoff directory; this note is the sanitized, shareable
   half)
@@ -76,7 +76,7 @@ its old switch, the root page fits one screen, Go and Swift tests pass and CI
 - `go test ./internal/app -run LocalAgent -v`: `TestLocalAgentSystemPrompt…`
   both pass, including the new `DoesNotClaimAWrite`.
 - This machine is Linux with no Swift/Xcode, so the Swift side was not compiled
-  locally. CI checked it: `Gate` is green on run 43577468587 — iOS core
+  locally. CI checked it: `Gate` is green on run 43578411528 (and on 43577468587 before it) — iOS core
   (`swift test`), iOS app (simulator build plus `LedgerMobileTests`) and
   Backend all pass; iOS widgets, iOS UI tests, Frontend and the rest are
   skipped because no path of this change plans them.
