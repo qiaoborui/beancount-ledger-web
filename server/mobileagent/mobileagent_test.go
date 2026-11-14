@@ -155,7 +155,7 @@ func TestToolCatalogListsTheAssistantsTools(t *testing.T) {
 		}
 	}
 	// The ledger tools keep their order; the assistant's own tools follow.
-	if got := strings.Join(names, ","); got != "get_bql_capabilities,validate_bql,run_bql,search_transactions,get_ledger_summary,get_accounts,ask_user,get_app_settings,update_app_settings" {
+	if got := strings.Join(names, ","); got != "get_bql_capabilities,validate_bql,run_bql,search_transactions,get_ledger_summary,get_accounts,ask_user,get_app_settings,update_app_settings,load_skill,create_skill,update_skill,delete_skill" {
 		t.Fatalf("catalog = %s", got)
 	}
 }

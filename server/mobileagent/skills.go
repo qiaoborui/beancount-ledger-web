@@ -52,6 +52,9 @@ type skill struct {
 	Description string
 	Body        string
 	Source      string
+	// Deleted marks a skill the user removed. The ledger keeps the file, so
+	// the removal travels with Git and can be undone by editing it back.
+	Deleted bool
 	// Path is where the body lives: the embedded path of a built-in skill, or
 	// the workspace-relative path of a ledger one.
 	Path string
@@ -84,14 +87,16 @@ const skillsPrompt = `
 技能（skills）：
 - 「可用技能」里每一条是一份做法说明：某类事该怎么在这本账上做。清单只有名字和一句说明，正文不在提示里，用到时用 load_skill 读。
 - 用户要做的事和清单里的技能有关时（例如导入支付宝或微信账单、按这本账的规矩记账），先 load_skill 读正文，再照它做；正文里提到的工具都能直接调用。读完不要向用户复述技能内容，直接按它操作。
-- 用户说「以后都这样做」「记住这个流程」，而内容是几步的做法，就写成账本里的技能：write_file 写 skills/<name>/SKILL.md，开头是 frontmatter（name 用小写字母、数字和连字符，description 一句说明什么时候用），下面是 Markdown 步骤。零散偏好（某商户记哪个账户、称呼习惯）不要建技能。
-- 改已有的技能用 edit_file，路径看 load_skill 返回的 path。技能和其他文件一样走草稿，bean_check 通过后才会写入账本，也会随 Git 同步给其他设备。`
+- 用户说「以后都这样做」「记住这个流程」，而内容是几步的做法，就用 create_skill 写成账本里的技能：name 用小写字母、数字和连字符，description 一句说明什么时候用，body 是 Markdown 步骤。零散偏好（某商户记哪个账户、称呼习惯）不要建技能。
+- 内置技能也能改：update_skill 会把内置技能复制成账本里的同名副本再改，之后以账本这份为准，随 Git 同步给其他设备。改已有的账本技能也用 update_skill，只传要改的字段。
+- delete_skill 删掉一份技能。删账本技能就是删除文件；删内置技能会在账本里留一份标了 deleted 的副本，内置的那份不再出现在清单里，要恢复就用 update_skill 把它改回来。
+- 技能不是账本条目，改完不用 bean_check；但它和其他文件一样走草稿，按写入设置写入账本。新写的技能下一轮就能 load_skill 读到。`
 
 // openSkills is the turn's view of its skills: the built-in ones and those in
 // the copy of the ledger it can see. A turn that may edit reads its draft, so
 // a skill it writes becomes available at once.
 func openSkills(workspaceRoot string, draft *scratch, disabled []string) (*skillSet, error) {
-	set := &skillSet{disabled: map[string]bool{}}
+	set := &skillSet{disabled: map[string]bool{}, scratch: draft}
 	for _, name := range disabled {
 		if name = strings.TrimSpace(name); name != "" {
 			set.disabled[name] = true
@@ -117,6 +122,9 @@ func openSkills(workspaceRoot string, draft *scratch, disabled []string) (*skill
 // skillSet reads the skills of one turn.
 type skillSet struct {
 	root *os.Root
+	// scratch is the draft this turn may write a skill into; a read-only turn
+	// has none, so its skill tools can only load.
+	scratch *scratch
 	// closeRoot is set when this set opened the root itself; a draft's root
 	// belongs to the turn.
 	closeRoot func()
@@ -143,6 +151,12 @@ func (s *skillSet) discover() ([]skill, []skillProblem) {
 		ledger, ledgerProblems := s.ledgerSkills()
 		problems = append(problems, ledgerProblems...)
 		for _, item := range ledger {
+			if item.Deleted {
+				// A tombstone removes the built-in one too; the ledger's own
+				// skill of that name is gone with the folder.
+				delete(byName, item.Name)
+				continue
+			}
 			byName[item.Name] = item
 		}
 	}
@@ -182,18 +196,46 @@ func (s *skillSet) prompt(remembering bool) string {
 	return prompt + "\n\n可用技能：" + list.String()
 }
 
-// tool is load_skill, which returns a skill's body.
-func (s *skillSet) tool() agent.AgentTool {
+// tools are the skill tools: load one, and — when the turn may write —
+// create, update and delete them in the ledger.
+func (s *skillSet) tools() []agent.AgentTool {
 	str := func(description string) map[string]any {
 		return map[string]any{"type": "string", "description": description}
 	}
-	return fileTool{name: "load_skill", title: "加载技能",
+	tools := []agent.AgentTool{fileTool{name: "load_skill", title: "加载技能",
 		description: "读取一份技能的完整正文，照着做。name 用「可用技能」清单里的名字。内置技能带附带文件时（结果里的 files），用 file 参数读其中一个；账本里的技能，其目录下的其他文件用 read_file 读。",
 		parameters: objectParameters(map[string]any{
 			"name": str("技能名，例如 alipay-bill-import"),
 			"file": str("内置技能的附带文件，例如 columns.md；一般不用"),
 		}, "name"),
-		run: s.load}
+		run: s.load}}
+	if s == nil || s.scratch == nil {
+		return tools
+	}
+	return append(tools,
+		fileTool{name: "create_skill", title: "新建技能",
+			description: "在账本里新建一份技能（skills/<name>/SKILL.md），用来记住一类事该怎么做。只在用户要求「以后都这样做」且内容是几步的做法时用；零散偏好用 edit_memory。名字不能和已有技能重复。",
+			parameters: objectParameters(map[string]any{
+				"name":        str("技能名：小写字母、数字和连字符，例如 ccb-bill-import"),
+				"description": str("一句说明：什么时候该用它，会出现在助手的技能清单里"),
+				"body":        str("Markdown 正文：具体的步骤，用到哪些工具、按什么顺序、注意什么"),
+			}, "name", "description", "body"),
+			run: s.create},
+		fileTool{name: "update_skill", title: "修改技能",
+			description: "改一份技能的说明或正文。只传要改的字段，没传的保持原样。改内置技能会先把它复制成账本里的同名副本，之后以账本那份为准；用它也能把删掉的技能改回来。",
+			parameters: objectParameters(map[string]any{
+				"name":        str("技能名"),
+				"description": str("新的说明；不改就不传"),
+				"body":        str("新的 Markdown 正文；不改就不传"),
+			}, "name"),
+			run: s.update},
+		fileTool{name: "delete_skill", title: "删除技能",
+			description: "删掉一份技能。账本技能就是删掉它的目录；内置技能会在账本里留一份标了 deleted 的副本，内置那份不再出现，以后可以用 update_skill 恢复。",
+			parameters: objectParameters(map[string]any{
+				"name": str("技能名"),
+			}, "name"),
+			run: s.delete},
+	)
 }
 
 func (s *skillSet) load(raw json.RawMessage) (any, error) {
@@ -210,6 +252,9 @@ func (s *skillSet) load(raw json.RawMessage) (any, error) {
 	}
 	if s.disabled[name] {
 		return nil, fmt.Errorf("技能 %s 已被用户关闭，不要用它", name)
+	}
+	if removed, _, ok := s.existing(name); ok && removed.Deleted {
+		return nil, fmt.Errorf("技能 %s 被用户删掉了，要恢复就用 update_skill 把它改回来", name)
 	}
 	skills, problems := s.discover()
 	for _, problem := range problems {
@@ -249,6 +294,171 @@ func (s *skillSet) load(raw json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("没有叫 %q 的技能，用户也没有打开任何技能", name)
 	}
 	return nil, fmt.Errorf("没有叫 %q 的技能；可用：%s", name, strings.Join(names, "、"))
+}
+
+// create writes a new skill into the ledger's draft. A name that any skill
+// already uses — a built-in, a ledger one, or a tombstone — is refused, so a
+// create never quietly overwrites what the user already has.
+func (s *skillSet) create(raw json.RawMessage) (any, error) {
+	var input struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Body        string `json:"body"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	name, description, body := strings.TrimSpace(input.Name), strings.TrimSpace(input.Description), strings.TrimSpace(input.Body)
+	if existing, ledger, ok := s.existing(name); ok {
+		if existing.Deleted {
+			return nil, fmt.Errorf("技能 %s 之前被删掉了，要用 update_skill 把它改回来", name)
+		}
+		if ledger {
+			return nil, fmt.Errorf("已经有叫 %s 的技能了，改它用 update_skill", name)
+		}
+		return nil, fmt.Errorf("App 自带了叫 %s 的技能：想改就用 update_skill（会存成账本里的副本），想自己另写一份就换个名字", name)
+	}
+	if skills, _ := s.discover(); len(skills) >= maxSkills {
+		return nil, fmt.Errorf("技能已经有 %d 份，上限也是 %d 份：先删掉一份再建", len(skills), maxSkills)
+	}
+	return s.write(name, description, body, false)
+}
+
+// update changes a skill's description or body, keeping whatever it does not
+// touch. On a built-in skill it first copies the body into the ledger, which
+// is what makes a shipped skill editable; on a tombstone it clears the mark,
+// which is how a deleted built-in comes back.
+func (s *skillSet) update(raw json.RawMessage) (any, error) {
+	var input struct {
+		Name        string  `json:"name"`
+		Description *string `json:"description"`
+		Body        *string `json:"body"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(input.Name)
+	current, _, ok := s.existing(name)
+	if !ok {
+		return nil, fmt.Errorf("没有叫 %q 的技能：改技能用 update_skill，新建用 create_skill", name)
+	}
+	description, body := current.Description, current.Body
+	if input.Description != nil {
+		description = *input.Description
+	}
+	if input.Body != nil {
+		body = *input.Body
+	}
+	return s.write(name, strings.TrimSpace(description), strings.TrimSpace(body), false)
+}
+
+// delete removes a skill. A ledger skill's folder goes away; a built-in one
+// leaves a tombstone with its body, so the removal is shared through Git and
+// can be undone.
+func (s *skillSet) delete(raw json.RawMessage) (any, error) {
+	var input struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(input.Name)
+	current, ledger, ok := s.existing(name)
+	if !ok {
+		return nil, fmt.Errorf("没有叫 %q 的技能", name)
+	}
+	if ledger {
+		dir := "skills/" + name
+		if err := s.scratch.root.RemoveAll(dir); err != nil {
+			return nil, err
+		}
+		s.scratch.markEdited()
+		return map[string]any{"name": name, "path": dir, "deleted": true, "source": skillSourceLedger}, nil
+	}
+	return s.write(name, current.Description, current.Body, true)
+}
+
+// write renders one SKILL.md into the draft and reports where it landed.
+func (s *skillSet) write(name, description, body string, deleted bool) (any, error) {
+	if s == nil || s.scratch == nil {
+		return nil, errors.New("这一轮只能读技能，改技能要在能改账本的对话里")
+	}
+	if !skillNamePattern.MatchString(name) {
+		return nil, fmt.Errorf("name %q 要用 1–64 个小写字母、数字和连字符，例如 ccb-bill-import", name)
+	}
+	if description == "" {
+		return nil, errors.New("description 是必填的：写一句什么时候该用这个技能")
+	}
+	if len(description) > maxSkillDescriptionBytes {
+		return nil, fmt.Errorf("description 最多 %d 字节，现在 %d 字节", maxSkillDescriptionBytes, len(description))
+	}
+	if body == "" {
+		return nil, errors.New("body 是必填的：写清楚具体的步骤")
+	}
+	content := renderSkill(name, description, body, deleted)
+	if len(content) > maxSkillBytes {
+		return nil, fmt.Errorf("技能最多 %d 字节，现在 %d 字节：把正文写短一点", maxSkillBytes, len(content))
+	}
+	file := "skills/" + name + "/SKILL.md"
+	if err := s.scratch.write(file, []byte(content)); err != nil {
+		return nil, err
+	}
+	result := map[string]any{"name": name, "path": file, "source": skillSourceLedger, "deleted": deleted}
+	if deleted {
+		result["note"] = "内置的这份不再出现在清单里；要恢复就用 update_skill 改回正文"
+	}
+	return result, nil
+}
+
+// existing finds a skill by name, tombstones included. The second result says
+// whether the ledger holds a copy of it, which is what decides between
+// removing a folder and leaving a tombstone.
+func (s *skillSet) existing(name string) (skill, bool, bool) {
+	if !skillNamePattern.MatchString(name) {
+		return skill{}, false, false
+	}
+	if s != nil && s.root != nil {
+		file := "skills/" + name + "/SKILL.md"
+		if data, err := s.root.ReadFile(file); err == nil {
+			if item, problem := buildSkill(file, string(data)); problem == nil {
+				item.Source, item.Path = skillSourceLedger, file
+				return item, true, true
+			}
+		}
+	}
+	builtin, _ := builtinSkillsOnce()
+	for _, item := range builtin {
+		if item.Name == name {
+			return item, false, true
+		}
+	}
+	return skill{}, false, false
+}
+
+// renderSkill writes a SKILL.md the parser reads back unchanged: the two
+// frontmatter fields it needs, the delete mark when there is one, then the
+// body.
+func renderSkill(name, description, body string, deleted bool) string {
+	var out strings.Builder
+	out.WriteString("---\nname: ")
+	out.WriteString(name)
+	out.WriteString("\ndescription: ")
+	out.WriteString(yamlScalar(description))
+	out.WriteString("\n")
+	if deleted {
+		out.WriteString("deleted: true\n")
+	}
+	out.WriteString("---\n\n")
+	out.WriteString(body)
+	out.WriteString("\n")
+	return out.String()
+}
+
+// yamlScalar quotes a description the way the parser reads it back, with no
+// dependence on which YAML shape a hand-written file would happen to use.
+func yamlScalar(text string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	return `"` + replacer.Replace(text) + `"`
 }
 
 // SkillCatalogJSON lists the skills for the app's 技能 page: the built-in ones
@@ -410,9 +620,17 @@ func readBuiltinSkillFile(item skill, file string) (string, error) {
 
 // buildSkill parses one SKILL.md and checks the limits the prompt relies on.
 func buildSkill(where, content string) (skill, *skillProblem) {
-	name, description, body, err := parseSkill(content)
+	name, description, body, deleted, err := parseSkill(content)
 	if err != nil {
 		return skill{}, &skillProblem{Path: where, Error: err.Error()}
+	}
+	if deleted {
+		// A removed skill keeps its text so it can be restored, so the limits
+		// that matter here are the name's and the body's, not the listing's.
+		if !skillNamePattern.MatchString(name) {
+			return skill{}, &skillProblem{Path: where, Error: fmt.Sprintf("name %q 要用 1–64 个小写字母、数字和连字符", name)}
+		}
+		return skill{Name: name, Description: description, Body: body, Deleted: true}, nil
 	}
 	switch {
 	case !skillNamePattern.MatchString(name):
@@ -430,8 +648,9 @@ func buildSkill(where, content string) (skill, *skillProblem) {
 }
 
 // parseSkill reads the frontmatter of a SKILL.md and returns its name, its
-// description and the body after the closing delimiter.
-func parseSkill(content string) (name, description, body string, err error) {
+// description, the body after the closing delimiter, and whether the user
+// marked it deleted.
+func parseSkill(content string) (name, description, body string, deleted bool, err error) {
 	if !utf8.ValidString(content) {
 		content = strings.ToValidUTF8(content, "")
 	}
@@ -439,7 +658,7 @@ func parseSkill(content string) (name, description, body string, err error) {
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return "", "", "", errors.New("缺少 frontmatter：文件开头要用 --- 包住 name 和 description")
+		return "", "", "", false, errors.New("缺少 frontmatter：文件开头要用 --- 包住 name 和 description")
 	}
 	end := -1
 	for index := 1; index < len(lines); index++ {
@@ -449,10 +668,20 @@ func parseSkill(content string) (name, description, body string, err error) {
 		}
 	}
 	if end < 0 {
-		return "", "", "", errors.New("frontmatter 没有结束的 ---")
+		return "", "", "", false, errors.New("frontmatter 没有结束的 ---")
 	}
 	fields := frontmatterFields(lines[1:end])
-	return fields["name"], fields["description"], strings.TrimSpace(strings.Join(lines[end+1:], "\n")), nil
+	return fields["name"], fields["description"], strings.TrimSpace(strings.Join(lines[end+1:], "\n")), skillDeleted(fields["deleted"]), nil
+}
+
+// skillDeleted reads the mark that takes a skill out of the list while keeping
+// its text, so a removed skill can be restored by editing it back.
+func skillDeleted(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "yes", "on", "1":
+		return true
+	}
+	return false
 }
 
 // frontmatterFields reads the scalar keys of a frontmatter block. It knows
@@ -473,7 +702,7 @@ func frontmatterFields(lines []string) map[string]string {
 		}
 		key = strings.ToLower(strings.TrimSpace(key))
 		value = strings.TrimSpace(value)
-		wanted := key == "name" || key == "description"
+		wanted := key == "name" || key == "description" || key == "deleted"
 		switch value {
 		case "", "|", ">", "|-", ">-", "|+", ">+":
 			// A block value: everything after it that is indented or blank.
