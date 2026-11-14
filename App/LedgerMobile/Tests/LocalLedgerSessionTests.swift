@@ -914,6 +914,115 @@ final class LocalLedgerSessionTests: XCTestCase {
         XCTAssertEqual(session.phase, .ready)
     }
 
+    func testResumeUnlockKeepsShieldThenRevealsBehindAuthenticationSheet() async throws {
+        let fixture = try await openedResumeFixture()
+        let session = fixture.session
+        defer { session.chooseLedger() }
+        session.setLockInterval(.immediately)
+        await session.updateActivity(isActive: false, isBackground: true)
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        let calls = fixture.authenticator.calls
+        let entered = expectation(description: "automatic unlock asked for authentication")
+        let gate = Gate(entered)
+        fixture.authenticator.gate = gate
+
+        // Returning keeps the shield over the retained shell and any open sheet:
+        // neither the last page nor the unlock page shows before Face ID.
+        await session.updateActivity(isActive: true, isBackground: false)
+        XCTAssertTrue(session.privacyShielded)
+        XCTAssertTrue(session.presentsPrivacyCover(sceneIsActive: true))
+        let unlocking = Task { await session.automaticallyUnlockIfNeeded() }
+        await fulfillment(of: [entered], timeout: 3)
+        await session.updateActivity(isActive: false, isBackground: false)
+        XCTAssertTrue(session.presentsPrivacyCover(sceneIsActive: false))
+
+        // Authentication answers while its sheet still holds the scene inactive.
+        await gate.release()
+        await unlocking.value
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertTrue(session.authenticationRevealsInactiveScene)
+        XCTAssertFalse(session.presentsPrivacyCover(sceneIsActive: false))
+        XCTAssertTrue(session.amountsVisible)
+        XCTAssertEqual(fixture.authenticator.calls, calls + 1)
+
+        // The sheet's dismissal ends the reveal; a later inactive scene shields again.
+        await session.updateActivity(isActive: true, isBackground: false)
+        XCTAssertFalse(session.authenticationRevealsInactiveScene)
+        XCTAssertFalse(session.presentsPrivacyCover(sceneIsActive: true))
+        await session.updateActivity(isActive: false, isBackground: false)
+        XCTAssertTrue(session.presentsPrivacyCover(sceneIsActive: false))
+    }
+
+    func testBackgroundVisitDuringRevealShieldsAndLocksAgain() async throws {
+        let fixture = try await openedResumeFixture()
+        let session = fixture.session
+        defer { session.chooseLedger() }
+        session.setLockInterval(.immediately)
+        await session.updateActivity(isActive: false, isBackground: true)
+        let entered = expectation(description: "automatic unlock asked for authentication")
+        let gate = Gate(entered)
+        fixture.authenticator.gate = gate
+        await session.updateActivity(isActive: true, isBackground: false)
+        let unlocking = Task { await session.automaticallyUnlockIfNeeded() }
+        await fulfillment(of: [entered], timeout: 3)
+        await session.updateActivity(isActive: false, isBackground: false)
+        await gate.release()
+        await unlocking.value
+        XCTAssertTrue(session.authenticationRevealsInactiveScene)
+        await session.updateActivity(isActive: false, isBackground: true)
+        XCTAssertFalse(session.authenticationRevealsInactiveScene)
+        XCTAssertTrue(session.presentsPrivacyCover(sceneIsActive: false))
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+    }
+
+    func testRejectedAutomaticUnlockOnReturnShowsUnlockPage() async throws {
+        let fixture = try await openedResumeFixture()
+        let session = fixture.session
+        defer { session.chooseLedger() }
+        session.setLockInterval(.immediately)
+        await session.updateActivity(isActive: false, isBackground: true)
+        fixture.authenticator.rejects = true
+        let calls = fixture.authenticator.calls
+        await session.updateActivity(isActive: true, isBackground: false)
+        XCTAssertTrue(session.privacyShielded)
+        await session.automaticallyUnlockIfNeeded()
+        XCTAssertEqual(fixture.authenticator.calls, calls + 1)
+        XCTAssertEqual(session.phase, .locked(authenticated: true))
+        XCTAssertFalse(session.privacyShielded)
+        XCTAssertFalse(session.presentsPrivacyCover(sceneIsActive: true))
+    }
+
+    func testColdLaunchAfterLockIntervalStaysOnStartupPath() async throws {
+        let fixture = try fixture()
+        let engine = ResumeEngine()
+        let catalog = LocalLedgerCatalog(rootDirectory: fixture.root.appendingPathComponent("managed"),
+            engine: engine, validator: { _, _ in })
+        let descriptor = try await catalog.create(name: "Stale background date")
+        let first = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: Authenticator(),
+            defaults: fixture.defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+            widgetCredentialStore: InertWidgetStore())
+        await first.openLocalLedger(descriptor)
+        first.setLockInterval(.oneMinute)
+        // The system ends the process in the background, leaving its date behind.
+        await first.updateActivity(isActive: false, isBackground: true)
+        let later = Date().addingTimeInterval(3_600)
+        let authenticator = Authenticator()
+        let session = LedgerSession(localOnly: true, localCatalog: catalog, localAuthenticator: authenticator,
+            defaults: fixture.defaults,
+            widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
+            widgetCredentialStore: InertWidgetStore(), ledgerNow: { later })
+        defer { session.chooseLedger(); first.chooseLedger() }
+        await session.updateActivity(isActive: false, isBackground: false)
+        await session.start()
+        await session.updateActivity(isActive: true, isBackground: false)
+        // Still behind the startup cover, not on the unlock page.
+        XCTAssertEqual(session.phase, .checking)
+        await session.automaticallyUnlockIfNeeded()
+        XCTAssertEqual(authenticator.calls, 1)
+        XCTAssertEqual(session.phase, .ready)
+    }
+
     func testForegroundReturnWithUnchangedLocalRevisionSkipsBootstrap() async throws {
         let fixture = try await openedResumeFixture()
         let session = fixture.session
@@ -1073,7 +1182,9 @@ final class LocalLedgerSessionTests: XCTestCase {
         XCTAssertFalse(session.isLocalOperationBusy)
     }
 
-    private enum AuthenticationEntry: CaseIterable { case create, importLedger, open, unlock }
+    // An unlock opens behind the dismissing system sheet instead of waiting; see
+    // testResumeUnlockKeepsShieldThenRevealsBehindAuthenticationSheet.
+    private enum AuthenticationEntry: CaseIterable { case create, importLedger, open }
     private enum ForegroundWaitCancellation { case background, chooseLedger, cancelTask }
 
     func testEveryLocalAuthenticationWaiterCancelsOnBackground() async throws {
@@ -1103,16 +1214,12 @@ final class LocalLedgerSessionTests: XCTestCase {
         let catalog = LocalLedgerCatalog(rootDirectory: fixture.root.appendingPathComponent("managed"),
             engine: engine, validator: { _, _ in })
         let descriptor = try await catalog.create(name: "Existing ledger")
-        if entry == .unlock {
-            fixture.defaults.set(descriptor.id.uuidString, forKey: "ledger.mobile.active-local-ledger")
-        }
         let session = LedgerSession(repositoryFactory: { location in
             XCTFail("\(entry) foreground waiter invoked remote factory")
             throw LedgerRepositoryError.unsupportedLocation(location)
         }, localCatalog: catalog, localAuthenticator: authenticator, defaults: fixture.defaults,
             widgetSnapshotStore: LedgerWidgetSnapshotStore(suiteName: fixture.suite, lockDirectory: fixture.root),
             widgetCredentialStore: InertWidgetStore())
-        if entry == .unlock { await session.lock() }
         let source = fixture.root.appendingPathComponent("selected-folder")
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
         try Data("; selected folder\n".utf8).write(to: source.appendingPathComponent("main.bean"))
@@ -1125,7 +1232,6 @@ final class LocalLedgerSessionTests: XCTestCase {
             case .create: await session.createLocalLedger(name: "New ledger", currency: "CNY")
             case .importLedger: await session.importLocalLedger(from: source, name: "Imported", entrypoint: "main.bean")
             case .open: await session.openLocalLedger(descriptor)
-            case .unlock: await session.unlockLocalLedger()
             }
             if probe.waitingForActiveScene { completedWhileInactive.fulfill() }
             completed.fulfill()
@@ -1148,13 +1254,8 @@ final class LocalLedgerSessionTests: XCTestCase {
         XCTAssertFalse(session.isLocalOperationBusy)
         XCTAssertNil(session.ledger)
         XCTAssertNotEqual(session.phase, .ready)
-        if cancellation == .chooseLedger || entry != .unlock {
-            XCTAssertNil(session.location)
-            XCTAssertEqual(session.phase, .configuration)
-        } else {
-            XCTAssertEqual(session.location, .local(descriptor.id))
-            XCTAssertEqual(session.phase, .locked(authenticated: true))
-        }
+        XCTAssertNil(session.location)
+        XCTAssertEqual(session.phase, .configuration)
         XCTAssertEqual(authenticator.calls, 1)
         let descriptors = try await catalog.list()
         XCTAssertEqual(descriptors, [descriptor])
