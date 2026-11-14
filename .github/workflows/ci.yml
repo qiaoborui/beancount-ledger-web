@@ -269,7 +269,22 @@ jobs:
       - name: Build the app scheme and run its UI tests
         env:
           UI_TESTS_ONLY: ${{ inputs.ui_tests_only }}
-        run: bash .github/scripts/ios-app-check.sh ui-tests
+          # The screenshot generators write their PNGs here; the next step
+          # uploads the folder so the pictures can be looked at afterwards.
+          UI_SCREENSHOT_DIR: ${{ runner.workspace }}/ui-screenshots
+        run: |
+          # A self-hosted runner keeps its workspace, so start from an empty
+          # folder rather than upload last run's pictures.
+          rm -rf "$UI_SCREENSHOT_DIR"
+          bash .github/scripts/ios-app-check.sh ui-tests
+      - name: Keep the UI test screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ui-screenshots
+          path: ${{ runner.workspace }}/ui-screenshots
+          if-no-files-found: ignore
+          retention-days: 14
 
   ios_runtime:
     name: iOS Beancount runtime
