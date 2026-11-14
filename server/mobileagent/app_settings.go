@@ -201,7 +201,7 @@ const appSettingsPrompt = `
 
 App 设置：
 - 除了账本文件，App 自身的设置也能改：get_app_settings 读取当前值，update_app_settings 修改。它们存在本机，不在账本里，不要用文件工具去找。
-- 用户提出这类要求时直接改，不必先问：说「每天晚上提醒我记账」「提醒改到 22 点、只在工作日」就改 reminders；「首页别显示预算」「首页先看支出分类」改 overview；「底部标签换成…」改 tabs；「周报改到周日发」「月报关掉」改 reports；「用美元看资产」改 valuation；「打开导入自动分类」改 importClassification。
+- 用户提出这类要求时直接改，不必先问：说「每天晚上提醒我记账」「提醒改到 22 点、只在工作日」就改 reminders；「首页别显示预算」「首页先看支出分类」改 overview；「底部标签换成…」改 tabs；「周报改到周日发」「月报关掉」改 reports；「用美元看资产」改 valuation。
 - 只改用户说的那一项，用局部更新；拿不准当前值就先 get_app_settings。时间用 24 小时制 HH:MM。星期用 1=周日 … 7=周六。
 - 改完在回答末尾用一句话说改了什么，例如「已把记账提醒改到每天 22:00，只在周一到周五」。App 会在回答下显示一行改动记录，用户可以撤销。
 - 这些设置以外的东西（模型、API Key、隐私锁、通知权限）不能改；用户要改就说明在设置页里改。`
@@ -499,7 +499,6 @@ func (s appSettingsV1) merge(update appSettingsUpdateV1) appSettingsV1 {
 // when the whole snapshot still validates.
 type appSettingsSession struct {
 	mu      sync.Mutex
-	initial appSettingsV1
 	current appSettingsV1
 	changed []string
 }
@@ -514,7 +513,7 @@ func openAppSettings(settings *appSettingsV1) *appSettingsSession {
 	if err := snapshot.validate(); err != nil {
 		return nil
 	}
-	return &appSettingsSession{initial: snapshot, current: snapshot}
+	return &appSettingsSession{current: snapshot}
 }
 
 func (s *appSettingsSession) snapshot() appSettingsV1 {
@@ -857,7 +856,7 @@ func appSettingsReadSchema() map[string]any {
 func appSettingsToolSchema(update bool) ai.ToolSchema {
 	if !update {
 		return ai.ToolSchema{Name: "get_app_settings",
-			Description: "读取 App 自身的设置（不是账本文件）：首页显示哪些分区、底部标签、估值币种、记账与导入提醒、周报月报、导入自动分类。每轮请求里已经带了当前值，需要确认或用户问「现在是什么设置」时再调用。返回设置和每个字段允许的取值。",
+			Description: "读取 App 自身的设置（不是账本文件）：首页显示哪些分区、底部标签、估值币种、记账与导入提醒、周报月报。每轮请求里已经带了当前值，需要确认或用户问「现在是什么设置」时再调用。返回设置和每个字段允许的取值。",
 			Parameters:  appSettingsReadSchema()}
 	}
 	return ai.ToolSchema{Name: "update_app_settings",
