@@ -1,7 +1,7 @@
 # 20261114-ai-onboarding-freeform
 
-- Status: active (draft PR, CI Gate green)
-- Last updated: 2026-11-14 (+08:00)
+- Status: completed (draft PR open, CI Gate green, awaiting review)
+- Last updated: 2026-11-14 17:30 (+08:00)
 - Branch: `codex/ai-onboarding-freeform`, based on `main` at `8ef3888b`
 - PR: #698 (draft), opened from this branch
 - Part of the AI-native ledger assistant batch (sub-task C); the shared
@@ -124,8 +124,10 @@ steps.
   text and its four single-tap steps, `greet` writing one app-authored
   message that is not replayed as model history, and
   `LedgerAgentSessions.takeOpening` consuming the greeting once.
-- CI (`Gate`) on the draft PR: green — the iPad/iPhone app build compiles the
-  new view code, `swift test` runs the new portable tests.
+- CI on the draft PR (run 43578233386): `iOS core` (`swift test` with the new
+  portable tests) passed, `iOS app` (Xcode build of the LedgerMobile scheme
+  plus `LedgerMobileTests`, which compiles the new view code) passed,
+  `Backend` (`go test ./...`) passed, and `Gate` is green.
 - Not tested: a live model conversation (no key or scripted harness in this
   worktree), the actual presentation timing of the cover after 确认创建, and a
   real device layout for the new progress pills.
