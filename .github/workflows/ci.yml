@@ -16,9 +16,26 @@ on:
           screenshot classes)
         type: string
         default: ''
+      clean:
+        description: Discard the Mac runner's build caches and build the iOS jobs from scratch
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+
+# A new push to a pull request replaces the run of the previous push, so the
+# one Mac runner is not kept busy checking code nobody is waiting for. Manual
+# runs are never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: true
+
+env:
+  # The iOS jobs keep their build products on the Mac runner between runs (see
+  # .github/scripts/ios-app-check.sh). A manual run on main is the check before
+  # a release, so it always builds from scratch; any manual run can ask to.
+  IOS_CI_CLEAN: ${{ github.event_name == 'workflow_dispatch' && (inputs.clean == true || github.ref == 'refs/heads/main') }}
 
 # Every job below is one area. .github/scripts/plan-components.sh maps the
 # changed paths of a pull request to areas; a manual run checks every area.
@@ -188,9 +205,16 @@ jobs:
           persist-credentials: false
       - name: Select Xcode
         run: bash .github/scripts/select-xcode.sh
+      # The checkout cleans App/LedgerMobile/.build, so SwiftPM builds into a
+      # directory beside the workspace and only recompiles what changed.
       - name: Test portable Swift package
         working-directory: App/LedgerMobile
-        run: swift test
+        run: |
+          scratch="$RUNNER_WORKSPACE/ledger-ci-cache/swiftpm"
+          if [[ "$IOS_CI_CLEAN" == true ]]; then
+            rm -rf "$scratch"
+          fi
+          swift test --scratch-path "$scratch"
       # `swift test` builds for macOS, where `canImport(UIKit)` is false, so an
       # iOS-only compile error (SwiftUI `Font`, a missing import) passes there
       # and only fails the IPA build. Cross-compiling for the device SDK catches
@@ -198,7 +222,8 @@ jobs:
       - name: Build for the iOS SDK
         working-directory: App/LedgerMobile
         run: |
-          swift build --triple arm64-apple-ios17.0 \
+          swift build --scratch-path "$RUNNER_WORKSPACE/ledger-ci-cache/swiftpm" \
+            --triple arm64-apple-ios17.0 \
             --sdk "$(xcrun --sdk iphoneos --show-sdk-path)"
 
   # The Swift package leaves out the app's UI layer, widgets and share
