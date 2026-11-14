@@ -1,8 +1,10 @@
 # 20261114-agent-remote-mcp
 
-- Status: active (draft PR #701, CI `Gate` green, awaiting review)
+- Status: active (draft PR #701, rebased onto `main` after A–D merged,
+  awaiting CI and review)
 - Last updated: 2026-11-14 (+08:00)
-- Branch: `codex/agent-remote-mcp`, based on `main` at `8ef3888b`; PR
+- Branch: `codex/agent-remote-mcp`, rebased onto `main` at `56f76393` (A #697,
+  B #699, C #698, D #700 merged); PR
   https://github.com/qiaoborui/beancount-ledger-web/pull/701
 - Task: 子任务 E of the AI-native ledger assistant batch (see
   `/home/borui/beancount-ledger-web/.git/agent-handoffs/20261114-ai-native/`,
@@ -67,6 +69,28 @@ per-server tokens in the Keychain, a settings page, and a native probe.
 - `MCPProbeJSON` is a normal exported function of `server/mobileagent`, which
   `scripts/build-ledgercore-xcframework.sh` binds whole, so it reaches
   LedgerCore with no build-script change.
+
+## Rebase onto main after A–D
+
+- The MCP hook in `runTurnIn` now sits after the skills and `appSettings`
+  blocks and before the memory prompt; the request field is appended after
+  `disabledSkills`/`appSettings`, so the cached prefix of an earlier build is
+  unchanged.
+- Swift: `mcpServers` is the last field of `LedgerAgentTurnRequest` and the last
+  argument of `runAgentTurn`/`turnReporting`, after `disabledSkills` and
+  `appSettings`; the settings views moved by A are untouched.
+- `FEATURE_PARITY.md`: A's 账本助手 row and the skills/app-settings rows are
+  kept, and the MCP row follows them.
+- `Package.swift`: main's exclusion and source lists are kept, with
+  `LedgerAgentMCPView.swift` excluded and `LedgerAgentMCP.swift` in the
+  portable sources.
+- C's `events_test.go` fix is kept as it is on main (this branch never touched
+  that file).
+- Local check after the rebase: `go build ./...`, `go build ./cmd/ledger-web`,
+  `go vet ./mobileagent/`, `go test ./mobileagent/` pass. `go test ./...` shows
+  two flaky `internal/app` tests (`TestLocalPageCacheReusesOnlyUnchangedReadModels`,
+  `TestLocalSourceRetentionOwnedRebuildAndMutation`), which fail intermittently
+  on `main` too on this filesystem and are unrelated to this branch.
 
 ## Changed files
 
