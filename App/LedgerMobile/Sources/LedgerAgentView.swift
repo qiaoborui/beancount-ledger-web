@@ -336,7 +336,7 @@ private struct LedgerAgentChatScreen: View {
                 }
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
-            circleButton("slider.horizontal.3", label: "模型与密钥", identifier: "ledger-agent-settings",
+            circleButton("slider.horizontal.3", label: "助手设置", identifier: "ledger-agent-settings",
                          drawsGlass: false) {
                 settingsPresented = true
             }
@@ -1444,7 +1444,7 @@ private struct LedgerAgentChatScreen: View {
         let conversation = conversation, conversationID = conversation.id
         let location = repository.workspace.agentAttachmentLocation(id: conversationID)
         conversation.editor = .live(repository)
-        conversation.autoWrites = settings.autoWrites
+        conversation.writePolicy = settings.writePolicy
         conversation.lifecycle = LedgerAgentBackgroundRun.shared
         LedgerAgentBackgroundRun.shared.concealsContent = session.localPrivacyProtectionEnabled
         LedgerAgentBackgroundRun.shared.keepsAwake = settings.keepsAwake
@@ -1837,11 +1837,13 @@ private struct LedgerAgentChangeCard: View {
 
     private var note: String {
         switch pending.status {
-        case .ready: String(localized: "校验通过。写入时会再校验一次，并生成一个可撤回的提交。")
-        case .writing: String(localized: "正在写入…")
-        case let .invalid(message): message + "\n" + String(localized: "可以让助手接着修，或者放弃草稿。")
-        case let .conflict(paths): String(localized: "对话期间账本有了新的改动，和草稿改到了同一处：\(paths.joined(separator: "、"))。可以让助手基于最新账本重改这些地方，或者放弃草稿。")
-        case let .failed(message): String(localized: "没有写入：") + message
+        case .ready:
+            let validation = String(localized: "校验通过。写入时会再校验一次，并生成一个可撤回的提交。")
+            return pending.holdReason.map { $0 + "\n" + validation } ?? validation
+        case .writing: return String(localized: "正在写入…")
+        case let .invalid(message): return message + "\n" + String(localized: "可以让助手接着修，或者放弃草稿。")
+        case let .conflict(paths): return String(localized: "对话期间账本有了新的改动，和草稿改到了同一处：\(paths.joined(separator: "、"))。可以让助手基于最新账本重改这些地方，或者放弃草稿。")
+        case let .failed(message): return String(localized: "没有写入：") + message
         }
     }
 
@@ -2237,7 +2239,7 @@ private struct LedgerAgentIntro: View {
         Ability(title: String(localized: "搜索流水"), detail: String(localized: "按商户、账户、标签、日期找交易")),
         Ability(title: String(localized: "BQL 查询"), detail: String(localized: "分组、排序、自定义统计")),
         Ability(title: String(localized: "账户"), detail: String(localized: "账户名称、别名和币种")),
-        Ability(title: String(localized: "改账（草稿确认后写入）"), detail: String(localized: "改分类、补记漏记、删重复，先改草稿，你确认后才写入")),
+        Ability(title: String(localized: "改账"), detail: String(localized: "改分类、补记漏记、删重复；校验通过就写入，可以撤销")),
         Ability(title: String(localized: "附件对账"), detail: String(localized: "上传 CSV、Excel、PDF 或截图，和账本逐笔核对")),
         Ability(title: String(localized: "记忆"), detail: String(localized: "记住你的偏好和常用账户，只存在本机")),
     ]
@@ -2259,7 +2261,7 @@ private struct LedgerAgentIntro: View {
                     .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                     .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
                 }
-                Text("改账时先改一份草稿，改动以卡片给你过目，点「写入账本」并通过校验后才会写入。需要你自己的模型 API Key，费用记在你的模型账户上。")
+                Text("改账时先改一份草稿，校验通过后直接写入，每次都是一个可以撤销的提交；删除文件或大量删改会先请你确认。需要你自己的模型 API Key，费用记在你的模型账户上。")
                     .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta).lineSpacing(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .balancedBand()
@@ -2275,290 +2277,6 @@ private struct LedgerAgentIntro: View {
                 .padding(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
                 .ledgerGlassDock()
         }
-    }
-}
-
-/// 模型与密钥 — provider, model, the Keychain key, and what leaves the device.
-struct LedgerAgentSettingsView: View {
-    @ObservedObject private var settings = LedgerAgentSettings.shared
-    @Environment(\.dismiss) private var dismiss
-    @State private var key = ""
-    @State private var error: String?
-
-    var body: some View {
-        List {
-            if let error { Section { StatusBanner(message: error) { self.error = nil } } }
-            Section {
-                Picker("服务商", selection: Binding(get: { settings.choice.provider }, set: { settings.select(provider: $0) })) {
-                    ForEach(settings.catalog.providers) { provider in Text(provider.title).tag(provider.id) }
-                }
-                .accessibilityIdentifier("ledger-agent-provider")
-                if settings.choice.isCustom {
-                    Picker("接口协议", selection: Binding(get: { settings.choice.custom?.api ?? .openAICompletions },
-                                                      set: { settings.setCustom(api: $0) })) {
-                        ForEach(LedgerAgentModelChoice.CustomEndpoint.API.allCases) { api in Text(api.title).tag(api) }
-                    }
-                    .accessibilityIdentifier("ledger-agent-custom-api")
-                    TextField("Base URL", text: Binding(get: { settings.choice.custom?.baseURL ?? "" },
-                                                        set: { settings.setCustom(baseURL: $0) }),
-                              prompt: Text(verbatim: "https://api.example.com/v1"))
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .balancedMono(size: 13)
-                        .accessibilityIdentifier("ledger-agent-custom-url")
-                    TextField("模型 ID", text: Binding(get: { settings.choice.model }, set: { settings.select(model: $0) }))
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .balancedMono(size: 13)
-                        .accessibilityIdentifier("ledger-agent-custom-model")
-                    if settings.hasKey, settings.choice.custom?.isValid == true {
-                        NavigationLink("从服务拉取模型列表") { LedgerAgentModelPicker() }
-                            .accessibilityIdentifier("ledger-agent-custom-list")
-                    }
-                } else {
-                    NavigationLink {
-                        LedgerAgentModelPicker()
-                    } label: {
-                        LabeledContent("模型") {
-                            Text(settings.modelTitle).foregroundStyle(BalancedPalette.meta)
-                        }
-                    }
-                    .accessibilityIdentifier("ledger-agent-model")
-                }
-                NavigationLink {
-                    LedgerAgentThinkingPicker()
-                } label: {
-                    LabeledContent("思考强度") {
-                        Text(settings.effectiveThinking.title).foregroundStyle(BalancedPalette.meta)
-                    }
-                }
-                .accessibilityIdentifier("ledger-agent-thinking")
-            } header: { Text("模型") } footer: {
-                if settings.choice.isCustom {
-                    let invalid = !(settings.choice.custom?.baseURL ?? "").isEmpty && settings.choice.custom?.isValid != true
-                    Text(invalid ? "Base URL 需要是 http(s) 地址，不能带账号密码或查询参数。"
-                                 : "兼容这三种协议的服务都可以用，比如自建网关、OneAPI、Ollama、vLLM。Base URL 填到 /v1 为止，Anthropic 协议也一样。模型需要支持工具调用。")
-                }
-            }
-            Section {
-                if settings.favorites.isEmpty {
-                    Text("在模型列表里点星标收藏，聊天页就能一键切换。")
-                        .foregroundStyle(BalancedPalette.meta)
-                }
-                ForEach(settings.favorites) { favorite in
-                    Button { settings.select(favorite: favorite) } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(favorite.title).foregroundStyle(BalancedPalette.ink)
-                                Text(verbatim: settings.providerTitle(for: favorite.choice.provider) + " · " + favorite.choice.model)
-                                    .balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            if favorite.id == LedgerAgentSettings.identity(settings.choice) {
-                                Image(systemName: "checkmark").foregroundStyle(BalancedPalette.ink)
-                            }
-                        }
-                    }
-                }
-                .onDelete { settings.removeFavorites(at: $0) }
-                .onMove { settings.moveFavorites(from: $0, to: $1) }
-            } header: { Text("收藏的模型") } footer: {
-                if !settings.favorites.isEmpty { Text("左滑删除。最多 \(LedgerAgentSettings.favoriteLimit) 个，各自用对应服务商的 Key。") }
-            }
-            Section {
-                if settings.hasKey { Label("\(settings.providerTitle) API Key 已保存在本机", systemImage: "key.fill") }
-                SecureField(settings.hasKey ? "替换 API Key" : "\(settings.providerTitle) API Key", text: $key)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("ledger-agent-api-key")
-                Button("保存 API Key") {
-                    do { try settings.saveKey(key); key = ""; error = nil }
-                    catch { self.error = error.localizedDescription }
-                }
-                .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityIdentifier("ledger-agent-save-key")
-                if settings.hasKey {
-                    Button("删除 Key", role: .destructive) {
-                        do { try settings.removeKey(); key = ""; error = nil }
-                        catch { self.error = error.localizedDescription }
-                    }
-                }
-            } header: { Text("密钥") } footer: {
-                Text("每个服务商的 Key 分开存放在本机钥匙串，不随账本导出、备份或 Git 同步。调用费用记在你的模型账户上。")
-            }
-            Section {
-                NavigationLink {
-                    LedgerAgentMemoryView()
-                } label: {
-                    Label("记忆", systemImage: "brain")
-                }
-                .accessibilityIdentifier("ledger-agent-memory")
-                Toggle("使用记忆", isOn: Binding(get: { settings.usesMemory }, set: { settings.setUsesMemory($0) }))
-                    .accessibilityIdentifier("ledger-agent-uses-memory")
-                Toggle("智能建议、回顾与命名", isOn: Binding(get: { settings.assists }, set: { settings.setAssists($0) }))
-                    .accessibilityIdentifier("ledger-agent-assists")
-                Toggle("显示推荐问题", isOn: Binding(get: { settings.suggestions }, set: { settings.setSuggestions($0) }))
-                    .accessibilityIdentifier("ledger-agent-suggestions")
-            } header: { Text("记忆与建议") } footer: {
-                Text("记忆是这本账的 memory.md：你的偏好、常用的账户和分类、常做的事。助手每次回答都会读，你说「记住」或纠正它时会自己更新。只存在本机，不随 Git 同步。智能建议会根据账本和记忆生成「试试」、在输入框里预测下一句、回来时总结对话，并在聊过两个来回后给这段对话起一个名字，起名失败会在下次回答后再试，每次都是一个不带思考的小请求。「显示推荐问题」单独控制空态里的「试试」和输入框里的下一句建议，关掉后不再为它们请求模型，回顾和命名照常。")
-            }
-            Section {
-                Toggle("后台保持运行", isOn: Binding(get: { settings.keepsAwake }, set: { settings.setKeepsAwake($0) }))
-                    .accessibilityIdentifier("ledger-agent-keep-awake")
-            } header: { Text("后台") } footer: {
-                Text("回答期间在后台播放无声音频，锁屏后助手也能一直做完，不影响你正在听的音乐。关掉后只能用系统给的后台时间，较长的回答可能被中断；被中断的回答回到 App 时会自动接着做。")
-            }
-            Section {
-                Toggle("改完自动写入", isOn: Binding(get: { settings.autoWrites }, set: { settings.setAutoWrites($0) }))
-                    .accessibilityIdentifier("ledger-agent-auto-write")
-            } header: { Text("写入") } footer: {
-                Text("打开后，助手的改动通过校验就直接写入账本，不再弹出确认卡片。每次写入都是一个单独的提交，回答下方的「撤销」可以把它退回去。和账本新改动冲突或校验没通过时，仍然停下来让你处理。")
-            }
-            Section("发给模型的内容") {
-                Text("你的问题、本次对话，以及助手调用工具后得到的结果（例如汇总金额、匹配到的流水）。不会发送整本账本文件，也不会发送 Git 凭据或本机路径。")
-            }
-            Section {
-                tool(String(localized: "汇总与搜索流水"), "get_ledger_summary · search_transactions")
-                tool(String(localized: "BQL 查询"), "run_bql · validate_bql · get_bql_capabilities")
-                tool(String(localized: "账户"), "get_accounts")
-                tool(String(localized: "向你提问（选项卡）"), "ask_user")
-                tool(String(localized: "改账（只改草稿）"),
-                     "list_files · grep_files · read_file · edit_file · write_file · copy_file · move_file · delete_file · draft_changes · bean_check")
-                if settings.usesMemory { tool(String(localized: "记忆"), "edit_memory · write_memory") }
-                tool(String(localized: "附件"),
-                     "list_attachments · read_attachment · reconcile_attachment · view_attachment_image · save_attachment")
-                tool(String(localized: "历史对话"), "list_saved_conversations · read_saved_conversation")
-            } header: { Text("可用工具") } footer: {
-                Text("查询工具只读账本。改账工具只改一份私有草稿，改动卡片上点「写入账本」并通过校验后才写入；打开「改完自动写入」时校验通过即写入。附件工具在对话附了文件时才有，看图需要模型支持图片。")
-            }
-        }
-        .font(.subheadline)
-        .navigationTitle("模型与密钥")
-        .terminalNativeChrome()
-        .navigationBarTitleDisplayMode(.inline)
-        .privacySensitive()
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
-        }
-        .onDisappear { key = "" }
-    }
-
-    private func tool(_ title: String, _ names: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-            Text(names).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
-        }
-    }
-}
-
-/// The selected provider's models: its own list once fetched with the saved
-/// key, else the built-in catalog. Searchable because OpenRouter lists
-/// hundreds; a typed id is accepted as is. The star keeps a model for the
-/// chat page's switcher.
-private struct LedgerAgentModelPicker: View {
-    @ObservedObject private var settings = LedgerAgentSettings.shared
-    @Environment(\.dismiss) private var dismiss
-    @State private var query = ""
-
-    private struct Row: Identifiable {
-        let id: String
-        let title: String
-        let levels: [LedgerAgentThinking]
-    }
-
-    private var all: [Row] {
-        if let listed = settings.listedModels { return listed.map { .init(id: $0.id, title: $0.title, levels: $0.thinking) } }
-        return (settings.catalog.provider(settings.choice.provider)?.models ?? []).map { .init(id: $0.id, title: $0.title, levels: $0.thinking) }
-    }
-
-    private var rows: [Row] {
-        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !needle.isEmpty else { return all }
-        return all.filter { $0.id.lowercased().contains(needle) || $0.title.lowercased().contains(needle) }
-    }
-
-    var body: some View {
-        List {
-            if let error = settings.listError {
-                Section { StatusBanner(message: error) { settings.clearListError() } }
-            }
-            Section {
-                let typed = query.trimmingCharacters(in: .whitespaces)
-                if !typed.isEmpty, !rows.contains(where: { $0.id == typed }) {
-                    Button { choose(typed) } label: { Text("使用「\(typed)」") }
-                }
-                ForEach(rows) { row in
-                    HStack {
-                        Button { choose(row.id) } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(row.title).foregroundStyle(BalancedPalette.ink)
-                                    Text(row.id).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
-                                }
-                                Spacer()
-                                if row.id == settings.choice.model {
-                                    Image(systemName: "checkmark").foregroundStyle(BalancedPalette.ink)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        Button {
-                            settings.toggleFavorite(model: row.id, title: row.title, levels: row.levels)
-                        } label: {
-                            Image(systemName: settings.isFavorite(model: row.id) ? "star.fill" : "star")
-                                .foregroundStyle(settings.isFavorite(model: row.id) ? BalancedPalette.ink : BalancedPalette.meta)
-                                .frame(width: 36, height: 36)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel(settings.isFavorite(model: row.id) ? "取消收藏" : "收藏")
-                    }
-                }
-            } header: {
-                if settings.listing {
-                    Text("正在向 \(settings.providerTitle) 拉取…")
-                } else if let listed = settings.listedModels {
-                    Text("\(settings.providerTitle) 提供的 \(listed.count) 个模型")
-                } else if !settings.choice.isCustom {
-                    Text("内置目录")
-                }
-            } footer: {
-                if settings.listedModels == nil, !settings.choice.isCustom {
-                    Text("内置目录随 App 更新。点右上角刷新，用已保存的 Key 拉取服务商当前提供的模型。")
-                } else if settings.listedModels != nil {
-                    Text("目录里没有的模型，思考强度最高给到「高」，不支持时由服务端忽略。")
-                }
-            }
-        }
-        .font(.subheadline)
-        .searchable(text: $query, prompt: Text("搜索或输入模型 ID"))
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled()
-        .navigationTitle(settings.providerTitle)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                if settings.listing {
-                    ProgressView()
-                } else {
-                    Button { Task { await settings.refreshModels() } } label: { Image(systemName: "arrow.clockwise") }
-                        .disabled(!settings.hasKey)
-                        .accessibilityLabel("拉取模型列表")
-                        .accessibilityIdentifier("ledger-agent-refresh-models")
-                }
-            }
-        }
-        .task {
-            if settings.listedModels == nil, settings.hasKey, settings.choice.isCustom { await settings.refreshModels() }
-        }
-    }
-
-    private func choose(_ id: String) {
-        settings.select(model: id)
-        dismiss()
     }
 }
 
@@ -2622,7 +2340,7 @@ private struct LedgerAgentQuickSwitch: View {
                 Label(settings.currentIsFavorite ? "取消收藏当前模型" : "收藏当前模型",
                       systemImage: settings.currentIsFavorite ? "star.slash" : "star")
             }
-            Button(action: manage) { Label("全部模型与密钥…", systemImage: "slider.horizontal.3") }
+            Button(action: manage) { Label("助手设置…", systemImage: "slider.horizontal.3") }
         }
     }
 
@@ -2647,45 +2365,6 @@ private struct LedgerAgentQuickSwitch: View {
             .padding(.trailing, trailing)
             .frame(minHeight: 32)
             .contentShape(Rectangle())
-    }
-}
-
-/// The efforts the current model accepts. The choice is kept across models;
-/// a model without it uses the nearest level, which is the one checked.
-private struct LedgerAgentThinkingPicker: View {
-    @ObservedObject private var settings = LedgerAgentSettings.shared
-
-    var body: some View {
-        List {
-            Section {
-                ForEach(settings.supportedThinking) { level in
-                    Button { settings.select(thinking: level) } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(level.title).foregroundStyle(BalancedPalette.ink)
-                                if let hint = level.hint {
-                                    Text(level == .default ? String(localized: "默认。") + hint : hint)
-                                        .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
-                                }
-                            }
-                            Spacer()
-                            if level == settings.effectiveThinking {
-                                Image(systemName: "checkmark").foregroundStyle(BalancedPalette.ink)
-                            }
-                        }
-                    }
-                }
-            } header: {
-                Text("\(settings.modelTitle) 支持")
-            } footer: {
-                Text(settings.thinkingIsAssumed
-                     ? "这个模型是否支持推理无从得知，最高给到「高」；不支持时由服务端忽略。"
-                     : "越高越慢、越贵，复杂的批量改动更稳。换到不支持这一档的模型时，自动用最接近的一档。")
-            }
-        }
-        .font(.subheadline)
-        .navigationTitle("思考强度")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

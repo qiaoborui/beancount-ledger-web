@@ -4,7 +4,11 @@
   in a separate private ledger repository.
 - Avoid local dev server startup unless the user asks for it. Use PR preview
   deployment as the default UI validation path.
-- Keep financial writes manual-first: preview, validate, then append.
+- Keep financial writes manual-first: preview, validate, then append. The iOS
+  ledger assistant follows its write policy (助手设置 → 写入账本): a change that
+  passes validation is written at once as a revertible commit, while file
+  deletions and large removals wait for a confirmation. Other write paths are
+  unchanged.
 - Sensitive data must remain hidden until the app's passkey or password unlock
   path grants access.
 - Reuse existing time-range, cache, parser, analytics, and UI helpers whenever a

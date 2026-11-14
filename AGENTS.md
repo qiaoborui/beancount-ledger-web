@@ -209,7 +209,11 @@ Other rules:
 - Keep private-ledger paths outside this repo. Root-level `main.bean`,
   `accounts.bean`, `budgets.bean`, `commodities.bean`, `prices.bean`,
   `transactions/`, `imports/`, and `ledgers/` are ignored for this reason.
-- Keep financial writes manual-first: preview, validate, then append.
+- Keep financial writes manual-first: preview, validate, then append. The iOS
+  ledger assistant is the one exception: under 助手设置 → 写入账本 it writes a
+  change that passes validation at once, as a revertible commit, keeping the
+  file deletions and large removals for a confirmation; deleting a ledger, a
+  conflict or a failed check still stops. Other write paths are unchanged.
 - Use existing Beancount parsers, ledger writers, analytics helpers, caches,
   schemas, and path helpers before introducing new parsing or write logic.
 - Use `bean-check` validation paths where ledger writes are involved, and keep

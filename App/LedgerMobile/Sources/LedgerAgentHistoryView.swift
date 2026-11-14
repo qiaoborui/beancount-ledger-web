@@ -14,7 +14,7 @@ struct LedgerAgentHistoryView: View {
     var sharesText: Bool
     /// Closes the drawer.
     var close: () -> Void
-    /// Opens 模型与密钥 on the chat page.
+    /// Opens 助手设置 on the chat page.
     var openSettings: () -> Void
     @ObservedObject private var sessions = LedgerAgentSessions.shared
     @State private var query = ""
@@ -227,7 +227,7 @@ struct LedgerAgentHistoryView: View {
 
     /// 新对话 in the middle, and at the leading end a round button with the
     /// app's mark where another app would put the user's picture: the ledger
-    /// has no profile, so it holds what is left over, 模型与密钥 and 清空历史.
+    /// has no profile, so it holds what is left over, 助手设置 and 清空历史.
     /// A clear spacer of the round button's width keeps the capsule centred
     /// without letting the two overlap at large type sizes.
     private var footer: some View {
@@ -236,7 +236,7 @@ struct LedgerAgentHistoryView: View {
                 Button {
                     close()
                     openSettings()
-                } label: { Label("模型与密钥…", systemImage: "slider.horizontal.3") }
+                } label: { Label("助手设置…", systemImage: "slider.horizontal.3") }
                 if !sessions.saved.isEmpty {
                     Button(role: .destructive) { confirmingClear = true } label: {
                         Label("清空历史", systemImage: "trash")

@@ -18,10 +18,10 @@ final class LedgerAgentSettings: ObservableObject {
     /// audio, instead of relying only on the time iOS grants. On by default:
     /// without it a long turn is cut short once the phone locks.
     @Published private(set) var keepsAwake: Bool
-    /// Whether a change that passes validation is written at once, without
-    /// the change card's confirmation. Off by default; every write is still a
-    /// separate, revertible commit.
-    @Published private(set) var autoWrites: Bool
+    /// How a change that passes validation reaches the ledger. Tiered by
+    /// default: written at once unless it deletes files or cuts a lot of
+    /// lines. Every write is still a separate, revertible commit.
+    @Published private(set) var writePolicy: LedgerAgentWritePolicy
     /// Whether turns read and keep the ledger's memory.md. On by default.
     @Published private(set) var usesMemory: Bool
     /// Whether the screen asks the model for suggestions, the next question
@@ -46,7 +46,10 @@ final class LedgerAgentSettings: ObservableObject {
     private let thinkingKey = "ledger.agent.thinking"
     private let favoritesKey = "ledger.agent.favorite-models"
     private let keepsAwakeKey = "ledger.agent.keep-awake"
-    private let autoWritesKey = "ledger.agent.auto-write"
+    private let writePolicyKey = "ledger.agent.write-policy"
+    /// The on/off auto-write switch that `writePolicyKey` replaced. Read only
+    /// to carry an existing install's choice over.
+    private let autoWriteKey = "ledger.agent.auto-write"
     private let usesMemoryKey = "ledger.agent.memory"
     private let assistsKey = "ledger.agent.assists"
     private let suggestionsKey = "ledger.agent.suggestions"
@@ -95,7 +98,7 @@ final class LedgerAgentSettings: ObservableObject {
         self.choice = choice
         thinking = defaults.string(forKey: thinkingKey).flatMap(LedgerAgentThinking.init(rawValue:)) ?? .default
         keepsAwake = defaults.object(forKey: keepsAwakeKey) as? Bool ?? true
-        autoWrites = defaults.bool(forKey: autoWritesKey)
+        writePolicy = Self.writePolicy(in: defaults, key: writePolicyKey, legacyKey: autoWriteKey)
         usesMemory = defaults.object(forKey: usesMemoryKey) as? Bool ?? true
         assists = defaults.object(forKey: assistsKey) as? Bool ?? true
         suggestions = defaults.object(forKey: suggestionsKey) as? Bool ?? true
@@ -199,10 +202,19 @@ final class LedgerAgentSettings: ObservableObject {
         defaults.set(on, forKey: keepsAwakeKey)
     }
 
-    func setAutoWrites(_ on: Bool) {
-        guard on != autoWrites else { return }
-        autoWrites = on
-        defaults.set(on, forKey: autoWritesKey)
+    func setWritePolicy(_ policy: LedgerAgentWritePolicy) {
+        guard policy != writePolicy else { return }
+        writePolicy = policy
+        defaults.set(policy.rawValue, forKey: writePolicyKey)
+    }
+
+    /// The stored policy; an install from before it existed keeps what its
+    /// auto-write switch said, and a new one starts tiered.
+    private static func writePolicy(in defaults: UserDefaults, key: String,
+                                    legacyKey: String) -> LedgerAgentWritePolicy {
+        if let raw = defaults.string(forKey: key), let policy = LedgerAgentWritePolicy(rawValue: raw) { return policy }
+        if let autoWrites = defaults.object(forKey: legacyKey) as? Bool { return autoWrites ? .always : .confirm }
+        return .tiered
     }
 
     func setUsesMemory(_ on: Bool) {
@@ -411,5 +423,70 @@ final class LedgerAgentSettings: ObservableObject {
     static func preferredModel(in provider: LedgerAgentCatalog.Provider) -> String {
         if let preferred = preferredModels[provider.id], provider.models.contains(where: { $0.id == preferred }) { return preferred }
         return provider.models.first?.id ?? ""
+    }
+}
+
+/// How a change that passed validation reaches the ledger. The user picks it
+/// in 助手设置 → 写入账本; it never bypasses validation, conflicts or undo.
+enum LedgerAgentWritePolicy: String, CaseIterable, Identifiable, Sendable {
+    /// Written at once, except the changes that are hard to notice going
+    /// wrong: deleting a file, or cutting a lot of lines. The default.
+    case tiered
+    /// Every validated change is written at once.
+    case always
+    /// Nothing is written until the change card's button.
+    case confirm
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .tiered: String(localized: "自动写入")
+        case .always: String(localized: "全部自动写入")
+        case .confirm: String(localized: "每次确认")
+        }
+    }
+
+    /// One sentence under the choice saying what it does now.
+    var detail: String {
+        switch self {
+        case .tiered: String(localized: "校验通过就直接写入，删除文件或一次删改超过 \(Self.largeRemoval) 行时先问你。")
+        case .always: String(localized: "校验通过就写入，不再询问；每次写入仍可撤销。")
+        case .confirm: String(localized: "每次改动都要你点「写入账本」才写入。")
+        }
+    }
+
+    /// Lines a change may cut before `tiered` asks first.
+    static let largeRemoval = 20
+
+    /// Whether a validated change is committed without the card's button.
+    func writesWithoutAsking(_ review: LedgerAgentReview) -> Bool {
+        switch self {
+        case .always: return true
+        case .confirm: return false
+        case .tiered: return review.tieredHoldReason == nil
+        }
+    }
+
+    /// What the card adds above the validation result when this policy holds
+    /// the change back. nil when it writes the change at once, and when the
+    /// user asked to confirm everything (the card already waits by itself).
+    func holdReason(for review: LedgerAgentReview) -> String? {
+        self == .tiered ? review.tieredHoldReason : nil
+    }
+}
+
+extension LedgerAgentReview {
+    /// Why a tiered write waits for the user. Appends, new files and small
+    /// edits are written at once: they are the everyday kind of change, and
+    /// every write can be undone from the answer.
+    var tieredHoldReason: String? {
+        let deleted = files.filter { $0.change == .removed }.count
+        if deleted == 1 { return String(localized: "这次改动删除了 1 个文件，需要你确认。") }
+        if deleted > 1 { return String(localized: "这次改动删除了 \(deleted) 个文件，需要你确认。") }
+        if removed > LedgerAgentWritePolicy.largeRemoval {
+            return String(localized: "这次改动删除了 \(removed) 行，需要你确认。")
+        }
+        return nil
     }
 }

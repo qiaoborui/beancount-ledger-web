@@ -429,6 +429,7 @@ final class LedgerAgentBranchesTests: XCTestCase {
         let ledger = FakeLedger()
         let conversation = LedgerAgentConversation()
         conversation.editor = ledger.editor
+        conversation.writePolicy = .confirm
         conversation.truncate = { transcript, _ in transcript }
         try await ask(conversation, "十月餐饮", reply: "812 元", transcript: "t1")
         conversation.send("午饭改成 26") { _, _, _ in .init(ok: true, reply: "改好了。", edited: true, transcript: "t2") }

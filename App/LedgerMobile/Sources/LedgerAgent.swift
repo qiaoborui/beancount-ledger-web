@@ -1273,10 +1273,15 @@ struct LedgerAgentPendingEdit: Equatable {
     }
     var review: LedgerAgentReview?
     var status: Status
+    /// Why the change waits for the card's button rather than being written
+    /// at once, said above the validation result; nil for the everyday
+    /// changes the write policy commits on its own, and for 每次确认.
+    var holdReason: String? = nil
 }
 
-/// One conversation behind the Agent screen. Nothing is written to the
-/// ledger without the change card's confirmation. `LedgerAgentSessions` keeps
+/// One conversation behind the Agent screen. A validated change is written
+/// through the write policy (tiered by default), and one the policy holds
+/// back waits for the change card's confirmation. `LedgerAgentSessions` keeps
 /// it beyond the screen, so a turn keeps running when the user leaves the
 /// page or the app, and saves it after every settled turn.
 @MainActor
@@ -1363,9 +1368,9 @@ final class LedgerAgentConversation: ObservableObject {
     var onSettled: ((LedgerAgentConversation) -> Void)?
     /// True while the Agent screen shows this conversation.
     var isOnScreen = false
-    /// Writes a validated change as soon as a turn produces it, instead of
-    /// waiting for the change card's confirmation.
-    var autoWrites = false
+    /// How a validated change reaches the ledger. Set from 助手设置 before
+    /// each turn; conflicts and failed validation still stop for the user.
+    var writePolicy = LedgerAgentWritePolicy.tiered
     weak var lifecycle: LedgerAgentLifecycle?
     private var task: Task<Void, Never>?
     /// A stopped or interrupted turn may have edited the draft without a card
@@ -2322,7 +2327,7 @@ final class LedgerAgentConversation: ObservableObject {
             switch turn.review {
             case nil: break
             case let .success(review)?:
-                pending = review.map { .init(review: $0, status: .ready) }
+                pending = review.map { .init(review: $0, status: .ready, holdReason: writePolicy.holdReason(for: $0)) }
             case let .failure(error)?:
                 switch error as? LedgerAgentEditError {
                 case let .conflict(paths)?: pending = .init(review: nil, status: .conflict(paths))
@@ -2338,7 +2343,9 @@ final class LedgerAgentConversation: ObservableObject {
                 transcript = next
                 markRecorded(questionID)
             }
+            let autoWriting = pending?.review.map { writePolicy.writesWithoutAsking($0) } ?? false
             let reply = Self.hasText(turn.response.reply) ? turn.response.reply ?? ""
+                : autoWriting ? String(localized: "改动已经准备好，正在写入账本。")
                 : String(localized: "改动已经准备好，请在下方查看并确认。")
             let steps = turn.response.steps.isEmpty ? liveDraft?.steps ?? [] : turn.response.steps
             let answer = LedgerAgentMessage(role: .assistant, text: reply, toolCalls: turn.response.toolCalls,
@@ -2389,7 +2396,9 @@ final class LedgerAgentConversation: ObservableObject {
             phase = .failed(.failed(error.localizedDescription), question: question)
             endRunning(.failed(error.localizedDescription))
         }
-        if autoWrites, pending?.status == .ready, !isRunning { write() }
+        if let review = pending?.review, pending?.status == .ready, !isRunning, writePolicy.writesWithoutAsking(review) {
+            write()
+        }
     }
 }
 

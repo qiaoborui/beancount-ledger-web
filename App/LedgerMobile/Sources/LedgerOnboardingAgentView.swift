@@ -40,7 +40,8 @@ struct LedgerOnboardingAgentView: View {
                 }
             }
             .sheet(isPresented: $settingsPresented) {
-                NavigationStack { LedgerAgentSettingsView() }.ledgerPrivacyProtectedSheet()
+                // No ledger yet, so only the model and key page applies.
+                NavigationStack { LedgerAgentSettingsView(modelOnly: true) }.ledgerPrivacyProtectedSheet()
             }
             .sheet(isPresented: $showingWizard) { OnboardingWizardView() }
             .sheet(isPresented: $planPresented) { planSheet }
