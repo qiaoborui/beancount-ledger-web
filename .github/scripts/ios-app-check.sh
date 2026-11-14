@@ -18,6 +18,15 @@
 #             separated, no target prefix), and `smoke` stands for the release
 #             smoke set below; empty runs every UI test except the screenshot
 #             generators.
+#
+# On the CI runner the build products outlive the job. The checkout step cleans
+# the workspace, so they live in $RUNNER_WORKSPACE/ledger-ci-cache (override
+# with LEDGER_CI_CACHE), which belongs to one runner and so to one job at a
+# time:
+#   server-build/        what server/.build holds: the downloads and the two
+#                        frameworks, each rebuilt only when its inputs changed
+#   DerivedData-<scheme> Xcode's incremental build state
+# IOS_CI_CLEAN=true discards them first. Outside CI nothing is kept or reused.
 set -euo pipefail
 
 mode="${1:-}"
@@ -84,13 +93,64 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/.github/scripts/select-xcode.sh"
 export PATH="/opt/homebrew/bin:$PATH"
 
+cache_root="${LEDGER_CI_CACHE:-${RUNNER_WORKSPACE:+$RUNNER_WORKSPACE/ledger-ci-cache}}"
+server_build="$repo_root/server/.build"
+linked_server_build=false
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/ledger-ios-app.XXXXXX")"
+cleanup() {
+  rm -rf "$work_dir"
+  # Leave no link behind: the release build shares this workspace and must
+  # build into a directory of its own.
+  if [[ "$linked_server_build" == true ]]; then
+    rm -f "$server_build"
+  fi
+}
+trap cleanup EXIT
+
+if [[ -n "$cache_root" && "${IOS_CI_CLEAN:-false}" == true ]]; then
+  echo "Discarding the build caches in $cache_root"
+  rm -rf "$cache_root/server-build" "$cache_root/DerivedData-$scheme"
+fi
+
+# Run a framework build script unless its output is already there from the same
+# inputs: the Xcode and Go versions and the Git objects named after the script.
+# The inputs are read from HEAD, so this is only for a clean CI checkout.
+build_framework() {
+  local name="$1" script="$2" output="$3"
+  shift 3
+  local stamp="$server_build/.ci-inputs-$name" key
+  key="$({
+    xcodebuild -version
+    go version
+    git -C "$repo_root" rev-parse "HEAD:$script" "$@"
+  } | shasum -a 256 | cut -d ' ' -f 1)"
+  if [[ -n "$cache_root" && -d "$output" && -f "$stamp" && "$(cat "$stamp")" == "$key" ]]; then
+    echo "$name: inputs unchanged, reusing $output"
+    return
+  fi
+  # A build that is cancelled half way must not pass for a finished one.
+  rm -f "$stamp"
+  bash "$repo_root/$script"
+  echo "$key" > "$stamp"
+}
+
 if [[ "$needs_frameworks" == true ]]; then
   # The frameworks the app links: LedgerCore (gomobile) and the embedded
   # Beancount runtime with its Python. They are built under server/.build,
-  # which the checkout step cleans, so every CI run builds them afresh.
+  # which the checkout step cleans, so in CI it is a link into the cache.
+  if [[ -n "$cache_root" && ! -e "$server_build" && ! -L "$server_build" ]]; then
+    mkdir -p "$cache_root/server-build"
+    ln -s "$cache_root/server-build" "$server_build"
+    linked_server_build=true
+  fi
   echo "::group::Build LedgerCore and the Beancount runtime"
-  bash "$repo_root/scripts/build-ledgercore-xcframework.sh"
-  bash "$repo_root/scripts/build-beancount-ios.sh"
+  build_framework ledgercore scripts/build-ledgercore-xcframework.sh \
+    "$server_build/ledgercore/LedgerCore.xcframework" \
+    HEAD:server/go.mod HEAD:server/go.sum HEAD:server/internal \
+    HEAD:server/mobilecore HEAD:server/mobilegit HEAD:server/mobileagent
+  build_framework beancount scripts/build-beancount-ios.sh \
+    "$server_build/beancount-ios/BeancountRuntime.xcframework" \
+    HEAD:App/LedgerMobile/Runtime
   echo "::endgroup::"
 fi
 
@@ -125,8 +185,11 @@ if [[ "$mode" == ui-tests ]]; then
   xcrun simctl uninstall "$simulator" com.qiaoborui.ledger.mobile 2>/dev/null || true
 fi
 
-derived_data="$(mktemp -d "${TMPDIR:-/tmp}/ledger-ios-app.XXXXXX")"
-trap 'rm -rf "$derived_data"' EXIT
+if [[ -n "$cache_root" ]]; then
+  derived_data="$cache_root/DerivedData-$scheme"
+else
+  derived_data="$work_dir/DerivedData"
+fi
 common=(
   -project LedgerMobile.xcodeproj
   -scheme "$scheme"
@@ -154,11 +217,11 @@ skip_args=()
 for test in ${skipped_tests[@]+"${skipped_tests[@]}"}; do
   skip_args+=("-skip-testing:$test")
 done
-test_log="$derived_data/test.log"
+test_log="$work_dir/test.log"
 xcodebuild test-without-building "${common[@]}" \
   "${only_args[@]}" \
   ${skip_args[@]+"${skip_args[@]}"} \
-  -resultBundlePath "$derived_data/Tests.xcresult" > "$test_log" 2>&1 || true
+  -resultBundlePath "$work_dir/Tests.xcresult" > "$test_log" 2>&1 || true
 grep -E '(error|failed|passed|Executed|TEST (SUCCEEDED|FAILED)|\*\* )' "$test_log" || true
 # The step-by-step lines around a failure are what make it diagnosable, and
 # grep above drops them: print them for every failing test.
@@ -169,7 +232,7 @@ awk '/error: -\[/ { start = NR } { line[NR] = $0 }
              print "::endgroup::"
            } }' "$test_log" || true
 # The grep hides the full log, so take the verdict from the result bundle.
-xcrun xcresulttool get test-results summary --path "$derived_data/Tests.xcresult" \
+xcrun xcresulttool get test-results summary --path "$work_dir/Tests.xcresult" \
   | python3 -c '
 import json, sys
 summary = json.load(sys.stdin)

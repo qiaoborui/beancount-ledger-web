@@ -21,7 +21,7 @@ App/LedgerMobile/LedgerMobile.xcodeproj/
 
 # Go build
 server/ledger-web
-server/.build/
+server/.build
 
 # Environment
 .env

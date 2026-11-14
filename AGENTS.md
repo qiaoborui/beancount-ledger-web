@@ -272,7 +272,13 @@ A manual run checks every area. `Gate` is the required status check: it
 passes only when every planned job succeeded and every other job was skipped.
 When a new directory needs CI, add it to the planner and its test in the same
 change. The iOS jobs run on the self-hosted Mac runner, one at a time, and
-select their Xcode through `.github/scripts/select-xcode.sh`. iOS core runs
+select their Xcode through `.github/scripts/select-xcode.sh`. A new push to a
+pull request cancels the run of the previous push. The iOS jobs keep their build
+products on the runner, in `ledger-ci-cache` beside the workspace: SwiftPM's
+build directory, Xcode's DerivedData per scheme, and the LedgerCore and Beancount
+frameworks, which are rebuilt only when their inputs change. A manual run on
+`main` discards them and builds from scratch, and so does any manual run with
+`-f clean=true`; use that when a failure looks like a stale cache. iOS core runs
 `swift test` in `App/LedgerMobile` on the portable core, but Package.swift
 leaves out the app's UI layer, widgets and share extension. iOS app and iOS
 widgets compile those with `.github/scripts/ios-app-check.sh`: iOS app builds
