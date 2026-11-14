@@ -2,7 +2,8 @@
 
 - Status: completed (draft PR open, CI `Gate` green)
 - Last updated: 2026-11-14 (+08:00)
-- Branch: `codex/agent-app-settings-tools`, based on `main` at `8ef3888b`; PR #699
+- Branch: `codex/agent-app-settings-tools`, rebased on `main` at `6b9f72c3`
+  (after A's settings page, #697); PR #699
 - Task B of the AI-native assistant batch (see
   `00-common.md` and `B-app-settings-tools.md` in the coordinator's local
   `agent-handoffs/20261114-ai-native/` directory)
@@ -75,6 +76,27 @@ effects, and must be undoable from the chat.
 - `LedgerAgentSettingsView` is untouched; task B needs no settings page of its
   own. The chat row lives in a new app-only file so the settings rewrite in task
   A does not conflict with it.
+
+## Rebase after task A (#697)
+
+A rewrote the assistant's settings page and the write policy while this branch
+was open. The rebase resolved three conflicts, all by keeping A's structure and
+adding this branch's hook next to it:
+
+- `LedgerAgentView.swift`: `conversation.writePolicy = settings.writePolicy`
+  (A's line) plus `conversation.appSettings = .live(session)`; the answer row and
+  its callbacks are unchanged. The moved settings views stay in A's new
+  `LedgerAgentSettingsView.swift`.
+- `Package.swift`: both new UI files are excluded from the portable target
+  (`LedgerAgentSettingsView.swift` from A, `LedgerAgentSettingsChangeView.swift`
+  from this branch); `LedgerAgentAppSettings.swift` and `LedgerReportReminders.swift`
+  stay in its sources.
+- `FEATURE_PARITY.md`: A's rewritten 账本助手 row, then this branch's new
+  App-settings row after it.
+
+`LedgerAgent.swift` merged cleanly: A's `writePolicy` replaces `autoWrites` in
+the same `finish` branch where this branch adds the settings note and the
+settings record on the answer.
 
 ## Progress
 
