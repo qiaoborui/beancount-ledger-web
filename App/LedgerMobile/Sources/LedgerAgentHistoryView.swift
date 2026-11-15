@@ -60,6 +60,12 @@ struct LedgerAgentHistoryView: View {
                 if !sessions.saved.isEmpty {
                     note("对话跟着账本存在本机，不进 Git 同步、备份或导出。置顶的对话不会因为数量太多被自动清理。")
                 }
+                // Room for the last line to clear the footer's fade.
+                Color.clear.frame(height: 28)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .accessibilityHidden(true)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -354,7 +360,14 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     /// Light mode lifts the pushed page towards white, dark mode dims it.
     private static let veil = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .black : .white })
 
+    @Environment(\.colorScheme) private var colorScheme
+
     private var width: CGFloat { min(pageWidth * 0.8, 400) }
+    /// A white veil any stronger would melt the card into the drawer.
+    private var veilStrength: CGFloat {
+        guard pushes else { return 0.32 }
+        return colorScheme == .dark ? 0.5 : 0.3
+    }
     /// Compact width pushes the page aside; regular width slides the drawer
     /// over it, since the system navigation bar there would not move.
     private var pushes: Bool { sizeClass != .regular }
@@ -419,7 +432,7 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     /// the soft shadow it casts on the drawer.
     private var cover: some View {
         ZStack(alignment: .leading) {
-            Self.veil.opacity((pushes ? 0.5 : 0.32) * progress)
+            Self.veil.opacity(veilStrength * progress)
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { isPresented = false }
@@ -436,10 +449,10 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                     .opacity(progress > 0 ? 1 : 0)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
-                LinearGradient(colors: [.black.opacity(0), .black.opacity(0.10)],
+                LinearGradient(colors: [.black.opacity(0), .black.opacity(colorScheme == .dark ? 0.12 : 0.09)],
                                startPoint: .leading, endPoint: .trailing)
-                    .frame(width: 18)
-                    .offset(x: -18)
+                    .frame(width: 22)
+                    .offset(x: -22)
                     .ignoresSafeArea()
                     .opacity(progress)
                     .allowsHitTesting(false)
@@ -562,6 +575,15 @@ final class LedgerLeadingEdgePanView: UIView {
 final class LedgerLeadingEdgePanDriver: NSObject, UIGestureRecognizerDelegate {
     weak var view: LedgerLeadingEdgePanView?
     private static let edgeWidth: CGFloat = 24
+    /// Where the finger came down, in the window. A pan's translation is
+    /// still zero when it asks whether to begin, so the distance is measured
+    /// from here.
+    private var touchDown: CGPoint?
+
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        touchDown = touch.location(in: view?.window)
+        return true
+    }
 
     @objc func handle(_ pan: UIPanGestureRecognizer) {
         guard let view, let window = view.window else { return }
@@ -580,10 +602,14 @@ final class LedgerLeadingEdgePanDriver: NSObject, UIGestureRecognizerDelegate {
     func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
         guard let pan = recognizer as? UIPanGestureRecognizer, let view, let window = view.window,
               let page = view.pageView else { return false }
-        let moved = pan.translation(in: window)
-        guard moved.x > 0, moved.x > abs(moved.y) else { return false }
         let now = pan.location(in: window)
-        let start = CGPoint(x: now.x - moved.x, y: now.y - moved.y)
+        let start = touchDown ?? now
+        var moved = CGPoint(x: now.x - start.x, y: now.y - start.y)
+        if moved == .zero {
+            let speed = pan.velocity(in: window)
+            moved = CGPoint(x: speed.x, y: speed.y)
+        }
+        guard moved.x > 0, moved.x > abs(moved.y) else { return false }
         guard start.x <= window.safeAreaInsets.left + Self.edgeWidth,
               let hit = window.hitTest(start, with: nil) else { return false }
         return hit.isDescendant(of: page)
