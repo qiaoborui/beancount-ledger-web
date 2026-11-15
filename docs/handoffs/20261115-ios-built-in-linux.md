@@ -25,7 +25,7 @@ lollipopkit/ShellBox v1.0.55), with the conversation's draft at /workspace.
 
 ## Remaining
 
-1. Get the iOS app CI job green (first real compile of the C and Swift).
+1. (done) CI green on 2546a7f, incl. iOS app compile, link and unit tests.
 2. (done) `ALPINE_SHA256` pinned.
 3. Device test: first command unpacks and boots; `apk add python3`; timeout and
    stop kill the command; the app survives a guest crash; background turns.
