@@ -23,6 +23,7 @@ struct LedgerAgentSettingsView: View {
 private struct LedgerAgentSettingsRoot: View {
     @ObservedObject private var settings = LedgerAgentSettings.shared
     @ObservedObject private var skills = LedgerAgentSkillSettings.shared
+    @ObservedObject private var sync = LedgerAgentCloudSync.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -67,7 +68,17 @@ private struct LedgerAgentSettingsRoot: View {
                     }
                 }
                 .accessibilityIdentifier("ledger-agent-memory")
-            } header: { Text("记忆") }
+                NavigationLink {
+                    LedgerAgentSyncView()
+                } label: {
+                    LabeledContent("iCloud 云盘同步") {
+                        AgentSettingsValue(text: sync.isOn ? String(localized: "已开启") : String(localized: "已关闭"))
+                    }
+                }
+                .accessibilityIdentifier("ledger-agent-sync")
+            } header: { Text("记忆与记录") } footer: {
+                Text("聊天记录和记忆默认只在本机，开启同步后删掉 App 也能找回。")
+            }
             Section {
                 Toggle("智能建议", isOn: Binding(get: { settings.assists }, set: { settings.setAssists($0) }))
                     .accessibilityIdentifier("ledger-agent-assists")

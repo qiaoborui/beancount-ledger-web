@@ -126,6 +126,14 @@ final class LedgerAgentSkillSettings: ObservableObject {
             .sorted()
     }
 
+    /// Takes the list again after a sync restored preferences.
+    func reloadFromDefaults() {
+        disabled = (defaults.stringArray(forKey: disabledKey) ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+    }
+
     func isEnabled(_ name: String) -> Bool { !disabled.contains(name) }
 
     func setEnabled(_ on: Bool, name: String) {

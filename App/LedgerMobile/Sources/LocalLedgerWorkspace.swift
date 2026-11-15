@@ -729,6 +729,28 @@ actor LocalLedgerWorkspace {
         try protect(file)
     }
 
+    /// runtime/, ready for an assistant data sync. The sync reads it from
+    /// outside the actor; its writes come back through `applyAgentSync`.
+    func prepareAgentSyncRuntime() throws -> URL {
+        let runtime = try importRuntimeDirectory("runtime")
+        try createProtectedDirectory(runtime)
+        try createProtectedDirectory(try importRuntimeDirectory("runtime/agent-sync"))
+        return runtime
+    }
+
+    /// Writes what an assistant data sync pulled, between this actor's own
+    /// saves, and gives it the workspace's file protection.
+    func applyAgentSync(_ changes: [LedgerAgentSyncLocalChange]) -> Set<String> {
+        guard let runtime = try? importRuntimeDirectory("runtime") else { return [] }
+        let applied = LedgerAgentSyncEngine.applyLocally(changes, runtime: runtime)
+        for directory in ["runtime/agent-history", "runtime/agent-attachments"] {
+            guard let url = try? importRuntimeDirectory(directory), (try? itemKindIfPresent(at: url)) == .directory else { continue }
+            try? protectTree(at: url)
+        }
+        protectAgentMemory()
+        return applied
+    }
+
     private func agentDraftDirectory(_ id: UUID) throws -> URL {
         try importRuntimeDirectory("runtime/agent/" + id.uuidString)
     }

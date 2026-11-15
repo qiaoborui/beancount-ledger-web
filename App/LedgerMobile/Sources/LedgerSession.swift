@@ -3567,6 +3567,8 @@ final class LedgerSession: ObservableObject {
             finishLocalAuthenticationForegroundWaiters(cancelled: true)
         } else if isActive {
             finishLocalAuthenticationForegroundWaiters(cancelled: false)
+            // 账本助手 data in the iCloud Drive folder, if the user turned it on.
+            if phase == .ready, let repository = localRepository { LedgerAgentCloudSync.shared.attach(repository) }
         }
         if !isActive {
             // System authentication (Face ID / Touch ID / device passcode) briefly deactivates
