@@ -77,7 +77,7 @@ build_slice() {
     local sdk="$1" arch="$2" target="$3" engine_archive="$4"
     local out="$BUILD/$sdk-$arch"
     rm -rf "$out"
-    mkdir -p "$out/objects" "$out/Headers" "$out/engine"
+    mkdir -p "$out/objects" "$out/Headers/LedgerLinux" "$out/engine"
     local sysroot
     sysroot="$(xcrun --sdk "$sdk" --show-sdk-path)"
     local flags=(-target "$target" -isysroot "$sysroot" -O2 -fPIC -std=gnu11 -Wall -I"$GLUE")
@@ -90,7 +90,10 @@ build_slice() {
     fi
     xcrun --sdk "$sdk" clang "${flags[@]}" -c "$GLUE/LedgerLinux.c" -o "$out/objects/LedgerLinux.o"
     xcrun libtool -static -o "$out/libLedgerLinux.a" "$out/objects/LedgerLinux.o" ${libraries[@]+"${libraries[@]}"}
-    cp "$GLUE/LedgerLinux.h" "$GLUE/module.modulemap" "$out/Headers/"
+    # In a folder of its own: Xcode copies every linked library's headers into
+    # one include directory, where BeancountRuntime's module.modulemap already
+    # sits at the top.
+    cp "$GLUE/LedgerLinux.h" "$GLUE/module.modulemap" "$out/Headers/LedgerLinux/"
 }
 build_slice iphoneos arm64 arm64-apple-ios17.0 ish-ios-arm64.tar.gz
 build_slice iphonesimulator arm64 arm64-apple-ios17.0-simulator ish-iossim-arm64.tar.gz
