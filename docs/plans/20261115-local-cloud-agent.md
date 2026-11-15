@@ -250,9 +250,9 @@ App 是 SideStore 个人团队签名，**拿不到 APNs**，所以：
 目标：手机上的助手能跑 bash 和 python，离线可用。做法见第 7.3 节。
 
 - 嵌入 ShellBox 发布的 iOS 静态库（`libish.a`、`libish_emu.a`、`libfakefs.a`），写一层很薄的 Swift/C 封装：启动、一次性执行、超时、中断、读写输出。
-- Alpine rootfs 首次使用时下载（校验固定的 digest），不打进 IPA。
+- Alpine rootfs 打进 IPA（约 3–4MB，构建时校验 sha256），首次运行命令时解包。
 - Go 侧新增 `bash` 工具（`effect: draft`），通过 gomobile 回调交给 Swift 执行；本会话草稿目录以 bind mount 挂到 `/workspace`。
-- 设置里加「本地 Linux」：安装/重置 rootfs、已装包列表、占用空间。
+- 设置里加「内置 Linux」：开关、占用空间、重置。
 
 验收：问“按月算一下近两年餐饮支出的趋势和同比，画个图”，助手 `apk add py3-pandas py3-matplotlib` 后在手机上算出来并出图；断网时（包已装）也能用。
 
@@ -321,14 +321,14 @@ python 纯计算大约慢 10–30 倍。账本是几万到十几万条交易的�
 ### 7.3 怎么接进账本 App
 
 - **引擎**：用 ShellBox 发布的静态库，自己写一层很薄的封装（启动一次内核；`exec(argv, cwd, timeout)` 返回退出码和输出；支持中断）。
-- **rootfs**：Alpine minirootfs 只有几 MB，首次启用时下载并校验 digest；`apk` 装的包留在 App 的 Application Support 里，可在设置里重置。不打进 IPA。
+- **rootfs**：Alpine minirootfs 压缩包约 3–4MB，打进 IPA（构建时按 sha256 校验），首次运行命令时解包到 Application Support/Linux（不进备份）；`apk` 装的包留在那里，可在设置里重置。
 - **文件**：本会话的草稿目录 bind mount 到 `/workspace`，输出目录挂到 `/out`。guest 看不到账本正本、Keychain 和 App 其他数据（ServerBox 的文档也强调了这一点：Alpine 看不到手机存储、App 数据和私钥）。改动照常进草稿、走变更卡。
 - **工具**：Go 侧 `bash` 工具通过 gomobile 回调交给 Swift 执行；默认 60 秒超时，输出截断；`/out` 里的图片/CSV 作为附件。
 - **后台**：解释器跑在 App 进程里，和助手共用现有的后台保活（静音音频 + `BGContinuedProcessingTask`），App 被挂起时它也一起停。
 - **要先验证的风险**：
   1. **信号冲突**：iSH 用 `SIGUSR1` 打断 guest 线程；同一进程里还有 Go 运行时（gomobile）和 CPython。要确认三者的信号处理能共存。
   2. **内存**：一个 python + pandas 进程在解释器里的内存占用，以及 iOS 的内存上限。
-  3. **体积**：引擎约 5.5MB（ShellBox 基准里 arm64 版二进制的大小），rootfs 按需下载。
+  3. **体积**：引擎三个静态库合计约 1.1MB（v1.0.55 的 libish/libish_emu/libfakefs），链接后增量更小；加上 rootfs 压缩包，IPA 约多 4–5MB。
   4. **许可**：引入 GPLv3 代码。App 目前本来就因为 GPL-2.0 依赖只做私有 SideStore 分发（见 `Runtime/THIRD_PARTY.md`），自用没问题；如果以后要公开分发，需要整体按 GPL 处理。
 - **内置 CPython 的位置**：现有的 CPython 只继续用于 Beancount 校验。不再单独做进程内 `run_python`，因为它没有 bash、不能装原生包，隔离也只能靠审计钩子；本地 Alpine 全面覆盖它。
 

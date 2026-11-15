@@ -556,6 +556,9 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 			return files, err
 		}
 		systemPrompt = app.LocalAgentSystemPrompt(files != nil)
+		if files != nil && files.linux != nil {
+			systemPrompt += linuxToolPrompt
+		}
 		if request.MemoryPath != "" {
 			if remembered, err = openMemory(request.MemoryPath); err != nil {
 				return files, err

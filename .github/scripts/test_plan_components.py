@@ -54,6 +54,8 @@ class PlanComponentsTests(unittest.TestCase):
             "App/LedgerMobile/Package.swift": {"ios"},
             "App/LedgerMobile/Runtime/ledger_validator.py": {"ios_runtime", "backend", "ios_app"},
             "scripts/build-ledgercore-xcframework.sh": {"ios_app"},
+            "scripts/build-linux-ios.sh": {"ios_app"},
+            "App/LedgerMobile/Linux/LedgerLinux.c": {"ios_app"},
             ".github/scripts/ios-app-check.sh": {"ios_app", "ios_widgets"},
             "docker/docker-compose.selfhost.yml": {"selfhost"},
             "scripts/selfhost/beancount-ledger-deploy-submit": {"selfhost"},

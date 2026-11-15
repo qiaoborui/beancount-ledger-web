@@ -109,7 +109,7 @@ else
       # Everything else the LedgerMobile scheme compiles. Sources/ files the
       # package lists also mark ios above. The UI tests are compiled here too,
       # though CI runs them only on request.
-      App/LedgerMobile/Sources/*|App/LedgerMobile/Resources/*|App/LedgerMobile/Supporting/*|App/LedgerMobile/ShareExtension/*|App/LedgerMobile/UITests/*)
+      App/LedgerMobile/Sources/*|App/LedgerMobile/Resources/*|App/LedgerMobile/Linux/*|App/LedgerMobile/Supporting/*|App/LedgerMobile/ShareExtension/*|App/LedgerMobile/UITests/*)
         mark ios_app ;;
       # Notes and screenshots compile into nothing.
       App/*.md|App/LedgerMobile/Screenshots/*)
@@ -118,7 +118,7 @@ else
         mark ios ;;
       # Build steps of the app scheme: the frameworks it links, and the scripts
       # its build phases run.
-      scripts/build-ledgercore-xcframework.sh|scripts/build-beancount-ios.sh|scripts/build-beancount-ios-resources.sh|scripts/stamp-ios-build-commit.sh)
+      scripts/build-ledgercore-xcframework.sh|scripts/build-beancount-ios.sh|scripts/build-linux-ios.sh|scripts/build-beancount-ios-resources.sh|scripts/stamp-ios-build-commit.sh)
         mark ios_app ;;
 
       # Agent tests discover the project skills under .agents/.

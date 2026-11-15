@@ -42,6 +42,19 @@ described above still apply to every published IPA.
   links this dependency through the pinned Go module graph in `server/go.mod`
   and `server/go.sum`. It adds another Apache-2.0 component to the combined
   application; its transitive dependencies also require the full notice audit.
+* ShellBox v1.0.55 (lollipopkit/ShellBox, a fork of iSH), copyright Theodore
+  Dubois and contributors: GPL-3.0 (earlier iSH code) with later contributions
+  under GPL-2.0, plus the App Store exception in its LICENSE.IOS. The built-in
+  Linux links its prebuilt static libraries (libish, libish_emu, libfakefs)
+  through `scripts/build-linux-ios.sh`, which pins the release archives' SHA-256
+  checksums and the source commit; LICENSE.md and LICENSE.IOS are bundled in the
+  app's `licenses` folder. Source: https://github.com/lollipopkit/ShellBox/tree/v1.0.55 .
+  GPL terms on the combined application are part of the unresolved licensing
+  issue above.
+* Alpine Linux 3.22 mini root filesystem (aarch64): bundled unmodified as a
+  tarball and unpacked on device; its packages carry their own licenses (musl
+  MIT, BusyBox GPL-2.0, apk-tools GPL-2.0 and others). Source:
+  https://alpinelinux.org/downloads/ and https://git.alpinelinux.org/aports .
 
 The build pins SHA-256 checksums for all three archives, compiles the canonical
 Beancount and regex C extensions into a static XCFramework, and registers both

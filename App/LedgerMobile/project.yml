@@ -25,9 +25,19 @@ targets:
     sources:
       - Sources
       - Resources
+      # The built-in Linux's root filesystem and the engine's licences, from
+      # scripts/build-linux-ios.sh.
+      - path: ../../server/.build/linux-ios/alpine-minirootfs.tar.gz
+        buildPhase: resources
+      - path: ../../server/.build/linux-ios/licenses
+        type: folder
+        buildPhase: resources
     dependencies:
       - sdk: libresolv.tbd
+      - sdk: libsqlite3.tbd
       - framework: ../../server/.build/ledgercore/LedgerCore.xcframework
+        embed: false
+      - framework: ../../server/.build/linux-ios/LedgerLinux.xcframework
         embed: false
       - framework: ../../server/.build/beancount-ios/BeancountRuntime.xcframework
         embed: false
