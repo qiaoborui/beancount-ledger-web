@@ -189,7 +189,7 @@ final class LedgerAgentCloudSyncTests: XCTestCase {
     func testPreferencesLeaveOutKeysAndTokenURLs() throws {
         let suite = "LedgerAgentCloudSyncTests-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
         defaults.set("high", forKey: "ledger.agent.thinking")
         defaults.set(Data(#"{"provider":"custom","model":"m","custom":{"api":"openai","baseURL":"https://x.example/v1?key=secret"}}"#.utf8),
                      forKey: "ledger.agent.custom-choice")
@@ -197,7 +197,7 @@ final class LedgerAgentCloudSyncTests: XCTestCase {
         let data = try XCTUnwrap(LedgerAgentSyncPreferences.snapshot(defaults))
 
         let fresh = try XCTUnwrap(UserDefaults(suiteName: suite + "-fresh"))
-        addTeardownBlock { fresh.removePersistentDomain(forName: suite + "-fresh") }
+        addTeardownBlock { UserDefaults(suiteName: suite + "-fresh")?.removePersistentDomain(forName: suite + "-fresh") }
         XCTAssertTrue(LedgerAgentSyncPreferences.isFresh(fresh))
         XCTAssertTrue(LedgerAgentSyncPreferences.restore(data, into: fresh))
         XCTAssertEqual(fresh.string(forKey: "ledger.agent.thinking"), "high")
