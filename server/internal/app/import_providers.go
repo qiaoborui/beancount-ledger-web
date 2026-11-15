@@ -365,6 +365,60 @@ var billImporters = []billImporter{
 			return prepared.RawRowCount, filtered
 		},
 	},
+	// Meituan exports share column names with Alipay (交易创建时间, 收/支), so
+	// it must be detected before the Alipay CSV fallback.
+	staticBillImporter{
+		id:              "meituan",
+		label:           "美团",
+		title:           "Meituan",
+		uiOrder:         25,
+		config:          importProviderConfig{Config: "imports/meituan-config.yaml", Output: "meituan-output.bean", Extensions: []string{".csv"}, Label: "美团", Detail: "美团 App 导出的交易账单明细 CSV", DEGProviderID: "mt"},
+		documentAccount: "Assets:CN:Meituan:Balance",
+		detect: func(filename, sample, ext string) (providerDetection, bool) {
+			if ext != ".csv" {
+				return providerDetection{}, false
+			}
+			if looksLikeMeituanCSV(filename, sample) {
+				return providerDetection{Provider: "meituan", Reason: "CSV 内容包含美团交易账单字段", Confidence: "high"}, true
+			}
+			return providerDetection{}, false
+		},
+		prepare: func(s *Server, input importFileInput) (preparedImportInput, error) {
+			prepared, err := s.prepareMeituanInput(input.InputFile, input.ImportID)
+			prepared.Generation = &importGenerationSummary{}
+			return prepared, err
+		},
+		previewWarnings: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated, deduped beanSummary, generatedBean string) ([]string, error) {
+			ignored := []string(nil)
+			if prepared.Generation != nil {
+				if prepared.Generation.ParsedCount != prepared.FilteredRowCount {
+					return nil, fmt.Errorf("美团账单解析行数核对失败：CSV 明细 %d 条，DEG 解析 %d 条。已停止导入。", prepared.RawRowCount, prepared.Generation.ParsedCount)
+				}
+				ignored = prepared.Generation.Ignored
+			}
+			if generated.CandidateCount+len(ignored) != prepared.FilteredRowCount {
+				return nil, fmt.Errorf("美团账单行数核对失败：CSV 明细 %d 条，配置忽略 %d 条，但 DEG 生成 %d 条。已停止导入，请检查账单格式或配置", prepared.RawRowCount, len(ignored), generated.CandidateCount)
+			}
+			warnings := []string{fmt.Sprintf("美团账单行数核对通过：CSV 明细 %d 条，配置忽略 %d 条，DEG 生成 %d 条，去重后待写入 %d 条。", prepared.RawRowCount, len(ignored), generated.CandidateCount, deduped.CandidateCount)}
+			if strings.Contains(strings.ToUpper(generatedBean), ":HSBC:") {
+				warnings = append(warnings, "汇丰信用卡支付的美团订单暂无记账日：之后导入汇丰账单时会自动补写 post_date，已归档的汇丰账单可在导入记录里「补写汇丰记账日」。")
+			}
+			return append(warnings, ignored...), nil
+		},
+		excludedRows: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated beanSummary) int {
+			if prepared.Generation != nil {
+				return len(prepared.Generation.Ignored)
+			}
+			return 0
+		},
+		rowCounts: func(prepared preparedImportInput, analysis providerSourceAnalysis, generated beanSummary) (int, int) {
+			filtered := prepared.FilteredRowCount
+			if prepared.Generation != nil {
+				filtered -= len(prepared.Generation.Ignored)
+			}
+			return prepared.RawRowCount, filtered
+		},
+	},
 	staticBillImporter{
 		id:              "alipay",
 		label:           "支付宝",
@@ -447,7 +501,7 @@ func detectImportProvider(filename string, content []byte, override string) (pro
 }
 
 func errorsUnsupportedBillType() error {
-	return fmt.Errorf("无法自动识别账单类型，请上传支付宝 CSV、支付宝小荷包 XLSX、微信 XLSX/XLS、招商银行信用卡 PDF/CSV、建设银行信用卡 EML/HTML/PDF/CSV、汇丰香港信用卡 CSV 或招商银行储蓄卡流水 PDF/CSV。需要时可使用手动覆盖。")
+	return fmt.Errorf("无法自动识别账单类型，请上传支付宝 CSV、支付宝小荷包 XLSX、微信 XLSX/XLS、招商银行信用卡 PDF/CSV、建设银行信用卡 EML/HTML/PDF/CSV、汇丰香港信用卡 CSV、美团 CSV 或招商银行储蓄卡流水 PDF/CSV。需要时可使用手动覆盖。")
 }
 
 func decorateStatementHashEntries(meta importMeta, entries []ImportEntry) {

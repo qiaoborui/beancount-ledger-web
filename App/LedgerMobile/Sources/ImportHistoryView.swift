@@ -680,7 +680,7 @@ struct ImportHistoryView: View {
     private static let collapsedDocumentCount = 2
 
     /// Offered once an HSBC HK statement is archived: older card entries from
-    /// Alipay/WeChat can take their bank post date from it.
+    /// Alipay/WeChat/Meituan can take their bank post date from it.
     @ViewBuilder
     private var postDateBackfillSection: some View {
         if documents.contains(where: { $0.provider == "hsbchk-credit" }) {
@@ -691,7 +691,7 @@ struct ImportHistoryView: View {
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("补写汇丰记账日").balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink)
-                            Text("从已归档的汇丰账单为支付宝/微信分录补上记账日，并检查重复记账。")
+                            Text("从已归档的汇丰账单为支付宝/微信/美团分录补上记账日，并检查重复记账。")
                                 .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                                 .fixedSize(horizontal: false, vertical: true)
                         }

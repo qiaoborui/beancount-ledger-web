@@ -1558,7 +1558,7 @@ struct NativeImportFlowView: View {
                 TerminalSectionLabel(text: String(localized: "补写记账日 \(included) / \(fills.count)"))
                     .listRowBackground(BalancedPalette.page)
             } footer: {
-                Text("这些银行行与账本里已有的支付宝/微信分录金额一致，写入时只把记账日补到已有分录上，不新增交易。取消勾选则跳过补写。")
+                Text("这些银行行与账本里已有的支付宝/微信/美团分录金额一致，写入时只把记账日补到已有分录上，不新增交易。取消勾选则跳过补写。")
                     .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                     .fixedSize(horizontal: false, vertical: true)
             }

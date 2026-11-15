@@ -44,7 +44,7 @@ import {
 import { formatAccountOptionLabel } from "./accountDisplay";
 import { MobileSheet } from "./MobileSheet";
 
-type Provider = "alipay" | "alipay-small-purse" | "wechat" | "cmb" | "ccb-credit" | "hsbchk-credit" | "cmb-checking";
+type Provider = "alipay" | "alipay-small-purse" | "wechat" | "meituan" | "cmb" | "ccb-credit" | "hsbchk-credit" | "cmb-checking";
 type ProviderOverride = "auto" | Provider;
 type ProviderChoice = { value: ProviderOverride; labelKey: string; detailKey: string; acceptKey: string };
 type ImportProviderInfo = { id: Provider; label: string; detail: string; extensions: string[]; accept: string; engine?: string };
@@ -118,6 +118,7 @@ const fallbackProviderChoices: ProviderChoice[] = [
   { value: "alipay", labelKey: "importPage.alipay", detailKey: "importPage.alipayDetail", acceptKey: "importPage.alipayAccept" },
   { value: "alipay-small-purse", labelKey: "importPage.alipaySmallPurse", detailKey: "importPage.alipaySmallPurseDetail", acceptKey: "importPage.alipaySmallPurseAccept" },
   { value: "wechat", labelKey: "importPage.wechat", detailKey: "importPage.wechatDetail", acceptKey: "importPage.wechatAccept" },
+  { value: "meituan", labelKey: "importPage.meituan", detailKey: "importPage.meituanDetail", acceptKey: "importPage.meituanAccept" },
   { value: "cmb", labelKey: "importPage.cmb", detailKey: "importPage.cmbDetail", acceptKey: "importPage.cmbAccept" },
   { value: "ccb-credit", labelKey: "importPage.ccbCredit", detailKey: "importPage.ccbCreditDetail", acceptKey: "importPage.ccbCreditAccept" },
   { value: "hsbchk-credit", labelKey: "importPage.hsbchkCredit", detailKey: "importPage.hsbchkCreditDetail", acceptKey: "importPage.hsbchkCreditAccept" },
@@ -162,7 +163,7 @@ function providerChoiceAccept(choice: ProviderChoice) {
 }
 
 function isProvider(value: string | undefined): value is Provider {
-  return value === "alipay" || value === "alipay-small-purse" || value === "wechat" || value === "cmb" || value === "ccb-credit" || value === "hsbchk-credit" || value === "cmb-checking";
+  return value === "alipay" || value === "alipay-small-purse" || value === "wechat" || value === "meituan" || value === "cmb" || value === "ccb-credit" || value === "hsbchk-credit" || value === "cmb-checking";
 }
 
 function importDocumentCoverageValue(document: ImportDocument) {

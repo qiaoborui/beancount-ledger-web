@@ -17,6 +17,7 @@ func (s *Server) localDefaultImportConfig(path string) ([]byte, bool, error) {
 		"imports/cmb-credit-card-config.yaml":    "cmb",
 		"imports/ccb-credit-card-config.yaml":    "ccb-credit",
 		"imports/hsbchk-credit-card-config.yaml": "hsbchk-credit",
+		"imports/meituan-config.yaml":            "meituan",
 	}[path]
 	if provider == "" {
 		return nil, false, nil
@@ -56,8 +57,15 @@ func (s *Server) localDefaultImportConfig(path string) ([]byte, bool, error) {
 	config := map[string]any{
 		"title": "本地账单导入", "defaultCurrency": currency,
 		"defaultMinusAccount": minus, "defaultPlusAccount": plus, "defaultCashAccount": cash,
-		"alipay":           map[string]any{"rules": []any{map[string]any{"methodAccount": cash}}},
-		"wechat":           map[string]any{"rules": []any{map[string]any{"methodAccount": cash}}},
+		"alipay": map[string]any{"rules": []any{map[string]any{"methodAccount": cash}}},
+		"wechat": map[string]any{"rules": []any{map[string]any{"methodAccount": cash}}},
+		// Meituan orders paid through WeChat Pay or Alipay already arrive with
+		// those bills; the preview lists them as ignored.
+		"mt": map[string]any{"rules": []any{
+			map[string]any{"methodAccount": cash},
+			map[string]any{"method": "微信支付", "ignore": true},
+			map[string]any{"method": "支付宝", "ignore": true},
+		}},
 		"alipaySmallPurse": map[string]any{"cashAccount": cash, "sharedExpenseSplit": false},
 	}
 	encoded, err := json.Marshal(config)

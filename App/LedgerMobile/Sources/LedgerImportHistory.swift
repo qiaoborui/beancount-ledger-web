@@ -10,6 +10,7 @@ struct LedgerImportProvider: Identifiable, Hashable, Sendable {
         LedgerImportProvider(id: "alipay", label: String(localized: "支付宝"), compactLabel: String(localized: "支付宝"), systemImage: "creditcard"),
         LedgerImportProvider(id: "alipay-small-purse", label: String(localized: "支付宝小荷包"), compactLabel: String(localized: "小荷包"), systemImage: "person.2"),
         LedgerImportProvider(id: "wechat", label: String(localized: "微信支付"), compactLabel: String(localized: "微信支付"), systemImage: "message"),
+        LedgerImportProvider(id: "meituan", label: String(localized: "美团"), compactLabel: String(localized: "美团"), systemImage: "takeoutbag.and.cup.and.straw"),
         LedgerImportProvider(id: "cmb", label: String(localized: "招商银行信用卡"), compactLabel: String(localized: "招行信用卡"), systemImage: "creditcard.fill"),
         LedgerImportProvider(id: "ccb-credit", label: String(localized: "建设银行信用卡"), compactLabel: String(localized: "建行信用卡"), systemImage: "creditcard.fill"),
         LedgerImportProvider(id: "hsbchk-credit", label: String(localized: "汇丰香港信用卡"), compactLabel: String(localized: "汇丰香港信用卡"), systemImage: "creditcard.fill"),
