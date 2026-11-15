@@ -53,6 +53,16 @@ struct MoreView: View {
                 MoreDestinationButton(overflowDestination: $overflowDestination, destination: .currencies, detail: String(localized: "估值货币与汇率"), accessibilityIdentifier: "more-currencies")
                 MoreDestinationButton(overflowDestination: $overflowDestination, destination: .query, detail: String(localized: "查询与历史"), accessibilityIdentifier: "more-query")
             } header: { TerminalSectionLabel(text: String(localized: "账本工具")) }
+            if LedgerLinuxMachine.engineAvailable {
+                Section {
+                    NavigationLink { LedgerLinuxTerminalScreen() } label: {
+                        MoreNavigationRow(index: "05", icon: "terminal", title: String(localized: "终端"), detail: String(localized: "内置 Alpine Linux"))
+                    }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).listRowSeparator(.hidden).navigationLinkIndicatorVisibility(.hidden).accessibilityIdentifier("more-linux-terminal")
+                    NavigationLink { LedgerLinuxFilesView(path: "/root") } label: {
+                        MoreNavigationRow(index: "06", icon: "folder", title: String(localized: "Linux 文件"), detail: String(localized: "浏览、导入和导出内置 Linux 里的文件"))
+                    }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).listRowSeparator(.hidden).navigationLinkIndicatorVisibility(.hidden).accessibilityIdentifier("more-linux-files")
+                } header: { TerminalSectionLabel(text: String(localized: "内置 Linux")) }
+            }
         }
         .scrollContentBackground(.hidden)
         .background(BalancedPalette.page)

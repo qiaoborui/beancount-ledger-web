@@ -59,6 +59,33 @@ void ledger_linux_cancel(void);
 
 void ledger_linux_result_free(ledger_linux_result *result);
 
+// ---------------------------------------------------------------------------
+// Terminals: an interactive login shell (`/bin/sh -l` in /root) on a
+// pseudo-terminal of its own, for the App's terminal screen. Several can be
+// open at once, alongside the assistant's runs.
+
+/// Receives what the terminal prints, on a guest thread. Copy the bytes and
+/// return; never block.
+typedef void (*ledger_linux_terminal_output)(void *context, const char *data, int length);
+/// Called once, on a guest thread, when the shell exits.
+typedef void (*ledger_linux_terminal_exit)(void *context, int exit_code);
+
+/// Opens a terminal of `cols` x `rows`. Returns its id (> 0), or a negative
+/// errno. `context` is passed back to both callbacks and must stay valid until
+/// ledger_linux_terminal_close() returns.
+int ledger_linux_terminal_open(int cols, int rows, ledger_linux_terminal_output output,
+                               ledger_linux_terminal_exit on_exit, void *context);
+
+/// Types `data` into the terminal. Returns how many bytes it took (fewer when
+/// its input buffer is full; send the rest later), or a negative errno.
+int ledger_linux_terminal_write(int id, const char *data, int length);
+
+void ledger_linux_terminal_resize(int id, int cols, int rows);
+
+/// Hangs the terminal up and kills what runs in it. No callback runs for it
+/// after this returns.
+void ledger_linux_terminal_close(int id);
+
 #ifdef __cplusplus
 }
 #endif
