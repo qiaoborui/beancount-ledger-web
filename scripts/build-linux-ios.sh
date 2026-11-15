@@ -18,10 +18,9 @@ ENGINE_DEVICE_SHA256=1546d78c660c15c083fc69753a1725f85e00a4d681435dc115427609c64
 ENGINE_SIMULATOR_SHA256=d0805eef5facfb9eb3f03c0552470131dce54ea73c3ffe45cd9381d129b3decc
 ALPINE_VERSION=3.22.8
 ALPINE_BRANCH=v3.22
-# Pinned once a build has printed it; until then the release's own .sha256,
-# fetched over HTTPS from the same mirror, is what the archive is checked
-# against.
-ALPINE_SHA256="${ALPINE_SHA256:-}"
+# From the release's alpine-minirootfs-3.22.8-aarch64.tar.gz.sha256. Emptied,
+# the build checks against that file fetched from the mirror and prints it.
+ALPINE_SHA256="${ALPINE_SHA256-36091efacd083c1cf5a8c837272530bff4fc72db1fbfdef559f52de0d890bca4}"
 
 mkdir -p "$BUILD/downloads" "$BUILD/upstream"
 
@@ -66,7 +65,7 @@ if [ -z "$ALPINE_SHA256" ]; then
     ALPINE_SHA256="$(curl --fail --location --retry 3 --retry-all-errors --connect-timeout 20 \
         --max-time 60 "$alpine_url.sha256" | awk '{print $1}')"
     [[ "$ALPINE_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "No sha256 for $alpine_name" >&2; exit 1; }
-    echo "Alpine $ALPINE_VERSION aarch64 sha256 (pin it in this script): $ALPINE_SHA256"
+    echo "Alpine $ALPINE_VERSION aarch64 sha256: $ALPINE_SHA256"
 fi
 fetch "$alpine_name" "$alpine_url" "$ALPINE_SHA256"
 install -m 644 "$BUILD/downloads/$alpine_name" "$BUILD/alpine-minirootfs.tar.gz"
@@ -90,7 +89,7 @@ build_slice() {
         libraries=("$out/engine/libish.a" "$out/engine/libish_emu.a" "$out/engine/libfakefs.a")
     fi
     xcrun --sdk "$sdk" clang "${flags[@]}" -c "$GLUE/LedgerLinux.c" -o "$out/objects/LedgerLinux.o"
-    xcrun libtool -static -o "$out/libLedgerLinux.a" "$out/objects/LedgerLinux.o" "${libraries[@]}"
+    xcrun libtool -static -o "$out/libLedgerLinux.a" "$out/objects/LedgerLinux.o" ${libraries[@]+"${libraries[@]}"}
     cp "$GLUE/LedgerLinux.h" "$GLUE/module.modulemap" "$out/Headers/"
 }
 build_slice iphoneos arm64 arm64-apple-ios17.0 ish-ios-arm64.tar.gz

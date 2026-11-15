@@ -26,7 +26,7 @@ lollipopkit/ShellBox v1.0.55), with the conversation's draft at /workspace.
 ## Remaining
 
 1. Get the iOS app CI job green (first real compile of the C and Swift).
-2. Pin `ALPINE_SHA256` in the build script from the CI log line.
+2. (done) `ALPINE_SHA256` pinned.
 3. Device test: first command unpacks and boots; `apk add python3`; timeout and
    stop kill the command; the app survives a guest crash; background turns.
 4. Then: decide release (`需要发版：新增内置 Linux（助手 bash 工具）`).
