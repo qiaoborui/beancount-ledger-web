@@ -64,7 +64,7 @@ class PrivateIPATests(unittest.TestCase):
     def test_runtime_build_and_signature_order(self):
         script = SCRIPT.read_text()
         archive = script.index("xcodebuild archive")
-        for builder in ("build-ledgercore-xcframework.sh", "build-beancount-ios.sh"):
+        for builder in ("build-ledgercore-xcframework.sh", "build-beancount-ios.sh", "build-linux-ios.sh"):
             self.assertLess(script.index(builder), archive)
         self.assertLess(script.index('"$framework"'), script.index('sign_bundle "$app"'))
         for required in ("Python.framework", "ledger_validator.py", "licenses/Beancount-GPL-2.0.txt"):

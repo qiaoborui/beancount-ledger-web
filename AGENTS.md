@@ -262,7 +262,7 @@ areas (its test is `.github/scripts/test_plan_components.py`):
 | `App/LedgerMobile/Package.swift`, and the `Sources/` files it lists | iOS core (those files also iOS app) |
 | `App/LedgerMobile/Tests/` | iOS core, iOS app |
 | `App/LedgerMobile/project.yml` | iOS app, iOS widgets |
-| other `Sources/`, and `Resources/`, `Supporting/`, `ShareExtension/`, `UITests/` under `App/LedgerMobile/` | iOS app |
+| other `Sources/`, and `Resources/`, `Supporting/`, `ShareExtension/`, `UITests/`, `Linux/` under `App/LedgerMobile/` | iOS app |
 | `WidgetExtension/`, `WidgetTests/` under `App/LedgerMobile/`, and the shared files the widget targets list in `project.yml` | iOS widgets |
 | Markdown and `Screenshots/` under `App/` | nothing |
 | other `App/` | iOS core |

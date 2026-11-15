@@ -161,7 +161,7 @@ if [[ "$needs_frameworks" == true ]]; then
     ln -s "$cache_root/server-build" "$server_build"
     linked_server_build=true
   fi
-  echo "::group::Build LedgerCore and the Beancount runtime"
+  echo "::group::Build LedgerCore, the Beancount runtime and the built-in Linux"
   build_framework ledgercore scripts/build-ledgercore-xcframework.sh \
     "$server_build/ledgercore/LedgerCore.xcframework" \
     HEAD:server/go.mod HEAD:server/go.sum HEAD:server/internal \
@@ -169,6 +169,9 @@ if [[ "$needs_frameworks" == true ]]; then
   build_framework beancount scripts/build-beancount-ios.sh \
     "$server_build/beancount-ios/BeancountRuntime.xcframework" \
     HEAD:App/LedgerMobile/Runtime
+  build_framework linux scripts/build-linux-ios.sh \
+    "$server_build/linux-ios/LedgerLinux.xcframework" \
+    HEAD:App/LedgerMobile/Linux
   echo "::endgroup::"
   phase_done "Frameworks"
 fi

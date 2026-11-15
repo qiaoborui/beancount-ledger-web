@@ -42,6 +42,7 @@ echo "Packaging version $marketing_version, build $build_number."
 # Build generated inputs from this checkout, including a fresh Python bridge.
 bash "$repo_root/scripts/build-ledgercore-xcframework.sh"
 bash "$repo_root/scripts/build-beancount-ios.sh"
+bash "$repo_root/scripts/build-linux-ios.sh"
 
 cd "$project_dir"
 

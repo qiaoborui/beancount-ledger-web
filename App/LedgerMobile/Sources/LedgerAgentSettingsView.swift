@@ -86,6 +86,16 @@ private struct LedgerAgentSettingsRoot: View {
                 }
                 .accessibilityIdentifier("ledger-agent-skills")
                 NavigationLink("可用工具") { LedgerAgentToolsView() }
+                if LedgerLinuxMachine.engineAvailable {
+                    NavigationLink {
+                        LedgerLinuxSettingsView()
+                    } label: {
+                        LabeledContent("内置 Linux") {
+                            AgentSettingsValue(text: LedgerLinuxMachine.isEnabled ? String(localized: "已开启") : String(localized: "已关闭"))
+                        }
+                    }
+                    .accessibilityIdentifier("ledger-agent-linux")
+                }
             } header: { Text("能力") } footer: {
                 Text("技能是助手按需加载的说明，写在账本的 skills/ 里，随 Git 同步。")
             }
@@ -246,6 +256,9 @@ private struct LedgerAgentToolsView: View {
                 tool(String(localized: "附件"),
                      "list_attachments · read_attachment · reconcile_attachment · view_attachment_image · save_attachment")
                 tool(String(localized: "历史对话"), "list_saved_conversations · read_saved_conversation")
+                if LedgerLinuxMachine.engineAvailable && LedgerLinuxMachine.isEnabled {
+                    tool(String(localized: "内置 Linux（在草稿里跑命令）"), "bash")
+                }
             } footer: {
                 Text("查询工具只读账本。改账工具只改一份私有草稿，改动按「写入账本」的设置通过校验后写入。附件工具在对话附了文件时才有，看图需要模型支持图片。")
             }
@@ -287,6 +300,53 @@ private struct LedgerAgentAdvancedSettingsView: View {
         .terminalNativeChrome()
         .navigationBarTitleDisplayMode(.inline)
         .privacySensitive()
+    }
+}
+
+/// 内置 Linux — the switch for the assistant's bash tool, what the unpacked
+/// system takes on disk, and a reset for a system a command broke.
+private struct LedgerLinuxSettingsView: View {
+    @State private var enabled = LedgerLinuxMachine.isEnabled
+    @State private var usage: Int64?
+    @State private var note: String?
+
+    var body: some View {
+        List {
+            Section {
+                Toggle("让助手使用内置 Linux", isOn: $enabled)
+                    .onChange(of: enabled) { _, on in LedgerLinuxMachine.setEnabled(on) }
+                    .accessibilityIdentifier("ledger-agent-linux-toggle")
+            } footer: {
+                Text("助手可以在 App 内置的 Alpine Linux 里运行命令和 Python 脚本，只能看到本次对话的草稿（挂在 /workspace）。改动和平时一样经过校验才写入账本。命令在手机上模拟运行，比电脑慢得多。")
+            }
+            Section {
+                LabeledContent("占用空间") {
+                    if let usage {
+                        AgentSettingsValue(text: usage == 0 ? String(localized: "未安装")
+                            : ByteCountFormatter.string(fromByteCount: usage, countStyle: .file))
+                    } else {
+                        ProgressView()
+                    }
+                }
+                Button("重置系统", role: .destructive) {
+                    let deferred = LedgerLinuxMachine.shared.reset()
+                    note = deferred ? String(localized: "重新打开 App 后重置。") : String(localized: "已重置，下次使用时重新安装。")
+                    Task { await refreshUsage() }
+                }
+                .accessibilityIdentifier("ledger-agent-linux-reset")
+            } footer: {
+                Text(note ?? String(localized: "重置会删除用 apk 装过的软件包和系统里的文件，账本不受影响。"))
+            }
+        }
+        .font(.subheadline)
+        .navigationTitle("内置 Linux")
+        .terminalNativeChrome()
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await refreshUsage() }
+    }
+
+    private func refreshUsage() async {
+        usage = await Task.detached { LedgerLinuxMachine.shared.diskUsage() }.value
     }
 }
 

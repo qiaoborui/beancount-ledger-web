@@ -20,6 +20,9 @@ struct LedgerMobileApp: App {
         // so a cold-start run is captured. Without `--ledger-perf-record` (and
         // without a stored opt-in) this changes nothing.
         LocalLedgerPerformanceRecording.configureLaunch()
+        // Hands the assistant its bash tool; the machine itself boots on the
+        // first command.
+        LedgerLinuxMachine.install()
         let session = LedgerSession.appSession()
         _session = StateObject(wrappedValue: session)
         LocalLedgerBackgroundSyncService.shared.configure { [weak session] in

@@ -63,6 +63,9 @@ type scratch struct {
 	committed string
 	mu        sync.Mutex
 	edited    bool
+	// linux runs the bash tool; nil when this build or shell has no
+	// built-in Linux, and then bash is not offered.
+	linux LinuxRunner
 }
 
 func openScratch(dir, entrypoint string) (*scratch, error) {
@@ -160,7 +163,7 @@ func (s *scratch) tools() []agent.AgentTool {
 	num := func(description string) map[string]any {
 		return map[string]any{"type": "integer", "description": description}
 	}
-	return []agent.AgentTool{
+	tools := []agent.AgentTool{
 		fileTool{name: "list_files", title: "列出账本文件",
 			description: "列出账本目录里的文件（.bean 账本文件，以及存档的账单、导入配置等）和大小，隐藏文件除外。入口文件是 " + s.entrypoint + "。dir 只列某个子目录；pattern 按 glob 过滤，例如 **/*.bean、documents/**/*.pdf、2026/*.bean。",
 			parameters: objectParameters(map[string]any{"dir": str("只列这个子目录，例如 documents"),
@@ -203,6 +206,12 @@ func (s *scratch) tools() []agent.AgentTool {
 			description: "用 App 内置的 Beancount 校验整份草稿账本，返回错误及所在文件和行号。改完后必须调用，直到通过。",
 			parameters:  objectParameters(map[string]any{}), run: s.beanCheck, detached: true},
 	}
+	// Last, so a conversation's cached tool prefix is the same with and
+	// without it.
+	if s.linux = currentLinuxRunner(); s.linux != nil {
+		tools = append(tools, s.bashTool(s.linux))
+	}
+	return tools
 }
 
 func (s *scratch) listFiles(raw json.RawMessage) (any, error) {
@@ -385,6 +394,9 @@ type fileTool struct {
 	name, title, description string
 	parameters               map[string]any
 	run                      func(json.RawMessage) (any, error)
+	// runContext replaces run for a tool that must see the turn's
+	// cancellation itself.
+	runContext func(context.Context, json.RawMessage) (any, error)
 	// detached runs a read-only tool that calls into the shell on a goroutine
 	// of its own, so a stop or the turn's deadline does not wait for it.
 	detached bool
@@ -409,7 +421,9 @@ func (t fileTool) Execute(ctx context.Context, _ string, params json.RawMessage,
 	}
 	var output any
 	var err error
-	if t.detached {
+	if t.runContext != nil {
+		output, err = t.runContext(ctx, params)
+	} else if t.detached {
 		output, err = runDetached(ctx, beanCheckTimeout, func() (any, error) { return t.run(params) })
 	} else {
 		output, err = t.run(params)
