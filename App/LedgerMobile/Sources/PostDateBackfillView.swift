@@ -167,7 +167,7 @@ struct PostDateBackfillView: View {
                 TerminalSectionLabel(text: String(localized: "疑似重复记账 \(result.possibleDuplicates.count)"))
                     .listRowBackground(BalancedPalette.page)
             } footer: {
-                Text("同一张卡上，银行导入的分录与支付宝/微信/手记分录金额接近、日期相近，可能记了两次。请核对后手动删除多余的一条，这里不会自动删除。")
+                Text("同一张卡上，银行导入的分录与支付宝/微信/美团/手记分录金额接近、日期相近，可能记了两次。请核对后手动删除多余的一条，这里不会自动删除。")
                     .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                     .fixedSize(horizontal: false, vertical: true)
             }

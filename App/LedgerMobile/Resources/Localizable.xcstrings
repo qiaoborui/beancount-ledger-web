@@ -3374,12 +3374,12 @@
         }
       }
     },
-    "从已归档的汇丰账单为支付宝/微信分录补上记账日，并检查重复记账。" : {
+    "从已归档的汇丰账单为支付宝/微信/美团分录补上记账日，并检查重复记账。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fill post dates on Alipay and WeChat entries from archived HSBC statements, and check for double bookings."
+            "value" : "Fill post dates on Alipay, WeChat and Meituan entries from archived HSBC statements, and check for double bookings."
           }
         }
       }
@@ -6378,12 +6378,12 @@
         }
       }
     },
-    "同一张卡上，银行导入的分录与支付宝/微信/手记分录金额接近、日期相近，可能记了两次。请核对后手动删除多余的一条，这里不会自动删除。" : {
+    "同一张卡上，银行导入的分录与支付宝/微信/美团/手记分录金额接近、日期相近，可能记了两次。请核对后手动删除多余的一条，这里不会自动删除。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "On the same card, a bank-imported entry and an Alipay, WeChat or manual entry have close amounts and dates and may be the same purchase. Check them and delete the extra one yourself; nothing is deleted here."
+            "value" : "On the same card, a bank-imported entry and an Alipay, WeChat, Meituan or manual entry have close amounts and dates and may be the same purchase. Check them and delete the extra one yourself; nothing is deleted here."
           }
         }
       }
@@ -18458,6 +18458,16 @@
         }
       }
     },
+    "美团" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meituan"
+          }
+        }
+      }
+    },
     "美团外卖" : {
       "localizations" : {
         "en" : {
@@ -21658,12 +21668,12 @@
         }
       }
     },
-    "这些银行行与账本里已有的支付宝/微信分录金额一致，写入时只把记账日补到已有分录上，不新增交易。取消勾选则跳过补写。" : {
+    "这些银行行与账本里已有的支付宝/微信/美团分录金额一致，写入时只把记账日补到已有分录上，不新增交易。取消勾选则跳过补写。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "These bank rows match existing Alipay/WeChat entries exactly. Saving writes the post date onto those entries instead of adding transactions. Uncheck one to skip it."
+            "value" : "These bank rows match existing Alipay/WeChat/Meituan entries exactly. Saving writes the post date onto those entries instead of adding transactions. Uncheck one to skip it."
           }
         }
       }

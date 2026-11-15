@@ -38,6 +38,9 @@
 2026-01-01 open Assets:CN:Alipay:Balance CNY
   alias: "支付宝余额 / 余额宝现金"
 
+2026-01-01 open Assets:CN:Meituan:Balance CNY
+  alias: "美团余额"
+
 2026-01-01 open Assets:CN:Alipay:Fund CNY
   alias: "支付宝基金 / 理财持仓"
   group: "wealth"

@@ -1,0 +1,37 @@
+defaultMinusAccount: Income:Other
+defaultPlusAccount: Expenses:Food:Meals
+defaultCurrency: CNY
+title: 美团导入示例
+# 美团 App「我的 → 钱包 → 账单 → 导出」得到的交易账单明细 CSV。
+# 规则按顺序叠加，后命中的覆盖先命中的。可用字段：item（订单标题）、
+# type（收/支：支出、收入、不计收支）、method（支付方式）、time、minPrice/maxPrice。
+# 退款记为「收入」，命中 item 规则时冲减同一个消费账户。
+mt:
+  rules:
+    # 支付方式 → 资金账户
+    - method: 美团余额
+      methodAccount: Assets:CN:Meituan:Balance
+    - method: 信用卡
+      methodAccount: Liabilities:CN:CreditCard
+    # 汇丰香港信用卡付的订单记到汇丰卡账户。导入时没有银行记账日，
+    # 之后导入汇丰账单（或在导入记录里「补写汇丰记账日」）时会把 post_date
+    # 补到这些分录上，不会重复记账。请按 App 里显示的卡名/尾号调整。
+    - method: 汇丰,HSBC
+      methodAccount: Liabilities:HK:HSBC:CreditCard
+    # 微信、支付宝付的订单已经在各自的账单里，这里忽略避免重复。
+    - method: 微信支付
+      ignore: true
+    - method: 支付宝
+      ignore: true
+
+    # 订单标题 → 消费分类
+    - item: 咖啡,奶茶,果茶,瑞幸,喜茶,中杯,大杯
+      targetAccount: Expenses:Food:Drinks
+    - item: 超市,便利店,买菜,生鲜,小象
+      targetAccount: Expenses:Food:Groceries
+    - item: 打车,单车,骑行
+      targetAccount: Expenses:Transport:Taxi
+    - item: 酒店,民宿
+      targetAccount: Expenses:Accommodation:Hotel
+    - item: 电影,KTV,门票
+      targetAccount: Expenses:Entertainment
