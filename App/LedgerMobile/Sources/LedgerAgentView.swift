@@ -143,9 +143,12 @@ private struct LedgerAgentChatScreen: View {
             NavigationStack { LedgerAgentMemoryView() }
                 .ledgerPrivacyProtectedSheet()
         }
-        // History is a drawer over the page, not a sheet. It is applied
-        // after the chrome so it covers the top bar and the dock as well.
-        .ledgerAgentHistoryDrawer(isPresented: $historyPresented, sharesText: session.amountsVisible) {
+        // History is a drawer beside the page, not a sheet. It is applied
+        // after the chrome so the top bar and the dock move with the page.
+        // A drag from the leading edge opens it on a root page; a pushed one
+        // leaves that edge to the system's back swipe.
+        .ledgerAgentHistoryDrawer(isPresented: $historyPresented, edgeOpens: isRoot && settings.isReady,
+                                  sharesText: session.amountsVisible) {
             settingsPresented = true
         }
         .onChange(of: historyPresented) { _, shown in if shown { composerFocused = false } }
