@@ -15,8 +15,9 @@
 4. **账本同步：按内容寻址上传快照，结果以“补丁”回来，由手机用现有 `LedgerAgentMerge` 三方合并。** 云端从不直接写账本、不拿 GitHub token。
 5. **云端运行时：先自建一个 Go 小服务 `ledger-agentd`（SQLite 收件箱 + Docker/gVisor 沙箱），部署在现有的自托管 Docker 主机上，用 Cloudflare Tunnel 暴露。** 额外成本约等于 0；沙箱做成接口，以后可以一行配置换成 Modal / E2B。
 6. **事件驱动照用户给的图做：** handler 写 inbox 表（按事件 ID 去重）→ 唤醒 worker → worker 取 pending、按会话串行启动 run → 等完成 → 标 done → 写 outbox 并推送。
-7. **手机上不内置 Alpine，但加一个本地 `run_python`。** App 里已经内置了 CPython 3.14（给 Beancount 校验用），直接让助手在里面跑 python，离线、零服务器。iOS 上跑完整 Linux（iSH 式 x86 模拟、WASM 里的虚拟机）又慢又大，后台也跑不住，不值得；bash 和真正的 Linux 留给云端。详见第 7 节。
-8. **最小可用版本 = 本地 `run_python`，然后才是云端 `sandbox_exec`。** 第一步不需要任何服务器；收件箱、后台任务、定时任务放在后面的阶段。
+7. **手机上内置一个 Alpine（iSH 的 arm64 分支），作为本地沙箱。** ServerBox（lollipopkit/flutter_server_box）在 App Store 上就是这么做的：嵌入 iSH 的 arm64 分支 [lollipopkit/ShellBox](https://github.com/lollipopkit/ShellBox)，用户态解释执行 aarch64 Linux，不需要 JIT。助手因此在手机上就有 bash、`apk add`、python（包括 Alpine 打好包的 pandas），离线也能用（装包时需要网络）。python 计算比原生慢大约 10–25 倍，对账本这种规模的数据够用。详见第 7 节。
+8. **云端退到“长任务、后台、定时、重计算”。** 有了本地 Alpine，原来第 1 阶段的云端 `sandbox_exec` 不再是刚需，改为可选；云端的价值集中在 `delegate`、收件箱和定时任务上。
+9. **最小可用版本 = 本地 Alpine + `bash` 工具。** 不需要任何服务器。
 
 下面逐条展开。
 
@@ -32,7 +33,7 @@
 | 三方合并、撤销 | ✅ `LedgerAgentMerge` | ❌ |
 | UI 工具：`ask_user`、App 设置、技能、visual 块、图表 | ✅ | ❌（需要用户时以 `needs_input` 结束，交回手机） |
 | 离线 | ✅ 云端工具自动隐藏，退回纯本地 | — |
-| bash / python / 各种 `bean-*` 命令行 / pandas / 解析 PDF、Excel | ❌ | ✅ 沙箱 |
+| bash / python / 各种 `bean-*` 命令行 / pandas / 解析 PDF、Excel | ✅ 内置 Alpine（解释执行，慢 10–30 倍，见第 7 节） | ✅ 沙箱（原生速度、可联网、可装任意包） |
 | 长任务（几十步、几十分钟）、手机锁屏后继续 | ⚠️ 靠保活，不可靠 | ✅ |
 | 定时任务、外部事件（邮件、webhook） | ❌ | ✅ |
 | 模型 key | 手机 Keychain（不出手机） | 云端自己的一份，存在服务器 env |
@@ -43,7 +44,7 @@
 - 写账本需要 canonical 校验、变更卡、撤销，这些都在手机上，没必要在云端再造一遍。
 - 云端是“可选加速器”：没配服务器、服务器挂了、在飞机上，助手照常工作，只是少了几样工具。
 
-**为什么不用单独的“路由模型”：** coordinator 就是手机上的模型本身。它看到的工具清单里多了 `sandbox_exec` 和 `delegate`，再加几条提示词规则（见第 2 节），由它自己决定。多一个路由模型只会多一次延迟和一份钱。
+**为什么不用单独的“路由模型”：** coordinator 就是手机上的模型本身。它看到的工具清单里多了本地的 `bash` 和云端的 `delegate`（以及可选的 `sandbox_exec`），再加几条提示词规则（见第 2 节），由它自己决定。多一个路由模型只会多一次延迟和一份钱。
 
 ---
 
@@ -52,7 +53,7 @@
 ### 2.1 路由规则（写进系统提示词）
 
 1. 能用账本工具（BQL、搜索、读改文件、`bean_check`）解决的，在本地做。
-2. 需要“算”而 BQL 做不了的：复杂统计、pandas、画复杂图、解析 PDF / Excel / 网页、跑 `bean-price` / `bean-extract` 等命令 → `sandbox_exec`。
+2. 需要“算”而 BQL 做不了的：复杂统计、pandas、画复杂图、解析 PDF / Excel、跑 `bean-price` / `bean-extract` 等命令 → 先用本地 `bash`（内置 Alpine）；本地太慢、装不上或需要大量联网时 → 云端。
 3. 预计超过两分钟、步骤很多、要在手机锁屏后继续、或者用户说“定时/每天/以后自动” → `delegate`，回复里告诉用户“交给云端了，完成后通知你”。
 4. 云端不可达时，2 和 3 的工具根本不出现在清单里，模型自然不会用。
 5. 用户可以强制：输入框加一个「云端」芯片（或 `/cloud` 前缀），这一轮直接走 `delegate`。
@@ -244,13 +245,20 @@ App 是 SideStore 个人团队签名，**拿不到 APNs**，所以：
 
 ## 6. 分阶段落地
 
-### 第 0 阶段：本地 `run_python`（不需要服务器）
+### 第 0 阶段：本地 Alpine 沙箱（不需要服务器）
 
-目标：离线也能用 python 算账。做法见第 7.3 节。验收：问“按月算一下近两年餐饮支出的趋势和同比”，助手写 python 在手机上算出来；断网也能用。
+目标：手机上的助手能跑 bash 和 python，离线可用。做法见第 7.3 节。
 
-### 第 1 阶段：云端沙箱工具
+- 嵌入 ShellBox 发布的 iOS 静态库（`libish.a`、`libish_emu.a`、`libfakefs.a`），写一层很薄的 Swift/C 封装：启动、一次性执行、超时、中断、读写输出。
+- Alpine rootfs 首次使用时下载（校验固定的 digest），不打进 IPA。
+- Go 侧新增 `bash` 工具（`effect: draft`），通过 gomobile 回调交给 Swift 执行；本会话草稿目录以 bind mount 挂到 `/workspace`。
+- 设置里加「本地 Linux」：安装/重置 rootfs、已装包列表、占用空间。
 
-目标：手机上的助手能跑 bash，以及装任意包的 python。
+验收：问“按月算一下近两年餐饮支出的趋势和同比，画个图”，助手 `apk add py3-pandas py3-matplotlib` 后在手机上算出来并出图；断网时（包已装）也能用。
+
+### 第 1 阶段（可选）：云端沙箱工具
+
+目标：本地 Alpine 太慢或装不上的重活（大文件解析、需要 glibc 的包、长时间计算）交给云端。有了第 0 阶段，这一阶段可以跳过，直接做第 2 阶段。
 
 - 抽 `agentcore`：先只抽工具描述和 `remoteTool` 适配器，循环暂不动。
 - `ledger-agentd`：设备令牌鉴权、blob 存储、`/mcp` 暴露 `sandbox_exec`、Docker + gVisor 沙箱（每会话一个，空闲 10 分钟销毁），镜像内置 Python 3、beancount 3、beanquery、pandas、matplotlib、openpyxl、pdfplumber。
@@ -279,36 +287,60 @@ App 是 SideStore 个人团队签名，**拿不到 APNs**，所以：
 - Git 存储用户直接按 commit 同步。
 - 放开云端改动的自动写入。
 
-## 7. 手机本地沙箱：能不能像 ServerBox 那样内置一个 Alpine
+## 7. 手机本地沙箱：在 App 里内置 Alpine
 
-Borui 看到 [ServerBox](https://github.com/madeye/ServerBox) 想到能不能在 App 里内置 Alpine。调研结论：**ServerBox 的做法搬不到 iOS 上，内置完整 Linux 也不推荐；推荐用 App 已有的 CPython 做一个本地 `run_python`。**
+Borui 在手机上装的 ServerBox（[lollipopkit/flutter_server_box](https://github.com/lollipopkit/flutter_server_box)，App Store 上架）能直接跑 Alpine 3.22、`apk add openssh`，`uname -m` 是 `aarch64`。调研结论：**可以照搬，推荐作为手机端的本地沙箱。**
 
-### 7.1 ServerBox 是怎么做的
+### 7.1 ServerBox 在 iOS 上是怎么做的
 
-- 它是 **Android** App（GPL-3.0，UserLAnd 的分叉），用 **PRoot** 在用户态跑 Alpine / Debian 等发行版：PRoot 靠 `ptrace` 截获系统调用、改写路径，跑的是原生 arm64 二进制。另有一条走 Android 虚拟化框架（AVF）的真虚拟机路线。
-- iOS 上这两条都走不通：App 沙箱里**没有 `fork` / `exec` / `ptrace`**，不能启动任何子进程；第三方 App 也拿不到 Hypervisor 能力。
+- 它的文档写明：iOS 不能启动进程，所以 App 里带了一个 Linux 解释器，Alpine 就是这个解释器运行的文件系统。Android 版则用 PRoot。
+- 这个解释器是 iSH 的 arm64 分支 [lollipopkit/ShellBox](https://github.com/lollipopkit/ShellBox)：
+  - 用户态模拟 AArch64 Linux + 系统调用翻译，guest 只有 arm64。
+  - 执行方式是 iSH 的“线程化代码”解释器（Asbestos）：每个基本块变成一串预编译“gadget”函数指针，**不在运行时生成机器码，所以不需要 JIT**，能过 App Store 审核。
+  - 支持 48 位地址空间、完整 NEON/AES/SHA，能跑 python、Node 22、Go、Rust 程序；支持 bind mount 把宿主目录挂进去。
+  - **不是 App，而是三个静态库**（`libish.a`、`libish_emu.a`、`libfakefs.a`），专门给宿主 App 嵌入；它的 CI 每次推送都发布 `iphoneos` / `iphonesimulator` 版本，ServerBox 直接下载这些产物。
+  - 许可：GPLv3（部分贡献额外 GPLv2），另附 LICENSE.IOS：只要其他方面遵守 GPL（提供源码），不追究 App Store 条款冲突。
+- 另有 [Lolendor/ish-arm64-pkg](https://github.com/Lolendor/ish-arm64-pkg) 把它包成了 Swift Package（`IshInstance.boot` / `runOneshot` / `spawn`），API 可以参考，但项目很小、维护不活跃，不建议直接依赖。
 
-### 7.2 iOS 上真正可行的几条路
+### 7.2 速度
 
-| 方案 | 原理 | 能做什么 | 体积（估） | 速度 | 问题 |
-|---|---|---|---|---|---|
-| **A. 内置 CPython 跑 `run_python`（推荐）** | 复用已内置的 BeeWare CPython 3.14，在进程内执行模型写的代码 | python 标准库、beancount、beanquery；纯 python 包；numpy/pandas 需要 iOS 版的二进制包（BeeWare 有 iOS wheel 的构建链，具体可用版本待核实） | 已有，几乎不增加；加 numpy/pandas 约多几十 MB | 原生速度 | 没有 bash、不能 `subprocess`；进程内执行，隔离靠审计钩子，属于“尽力而为” |
-| B. iSH 式 x86 模拟 + Alpine | [iSH](https://github.com/ish-app/ish)：用户态 x86 模拟 + 系统调用翻译，线程化解释器，不需要 JIT，已上架 App Store | 真正的 Alpine（i386）：`apk add`、bash、python3 | rootfs 几 MB，装上 python 后几十 MB | 解释执行，明显比原生慢（经验上大约一个数量级，未实测）；`pip install` 很慢 | iSH 是完整 App，不是可嵌入库，要抽它的内核和模拟器；32 位 x86，很多现代包没有 i386 版本；后台被挂起就停 |
-| C. WKWebView 里跑 WASM（Pyodide，或 WASM 里的 x86 虚拟机跑 Alpine） | WebKit 的 WebContent 进程有 JIT，第三方 App 自己的进程没有 | Pyodide 带 numpy/pandas；虚拟机路线有真 Linux | Pyodide 加科学计算包约几十 MB；虚拟机镜像更大 | Pyodide 尚可；WASM 里再模拟 x86 很慢 | 要在网页和原生之间搬文件；App 进后台后 WebContent 进程会被节流或挂起，和助手的后台运行冲突 |
-| D. a-Shell 式 `ios_system` | [a-Shell](https://github.com/holzschu/a-shell)（BSD-3）把 ls/grep/sed/awk/curl/python 等编成进程内函数，C 程序编成 WASM 跑 | 一个“像 shell”的环境 | 中等 | 原生 | 不是真 bash；python 只能装纯 python 包；集成工作量不小 |
-| E. QEMU 解释模式跑完整 VM（UTM SE 那种） | 不用 JIT 的 TCG 解释器 | 完整 aarch64 Alpine | 上百 MB | 非常慢 | 不实用 |
-| F. 开 JIT（SideStore + StikDebug） | 调试器附加后允许 JIT，配合 QEMU/UTM | 接近能用的 VM | 上百 MB | 尚可 | 每次启动都要手动开 JIT，iOS 一升级就可能失效，不能当默认依赖 |
+ShellBox 自带的基准（在 Mac arm64 上测，中位数，“原生”指同机原生执行）：
 
-### 7.3 推荐：本地 `run_python`
+| 测试 | 原生 | arm64 解释器 | 慢多少 |
+|---|---|---|---|
+| python 启动 | 46ms | 149ms | 3x |
+| python `sum(1M)` | 35ms | 579ms | 17x |
+| python `fib(30)` | 134ms | 1683ms | 13x |
+| python json 往返 | 45ms | 1315ms | 29x |
+| python 排序 10 万 | 67ms | 1597ms | 24x |
+| python sha256 1MB | 74ms | 189ms | 2.6x |
+| C 整数运算 | 10ms | 65ms | 6.5x |
 
-- **执行**：在已有的嵌入解释器里，开一个独立命名空间运行模型写的代码；工作目录是本会话的草稿副本（`runtime/agent/<id>/workspace`），改动自然进草稿、走变更卡。
-- **限制**：
-  - 超时（例如 30 秒）后用异步异常打断；输出截断。
-  - `sys.addaudithook` 拦截 `socket`、`subprocess`、`os.system`，`open` 只允许草稿目录和一个临时输出目录。这只是尽力而为的隔离（代码是你自己的模型写的，草稿本来就是副本），**不当安全边界**，真要隔离的任务交给云端。
-  - 与 Beancount 校验共用一把 GIL：执行时串行，校验优先。
-- **产物**：写到输出目录的 PNG/CSV 作为附件显示在回复里（matplotlib 能用的前提是有 iOS 版的包）。
-- **路由**：本地 `run_python` 优先；需要 bash、任意 `pip install`、联网、长时间运行、后台或定时，才走云端。
-- **先核实**：BeeWare 生态目前能拿到哪些 iOS 版 numpy / pandas / matplotlib，以及加进 IPA 后的体积。拿不到就先只提供标准库 + beancount，这已经覆盖大部分“BQL 算不了”的统计。
+python 纯计算大约慢 10–30 倍。账本是几万到十几万条交易的规模，一次统计在本地通常是几秒级，可以接受；真正重的活交给云端。iPhone 上的实际数字待 Borui 在 ServerBox 里实测。
+
+### 7.3 怎么接进账本 App
+
+- **引擎**：用 ShellBox 发布的静态库，自己写一层很薄的封装（启动一次内核；`exec(argv, cwd, timeout)` 返回退出码和输出；支持中断）。
+- **rootfs**：Alpine minirootfs 只有几 MB，首次启用时下载并校验 digest；`apk` 装的包留在 App 的 Application Support 里，可在设置里重置。不打进 IPA。
+- **文件**：本会话的草稿目录 bind mount 到 `/workspace`，输出目录挂到 `/out`。guest 看不到账本正本、Keychain 和 App 其他数据（ServerBox 的文档也强调了这一点：Alpine 看不到手机存储、App 数据和私钥）。改动照常进草稿、走变更卡。
+- **工具**：Go 侧 `bash` 工具通过 gomobile 回调交给 Swift 执行；默认 60 秒超时，输出截断；`/out` 里的图片/CSV 作为附件。
+- **后台**：解释器跑在 App 进程里，和助手共用现有的后台保活（静音音频 + `BGContinuedProcessingTask`），App 被挂起时它也一起停。
+- **要先验证的风险**：
+  1. **信号冲突**：iSH 用 `SIGUSR1` 打断 guest 线程；同一进程里还有 Go 运行时（gomobile）和 CPython。要确认三者的信号处理能共存。
+  2. **内存**：一个 python + pandas 进程在解释器里的内存占用，以及 iOS 的内存上限。
+  3. **体积**：引擎约 5.5MB（ShellBox 基准里 arm64 版二进制的大小），rootfs 按需下载。
+  4. **许可**：引入 GPLv3 代码。App 目前本来就因为 GPL-2.0 依赖只做私有 SideStore 分发（见 `Runtime/THIRD_PARTY.md`），自用没问题；如果以后要公开分发，需要整体按 GPL 处理。
+- **内置 CPython 的位置**：现有的 CPython 只继续用于 Beancount 校验。不再单独做进程内 `run_python`，因为它没有 bash、不能装原生包，隔离也只能靠审计钩子；本地 Alpine 全面覆盖它。
+
+### 7.4 其他候选（不选）
+
+| 方案 | 不选的原因 |
+|---|---|
+| iSH 原版（x86） | 32 位 x86，比 arm64 分支慢 4–12 倍，很多现代包没有 i386 版本 |
+| WKWebView 里跑 WASM（Pyodide 等） | App 进后台后 WebContent 进程会被挂起；网页与原生之间搬文件麻烦 |
+| a-Shell 的 `ios_system` | 不是真 bash，python 只能装纯 python 包 |
+| QEMU 解释模式跑整台 VM | 非常慢、体积大 |
+| 开 JIT（SideStore + StikDebug） | 每次启动都要手动开，不能当默认依赖 |
 
 ## 不做什么
 
@@ -316,7 +348,7 @@ Borui 看到 [ServerBox](https://github.com/madeye/ServerBox) 想到能不能在
 - 云端不直接写账本、不拿 GitHub token。
 - 不复用旧的 Bub（Python）agent，也不用托管 agent 服务，以免锁定单一模型厂商。
 - 第一版不做多设备、多用户。
-- 不在 App 里内置完整 Linux（iSH 式模拟、WASM 虚拟机、QEMU）。
+- 不在 App 里跑整台虚拟机（QEMU）或依赖 JIT。
 
 ## 需要 Borui 确认的
 
