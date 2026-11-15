@@ -313,6 +313,13 @@ private struct LedgerLinuxSettingsView: View {
     var body: some View {
         List {
             Section {
+                NavigationLink { LedgerLinuxTerminalScreen() } label: { Label("终端", systemImage: "terminal") }
+                    .accessibilityIdentifier("ledger-linux-terminal")
+                NavigationLink { LedgerLinuxFilesView(path: "/root") } label: { Label("文件（/root）", systemImage: "folder") }
+                    .accessibilityIdentifier("ledger-linux-files")
+                NavigationLink { LedgerLinuxFilesView(path: "/") } label: { Label("整个系统（/）", systemImage: "externaldrive") }
+            } header: { Text("使用") }
+            Section {
                 Toggle("让助手使用内置 Linux", isOn: $enabled)
                     .onChange(of: enabled) { _, on in LedgerLinuxMachine.setEnabled(on) }
                     .accessibilityIdentifier("ledger-agent-linux-toggle")

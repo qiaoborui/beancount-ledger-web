@@ -55,6 +55,10 @@ described above still apply to every published IPA.
   tarball and unpacked on device; its packages carry their own licenses (musl
   MIT, BusyBox GPL-2.0, apk-tools GPL-2.0 and others). Source:
   https://alpinelinux.org/downloads/ and https://git.alpinelinux.org/aports .
+* xterm.js 6.0.0 and @xterm/addon-fit 0.11.0 (npm), copyright the xterm.js
+  authors: MIT. Bundled unmodified (source-map comments removed) in
+  `App/LedgerMobile/Resources/Terminal/` with its license as xterm-LICENSE.txt;
+  the terminal page loads them from the app bundle.
 
 The build pins SHA-256 checksums for all three archives, compiles the canonical
 Beancount and regex C extensions into a static XCFramework, and registers both

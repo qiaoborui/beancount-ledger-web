@@ -40,6 +40,7 @@
 #include "fs/fd.h"
 #include "fs/path.h"
 #include "fs/real.h"
+#include "fs/tty.h"
 
 // ---------------------------------------------------------------------------
 // Host signals
@@ -145,6 +146,13 @@ static int running_status;
 static atomic_bool cancel_requested;
 static char *mounted_workspace;
 
+// Building a task is not safe from two threads at once (the engine's
+// become_new_init_child says as much), and a terminal can open while the
+// assistant's command starts.
+static pthread_mutex_t spawn_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void terminal_exit_hook(struct task *task, int code);
+
 static void machine_exit_hook(struct task *task, int code) {
     pthread_mutex_lock(&state_lock);
     if (task->parent == NULL) {
@@ -154,6 +162,7 @@ static void machine_exit_hook(struct task *task, int code) {
         running_status = code;
     }
     pthread_mutex_unlock(&state_lock);
+    terminal_exit_hook(task, code);
 }
 
 bool ledger_linux_available(void) { return true; }
@@ -264,6 +273,13 @@ int ledger_linux_boot(const char *rootfs, const char *dev_dir) {
     make_device("/dev/random", MEM_MAJOR, DEV_RANDOM_MINOR);
     make_device("/dev/urandom", MEM_MAJOR, DEV_URANDOM_MINOR);
     make_device("/dev/tty", TTY_ALTERNATE_MAJOR, DEV_TTY_MINOR);
+    make_device("/dev/console", TTY_ALTERNATE_MAJOR, DEV_CONSOLE_MINOR);
+    make_device("/dev/ptmx", TTY_ALTERNATE_MAJOR, DEV_PTMX_MINOR);
+    // Where a terminal's slave appears, as /dev/pts/N.
+    generic_mkdirat(AT_PWD, "/dev/pts", 0755);
+    err = do_mount(&devptsfs, "devpts", "/dev/pts", "", 0);
+    if (err < 0)
+        goto fail;
     generic_symlinkat("/proc/self/fd/0", AT_PWD, "/dev/stdin");
     generic_symlinkat("/proc/self/fd/1", AT_PWD, "/dev/stdout");
     generic_symlinkat("/proc/self/fd/2", AT_PWD, "/dev/stderr");
@@ -404,9 +420,12 @@ static void discard_unstarted_task(struct task *task) {
 }
 
 static int start_command(const char *command, int output_fd, int *pid) {
+    pthread_mutex_lock(&spawn_lock);
     int err = become_new_init_child();
-    if (err < 0)
+    if (err < 0) {
+        pthread_mutex_unlock(&spawn_lock);
         return err;
+    }
     err = set_stdio(output_fd);
     if (err < 0)
         goto fail;
@@ -437,11 +456,13 @@ static int start_command(const char *command, int output_fd, int *pid) {
     pthread_mutex_unlock(&state_lock);
     task_start(current);
     current = NULL;
+    pthread_mutex_unlock(&spawn_lock);
     return 0;
 
 fail:
     discard_unstarted_task(current);
     current = NULL;
+    pthread_mutex_unlock(&spawn_lock);
     return err;
 }
 
@@ -570,6 +591,242 @@ int ledger_linux_run(const char *workspace, const char *command, int timeout_ms,
     return 0;
 }
 
+
+// ---------------------------------------------------------------------------
+// Terminals
+//
+// Each terminal is the slave side of a pseudo-terminal whose master is this
+// file: what the guest writes arrives in terminal_driver_write, and what the
+// user types goes in through tty_input, with the line discipline, echo and
+// job-control signals the engine's tty layer provides. The shell opens
+// /dev/pts/N as its stdin, stdout and stderr, which makes it the session's
+// controlling terminal.
+
+#define MAX_TERMINALS 8
+
+struct terminal {
+    int id; // 0: free
+    struct tty *tty;
+    pid_t_ pid;
+    bool exited;
+    ledger_linux_terminal_output output;
+    ledger_linux_terminal_exit on_exit;
+    void *context;
+};
+
+static struct terminal terminals[MAX_TERMINALS];
+static pthread_mutex_t terminal_lock = PTHREAD_MUTEX_INITIALIZER;
+static int next_terminal_id = 1;
+
+static const char terminal_environment[] =
+    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\0"
+    "HOME=/root\0"
+    "TERM=xterm-256color\0"
+    "LANG=C.UTF-8\0"
+    "PYTHONDONTWRITEBYTECODE=1\0"
+    "MPLBACKEND=Agg\0"
+    "\0";
+
+static int terminal_driver_write(struct tty *tty, const void *buf, size_t len, bool blocking) {
+    (void)blocking;
+    pthread_mutex_lock(&terminal_lock);
+    for (int i = 0; i < MAX_TERMINALS; i++) {
+        struct terminal *t = &terminals[i];
+        if (t->id != 0 && t->tty == tty && t->output != NULL)
+            t->output(t->context, buf, (int)len);
+    }
+    pthread_mutex_unlock(&terminal_lock);
+    return (int)len;
+}
+
+static int terminal_driver_nop(struct tty *tty) {
+    (void)tty;
+    return 0;
+}
+
+static void terminal_driver_cleanup(struct tty *tty) { (void)tty; }
+
+static const struct tty_driver_ops terminal_driver_ops = {
+    .init = terminal_driver_nop,
+    .open = terminal_driver_nop,
+    .close = terminal_driver_nop,
+    .write = terminal_driver_write,
+    .cleanup = terminal_driver_cleanup,
+};
+
+// Not DEFINE_TTY_DRIVER: pty_open_fake points its table at the pty slaves'.
+static struct tty *terminal_ttys[MAX_TERMINALS];
+static struct tty_driver terminal_driver = {
+    .ops = &terminal_driver_ops,
+    .major = TTY_PSEUDO_SLAVE_MAJOR,
+    .ttys = terminal_ttys,
+    .limit = MAX_TERMINALS,
+};
+
+static void terminal_exit_hook(struct task *task, int code) {
+    pthread_mutex_lock(&terminal_lock);
+    for (int i = 0; i < MAX_TERMINALS; i++) {
+        struct terminal *t = &terminals[i];
+        // Called once per process, when its last thread goes.
+        if (t->id != 0 && !t->exited && t->pid == task->tgid) {
+            t->exited = true;
+            int exit_code = (code & 0x7f) ? 128 + (code & 0x7f) : (code >> 8) & 0xff;
+            if (t->on_exit != NULL)
+                t->on_exit(t->context, exit_code);
+        }
+    }
+    pthread_mutex_unlock(&terminal_lock);
+}
+
+static struct terminal *terminal_find(int id) {
+    for (int i = 0; i < MAX_TERMINALS; i++)
+        if (terminals[i].id == id && id != 0)
+            return &terminals[i];
+    return NULL;
+}
+
+static void release_tty(struct tty *tty) {
+    lock(&ttys_lock);
+    tty_release(tty);
+    unlock(&ttys_lock);
+}
+
+int ledger_linux_terminal_open(int cols, int rows, ledger_linux_terminal_output output,
+                               ledger_linux_terminal_exit on_exit, void *context) {
+    if (!ledger_linux_running())
+        return -ESRCH;
+    if (cols < 2) cols = 80;
+    if (rows < 2) rows = 24;
+    pthread_mutex_lock(&spawn_lock);
+    pthread_mutex_lock(&terminal_lock);
+    struct terminal *slot = NULL;
+    for (int i = 0; i < MAX_TERMINALS && slot == NULL; i++)
+        if (terminals[i].id == 0)
+            slot = &terminals[i];
+    pthread_mutex_unlock(&terminal_lock);
+    if (slot == NULL) {
+        pthread_mutex_unlock(&spawn_lock);
+        return -EMFILE;
+    }
+
+    int err = become_new_init_child();
+    if (err < 0) {
+        pthread_mutex_unlock(&spawn_lock);
+        return err;
+    }
+    struct tty *tty = pty_open_fake(&terminal_driver);
+    if (IS_ERR(tty)) {
+        err = (int)PTR_ERR(tty);
+        goto fail;
+    }
+    tty_set_winsize(tty, (struct winsize_){.col = (word_t)cols, .row = (word_t)rows});
+
+    // Registered before the shell starts, so its first prompt is not lost.
+    pthread_mutex_lock(&terminal_lock);
+    int id = next_terminal_id++;
+    *slot = (struct terminal){.id = id, .tty = tty, .pid = current->pid, .output = output,
+                              .on_exit = on_exit, .context = context};
+    pthread_mutex_unlock(&terminal_lock);
+
+    // Opening the slave by path, not handing over the tty, is what routes it
+    // through tty_open and makes it the session's controlling terminal.
+    char slave[64];
+    snprintf(slave, sizeof(slave), "/dev/pts/%d", tty->num);
+    struct fd *fd = generic_open(slave, O_RDWR_, 0);
+    if (IS_ERR(fd)) {
+        err = (int)PTR_ERR(fd);
+        goto fail_registered;
+    }
+    fd->refcount = 0;
+    current->files->files[0] = fd_retain(fd);
+    current->files->files[1] = fd_retain(fd);
+    current->files->files[2] = fd_retain(fd);
+
+    struct fd *home = generic_open("/root", O_RDONLY_, 0);
+    if (!IS_ERR(home))
+        fs_chdir(current->fs, home);
+
+    static const char argv[] = "-sh\0" "-l\0";
+    err = do_execve("/bin/sh", 2, argv, terminal_environment);
+    if (err < 0)
+        goto fail_registered;
+    task_start(current);
+    current = NULL;
+    pthread_mutex_unlock(&spawn_lock);
+    return id;
+
+fail_registered:
+    pthread_mutex_lock(&terminal_lock);
+    *slot = (struct terminal){0};
+    pthread_mutex_unlock(&terminal_lock);
+    discard_unstarted_task(current);
+    current = NULL;
+    release_tty(tty);
+    pthread_mutex_unlock(&spawn_lock);
+    return err;
+
+fail:
+    discard_unstarted_task(current);
+    current = NULL;
+    pthread_mutex_unlock(&spawn_lock);
+    return err;
+}
+
+int ledger_linux_terminal_write(int id, const char *data, int length) {
+    if (data == NULL || length <= 0)
+        return 0;
+    pthread_mutex_lock(&terminal_lock);
+    struct terminal *t = terminal_find(id);
+    if (t == NULL || t->exited) {
+        pthread_mutex_unlock(&terminal_lock);
+        return -EPIPE;
+    }
+    struct tty *tty = t->tty;
+    // Our reference keeps the tty alive until close, so the input can go in
+    // without the table locked: a signal it raises may print, and printing
+    // takes the table's lock.
+    pthread_mutex_unlock(&terminal_lock);
+    ssize_t taken = tty_input(tty, data, (size_t)length, false);
+    if (taken == _EAGAIN)
+        return 0;
+    return taken < 0 ? -EIO : (int)taken;
+}
+
+void ledger_linux_terminal_resize(int id, int cols, int rows) {
+    if (cols < 2 || rows < 2)
+        return;
+    pthread_mutex_lock(&terminal_lock);
+    struct terminal *t = terminal_find(id);
+    struct tty *tty = t != NULL && !t->exited ? t->tty : NULL;
+    pthread_mutex_unlock(&terminal_lock);
+    if (tty != NULL)
+        tty_set_winsize(tty, (struct winsize_){.col = (word_t)cols, .row = (word_t)rows});
+}
+
+void ledger_linux_terminal_close(int id) {
+    pthread_mutex_lock(&terminal_lock);
+    struct terminal *t = terminal_find(id);
+    if (t == NULL) {
+        pthread_mutex_unlock(&terminal_lock);
+        return;
+    }
+    struct tty *tty = t->tty;
+    pid_t_ pid = t->pid;
+    bool exited = t->exited;
+    *t = (struct terminal){0};
+    pthread_mutex_unlock(&terminal_lock);
+
+    if (!exited) {
+        send_group_signal((dword_t)pid, SIGHUP_, SIGINFO_NIL);
+        send_group_signal((dword_t)pid, SIGKILL_, SIGINFO_NIL);
+    }
+    // Wakes anything still reading it, so jobs in other groups see the end.
+    lock(&tty->lock);
+    tty_hangup(tty);
+    unlock(&tty->lock);
+    release_tty(tty);
+}
+
 #else // !LEDGER_LINUX_ENGINE
 
 bool ledger_linux_available(void) { return false; }
@@ -592,5 +849,16 @@ void ledger_linux_result_free(ledger_linux_result *result) {
         result->output = NULL;
     }
 }
+int ledger_linux_terminal_open(int cols, int rows, ledger_linux_terminal_output output,
+                               ledger_linux_terminal_exit on_exit, void *context) {
+    (void)cols; (void)rows; (void)output; (void)on_exit; (void)context;
+    return -ENOSYS;
+}
+int ledger_linux_terminal_write(int id, const char *data, int length) {
+    (void)id; (void)data; (void)length;
+    return -ENOSYS;
+}
+void ledger_linux_terminal_resize(int id, int cols, int rows) { (void)id; (void)cols; (void)rows; }
+void ledger_linux_terminal_close(int id) { (void)id; }
 
 #endif

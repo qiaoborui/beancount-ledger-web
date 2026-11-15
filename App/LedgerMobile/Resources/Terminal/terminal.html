@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<link rel="stylesheet" href="xterm.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #111214; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+  #terminal { flex: 1; min-height: 0; padding: 4px 4px 0 6px; }
+  #keys { display: flex; gap: 6px; padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); background: #1b1c1f;
+          overflow-x: auto; -webkit-overflow-scrolling: touch; flex-shrink: 0; }
+  #keys button { flex: 0 0 auto; min-width: 40px; height: 34px; border: 0; border-radius: 7px; background: #2c2d31;
+                 color: #e8e8ea; font: 15px -apple-system, "SF Mono", Menlo, monospace; padding: 0 10px; }
+  #keys button.on { background: #e8e8ea; color: #111214; }
+</style>
+</head>
+<body>
+<div id="terminal"></div>
+<div id="keys">
+  <button data-send="\u001b">esc</button>
+  <button data-send="\t">tab</button>
+  <button id="ctrl">ctrl</button>
+  <button data-send="\u001b[A">↑</button>
+  <button data-send="\u001b[B">↓</button>
+  <button data-send="\u001b[D">←</button>
+  <button data-send="\u001b[C">→</button>
+  <button data-send="|">|</button>
+  <button data-send="~">~</button>
+  <button data-send="/">/</button>
+  <button data-send="-">-</button>
+  <button data-send="\u0003">^C</button>
+  <button data-send="\u0004">^D</button>
+</div>
+<script src="xterm.js"></script>
+<script src="xterm-addon-fit.js"></script>
+<script>
+(function () {
+  const post = (message) => window.webkit.messageHandlers.terminal.postMessage(message);
+  const term = new Terminal({
+    fontFamily: '"SF Mono", Menlo, monospace',
+    fontSize: 13,
+    cursorBlink: true,
+    scrollback: 5000,
+    theme: { background: '#111214', foreground: '#e8e8ea', cursor: '#e8e8ea' },
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById('terminal'));
+
+  let ctrl = false;
+  const ctrlButton = document.getElementById('ctrl');
+  const setCtrl = (on) => { ctrl = on; ctrlButton.classList.toggle('on', on); };
+  const send = (data) => post({ type: 'input', data: data });
+
+  term.onData((data) => {
+    if (ctrl && data.length === 1) {
+      const code = data.toUpperCase().charCodeAt(0);
+      if (code >= 64 && code <= 95) data = String.fromCharCode(code - 64);
+      setCtrl(false);
+    }
+    send(data);
+  });
+  term.onBinary((data) => post({ type: 'binary', data: data }));
+
+  document.querySelectorAll('#keys button[data-send]').forEach((button) => {
+    const value = JSON.parse('"' + button.dataset.send + '"');
+    button.addEventListener('mousedown', (event) => event.preventDefault());
+    button.addEventListener('click', () => { send(value); term.focus(); });
+  });
+  ctrlButton.addEventListener('mousedown', (event) => event.preventDefault());
+  ctrlButton.addEventListener('click', () => { setCtrl(!ctrl); term.focus(); });
+
+  let lastSize = '';
+  const resize = () => {
+    try { fit.fit(); } catch (e) {}
+    const size = term.cols + 'x' + term.rows;
+    if (size !== lastSize) {
+      lastSize = size;
+      post({ type: 'resize', cols: term.cols, rows: term.rows });
+    }
+  };
+  window.addEventListener('resize', resize);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', () => {
+    document.body.style.height = window.visualViewport.height + 'px';
+    resize();
+  });
+
+  const decode = (base64) => {
+    const text = atob(base64);
+    const bytes = new Uint8Array(text.length);
+    for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i);
+    return bytes;
+  };
+  window.ledgerTerminal = {
+    write: (base64) => term.write(decode(base64)),
+    reset: () => term.reset(),
+    focus: () => term.focus(),
+  };
+
+  resize();
+  post({ type: 'ready', cols: term.cols, rows: term.rows });
+  term.focus();
+})();
+</script>
+</body>
+</html>

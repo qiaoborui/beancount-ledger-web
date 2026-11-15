@@ -41,6 +41,9 @@ final class LedgerLinuxMachine: @unchecked Sendable {
     private let lock = NSLock()
     /// One command at a time, from the request to the result.
     private let gate = NSLock()
+    /// Unpacking and booting, which the assistant and the terminal may both
+    /// ask for at once.
+    private let bootLock = NSLock()
     private var bootAttempted = false
     private var bootError: String?
     private var activeID: String?
@@ -151,7 +154,15 @@ final class LedgerLinuxMachine: @unchecked Sendable {
 
     /// Unpacks and boots on first use. A failed boot is remembered: the
     /// engine cannot boot twice in one process.
+    /// Unpacks and boots if that has not happened yet, for the terminal and
+    /// the file manager. Blocks; call it off the main thread.
+    func boot() throws {
+        try ensureBooted()
+    }
+
     private func ensureBooted() throws {
+        bootLock.lock()
+        defer { bootLock.unlock() }
         if let error = lock.withLock({ bootAttempted ? (bootError ?? "") : nil }) {
             if !error.isEmpty { throw Failure.message(error) }
             #if canImport(LedgerLinux)
