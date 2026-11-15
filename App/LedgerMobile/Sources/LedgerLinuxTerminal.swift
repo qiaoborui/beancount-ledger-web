@@ -232,6 +232,9 @@ struct LedgerLinuxTerminalScreen: View {
             }
             .navigationTitle("终端")
             .navigationBarTitleDisplayMode(.inline)
+            // The terminal is dark in either mode, so its bar is too; a
+            // light-mode title would be black on black.
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("重新开始", systemImage: "arrow.counterclockwise") { restart() }

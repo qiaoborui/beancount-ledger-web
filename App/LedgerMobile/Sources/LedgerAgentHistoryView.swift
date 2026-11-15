@@ -545,7 +545,7 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                     .opacity(progress > 0 ? 1 : 0)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
-                LinearGradient(colors: [.black.opacity(0), .black.opacity(colorScheme == .dark ? 0.12 : 0.09)],
+                LinearGradient(colors: [.black.opacity(0), .black.opacity(colorScheme == .dark ? 0.35 : 0.09)],
                                startPoint: .leading, endPoint: .trailing)
                     .frame(width: 22)
                     .offset(x: -22)
