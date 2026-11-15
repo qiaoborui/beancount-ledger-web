@@ -15,7 +15,8 @@
 4. **账本同步：按内容寻址上传快照，结果以“补丁”回来，由手机用现有 `LedgerAgentMerge` 三方合并。** 云端从不直接写账本、不拿 GitHub token。
 5. **云端运行时：先自建一个 Go 小服务 `ledger-agentd`（SQLite 收件箱 + Docker/gVisor 沙箱），部署在现有的自托管 Docker 主机上，用 Cloudflare Tunnel 暴露。** 额外成本约等于 0；沙箱做成接口，以后可以一行配置换成 Modal / E2B。
 6. **事件驱动照用户给的图做：** handler 写 inbox 表（按事件 ID 去重）→ 唤醒 worker → worker 取 pending、按会话串行启动 run → 等完成 → 标 done → 写 outbox 并推送。
-7. **最小可用版本 = 只做 `sandbox_exec`。** 先解决“没法用 bash / python”，不需要收件箱、不需要推送。收件箱、后台任务、定时任务放在第二、三阶段。
+7. **手机上不内置 Alpine，但加一个本地 `run_python`。** App 里已经内置了 CPython 3.14（给 Beancount 校验用），直接让助手在里面跑 python，离线、零服务器。iOS 上跑完整 Linux（iSH 式 x86 模拟、WASM 里的虚拟机）又慢又大，后台也跑不住，不值得；bash 和真正的 Linux 留给云端。详见第 7 节。
+8. **最小可用版本 = 本地 `run_python`，然后才是云端 `sandbox_exec`。** 第一步不需要任何服务器；收件箱、后台任务、定时任务放在后面的阶段。
 
 下面逐条展开。
 
@@ -162,6 +163,7 @@ Git 存储的用户以后可以加一个优化（云端直接按 commit 拉）�
 | **A. 自建 Go 小服务 + Docker/gVisor（推荐）** | `ledger-agentd` 单二进制 + SQLite + 本机 Docker 起沙箱 | 用现有自托管主机：≈ 0；新开一台小 VPS：约 5 美元级 | 账本不出自己的机器；和仓库同语言；agent 内核与手机共用；没有新供应商 | 要自己维护主机、沙箱隔离；家里主机断电就没了 |
 | B. 自建服务 + 托管沙箱（Modal / E2B） | agentd 同上，沙箱调 Modal / E2B | 30 小时 × 约 0.07–0.12 美元/小时 ≈ 2–4 美元，Modal 每月有 30 美元免费额度，E2B 有一次性 100 美元额度 | 沙箱零运维、隔离更强 | 账本内容交给第三方（美国）；多一跳延迟；国内访问不稳定 |
 | C. Cloudflare（Worker + Durable Objects + Containers/Sandbox） | 收件箱用 DO/D1，定时用 Cron Triggers，沙箱用 Containers | Workers 付费版 5 美元/月起，用量很小 | 全球可达，收件箱/定时/串行天然契合 | 收件箱要用 TS 重写，Go 内核只能跑在容器里；两种语言两套部署 |
+| E. 自托管的“开源 Managed Agents”：[Omnara](https://github.com/omnara-ai/omnara)（Go，Apache-2.0） | 在主机上用 compose 跑 Omnara（API、worker、Postgres、Redis、blob），代码跑在 gVisor 容器里的 `omnarad`；云端改账本只能调一个由手机执行的自定义工具 `propose_ledger_change`，调用会停住等手机合并、你确认后交回结果 | 自有主机 ≈ 0 | 收件箱、worker、cron、SSE、webhook 都现成；“改账本必须你点头”由它的自定义工具机制天然保证 | 主机上多一整套服务要维护；云端循环和手机上的 PiG 是两套；项目年轻，API 可能变；要自己写 Swift 客户端（只有 TS SDK） |
 | D. 托管 agent 服务（Claude Managed Agents、OpenAI 托管等） | 整个 agent 交给厂商 | 按量 | 最省事 | 锁死单一模型厂商，和“多 provider”的选择冲突；账本和 transcript 都在厂商那里 |
 
 价格来源：Modal 官方定价页（沙箱按 3 倍非抢占价计费）、Cloudflare Containers 定价页、以及 Fly.io 2026-09 的沙箱价格对比文章（E2B、Daytona 等的数字来自这篇第三方文章，未逐个核对官网）。
@@ -242,9 +244,13 @@ App 是 SideStore 个人团队签名，**拿不到 APNs**，所以：
 
 ## 6. 分阶段落地
 
-### 第 1 阶段（最小可用）：云端沙箱工具
+### 第 0 阶段：本地 `run_python`（不需要服务器）
 
-目标：手机上的助手能跑 bash / python。
+目标：离线也能用 python 算账。做法见第 7.3 节。验收：问“按月算一下近两年餐饮支出的趋势和同比”，助手写 python 在手机上算出来；断网也能用。
+
+### 第 1 阶段：云端沙箱工具
+
+目标：手机上的助手能跑 bash，以及装任意包的 python。
 
 - 抽 `agentcore`：先只抽工具描述和 `remoteTool` 适配器，循环暂不动。
 - `ledger-agentd`：设备令牌鉴权、blob 存储、`/mcp` 暴露 `sandbox_exec`、Docker + gVisor 沙箱（每会话一个，空闲 10 分钟销毁），镜像内置 Python 3、beancount 3、beanquery、pandas、matplotlib、openpyxl、pdfplumber。
@@ -273,12 +279,44 @@ App 是 SideStore 个人团队签名，**拿不到 APNs**，所以：
 - Git 存储用户直接按 commit 同步。
 - 放开云端改动的自动写入。
 
+## 7. 手机本地沙箱：能不能像 ServerBox 那样内置一个 Alpine
+
+Borui 看到 [ServerBox](https://github.com/madeye/ServerBox) 想到能不能在 App 里内置 Alpine。调研结论：**ServerBox 的做法搬不到 iOS 上，内置完整 Linux 也不推荐；推荐用 App 已有的 CPython 做一个本地 `run_python`。**
+
+### 7.1 ServerBox 是怎么做的
+
+- 它是 **Android** App（GPL-3.0，UserLAnd 的分叉），用 **PRoot** 在用户态跑 Alpine / Debian 等发行版：PRoot 靠 `ptrace` 截获系统调用、改写路径，跑的是原生 arm64 二进制。另有一条走 Android 虚拟化框架（AVF）的真虚拟机路线。
+- iOS 上这两条都走不通：App 沙箱里**没有 `fork` / `exec` / `ptrace`**，不能启动任何子进程；第三方 App 也拿不到 Hypervisor 能力。
+
+### 7.2 iOS 上真正可行的几条路
+
+| 方案 | 原理 | 能做什么 | 体积（估） | 速度 | 问题 |
+|---|---|---|---|---|---|
+| **A. 内置 CPython 跑 `run_python`（推荐）** | 复用已内置的 BeeWare CPython 3.14，在进程内执行模型写的代码 | python 标准库、beancount、beanquery；纯 python 包；numpy/pandas 需要 iOS 版的二进制包（BeeWare 有 iOS wheel 的构建链，具体可用版本待核实） | 已有，几乎不增加；加 numpy/pandas 约多几十 MB | 原生速度 | 没有 bash、不能 `subprocess`；进程内执行，隔离靠审计钩子，属于“尽力而为” |
+| B. iSH 式 x86 模拟 + Alpine | [iSH](https://github.com/ish-app/ish)：用户态 x86 模拟 + 系统调用翻译，线程化解释器，不需要 JIT，已上架 App Store | 真正的 Alpine（i386）：`apk add`、bash、python3 | rootfs 几 MB，装上 python 后几十 MB | 解释执行，明显比原生慢（经验上大约一个数量级，未实测）；`pip install` 很慢 | iSH 是完整 App，不是可嵌入库，要抽它的内核和模拟器；32 位 x86，很多现代包没有 i386 版本；后台被挂起就停 |
+| C. WKWebView 里跑 WASM（Pyodide，或 WASM 里的 x86 虚拟机跑 Alpine） | WebKit 的 WebContent 进程有 JIT，第三方 App 自己的进程没有 | Pyodide 带 numpy/pandas；虚拟机路线有真 Linux | Pyodide 加科学计算包约几十 MB；虚拟机镜像更大 | Pyodide 尚可；WASM 里再模拟 x86 很慢 | 要在网页和原生之间搬文件；App 进后台后 WebContent 进程会被节流或挂起，和助手的后台运行冲突 |
+| D. a-Shell 式 `ios_system` | [a-Shell](https://github.com/holzschu/a-shell)（BSD-3）把 ls/grep/sed/awk/curl/python 等编成进程内函数，C 程序编成 WASM 跑 | 一个“像 shell”的环境 | 中等 | 原生 | 不是真 bash；python 只能装纯 python 包；集成工作量不小 |
+| E. QEMU 解释模式跑完整 VM（UTM SE 那种） | 不用 JIT 的 TCG 解释器 | 完整 aarch64 Alpine | 上百 MB | 非常慢 | 不实用 |
+| F. 开 JIT（SideStore + StikDebug） | 调试器附加后允许 JIT，配合 QEMU/UTM | 接近能用的 VM | 上百 MB | 尚可 | 每次启动都要手动开 JIT，iOS 一升级就可能失效，不能当默认依赖 |
+
+### 7.3 推荐：本地 `run_python`
+
+- **执行**：在已有的嵌入解释器里，开一个独立命名空间运行模型写的代码；工作目录是本会话的草稿副本（`runtime/agent/<id>/workspace`），改动自然进草稿、走变更卡。
+- **限制**：
+  - 超时（例如 30 秒）后用异步异常打断；输出截断。
+  - `sys.addaudithook` 拦截 `socket`、`subprocess`、`os.system`，`open` 只允许草稿目录和一个临时输出目录。这只是尽力而为的隔离（代码是你自己的模型写的，草稿本来就是副本），**不当安全边界**，真要隔离的任务交给云端。
+  - 与 Beancount 校验共用一把 GIL：执行时串行，校验优先。
+- **产物**：写到输出目录的 PNG/CSV 作为附件显示在回复里（matplotlib 能用的前提是有 iOS 版的包）。
+- **路由**：本地 `run_python` 优先；需要 bash、任意 `pip install`、联网、长时间运行、后台或定时，才走云端。
+- **先核实**：BeeWare 生态目前能拿到哪些 iOS 版 numpy / pandas / matplotlib，以及加进 IPA 后的体积。拿不到就先只提供标准库 + beancount，这已经覆盖大部分“BQL 算不了”的统计。
+
 ## 不做什么
 
 - 不用单独的路由模型。
 - 云端不直接写账本、不拿 GitHub token。
 - 不复用旧的 Bub（Python）agent，也不用托管 agent 服务，以免锁定单一模型厂商。
 - 第一版不做多设备、多用户。
+- 不在 App 里内置完整 Linux（iSH 式模拟、WASM 虚拟机、QEMU）。
 
 ## 需要 Borui 确认的
 
