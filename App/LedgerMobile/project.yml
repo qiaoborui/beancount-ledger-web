@@ -26,12 +26,15 @@ targets:
       - Sources
       - Resources
       # The built-in Linux's root filesystem and the engine's licences, from
-      # scripts/build-linux-ios.sh.
+      # scripts/build-linux-ios.sh. Optional so the widget scheme, which
+      # builds no frameworks, can still generate the project.
       - path: ../../server/.build/linux-ios/alpine-minirootfs.tar.gz
         buildPhase: resources
+        optional: true
       - path: ../../server/.build/linux-ios/licenses
         type: folder
         buildPhase: resources
+        optional: true
     dependencies:
       - sdk: libresolv.tbd
       - sdk: libsqlite3.tbd
