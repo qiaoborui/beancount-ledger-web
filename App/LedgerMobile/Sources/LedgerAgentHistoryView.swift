@@ -17,6 +17,9 @@ struct LedgerAgentHistoryView: View {
     var close: () -> Void
     /// Opens 助手设置 on the chat page.
     var openSettings: () -> Void
+    /// Opens one of the places at the top of the drawer on the chat page's
+    /// navigation stack.
+    var openRoute: (LedgerAgentDrawerRoute) -> Void
     /// A drag to the left on the header or the footer, which moves the
     /// drawer with the finger and closes it when let go far or fast enough.
     var closeDrag: LedgerAgentDrawerDrag
@@ -44,6 +47,12 @@ struct LedgerAgentHistoryView: View {
         VStack(spacing: 0) {
             header
             List {
+                // Claude puts its places (项目, Code, …) above the
+                // conversations; these are the assistant's. A search is about
+                // conversations, so they step aside while one is typed.
+                if query.isEmpty {
+                    ForEach(LedgerAgentDrawerRoute.available) { route in place(route) }
+                }
                 if sessions.saved.isEmpty {
                     note("还没有历史对话。问过的问题会按账本存在本机。")
                 } else if groups.isEmpty {
@@ -155,6 +164,31 @@ struct LedgerAgentHistoryView: View {
             .listRowInsets(EdgeInsets(top: 18, leading: 24, bottom: 6, trailing: 16))
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
+    }
+
+    /// A place: its symbol and name, set like a conversation row.
+    private func place(_ route: LedgerAgentDrawerRoute) -> some View {
+        Button {
+            close()
+            openRoute(route)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: route.symbol).font(.system(size: 18, weight: .regular))
+                    .foregroundStyle(BalancedPalette.ink)
+                    .frame(width: 26)
+                    .accessibilityHidden(true)
+                Text(route.title).balancedFont(size: 17).foregroundStyle(BalancedPalette.ink)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+            }
+            .frame(minHeight: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 0, leading: 22, bottom: 0, trailing: 22))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        .accessibilityIdentifier("ledger-agent-drawer-\(route.rawValue)")
     }
 
     private func note(_ text: LocalizedStringKey) -> some View {
@@ -319,9 +353,41 @@ extension View {
     /// the page stays put and the drawer slides over it. The page is hidden
     /// from assistive technology while the drawer is open.
     func ledgerAgentHistoryDrawer(isPresented: Binding<Bool>, edgeOpens: Bool, sharesText: Bool,
-                                  openSettings: @escaping () -> Void) -> some View {
+                                  openSettings: @escaping () -> Void,
+                                  openRoute: @escaping (LedgerAgentDrawerRoute) -> Void) -> some View {
         modifier(LedgerAgentHistoryDrawer(isPresented: isPresented, edgeOpens: edgeOpens, sharesText: sharesText,
-                                          openSettings: openSettings))
+                                          openSettings: openSettings, openRoute: openRoute))
+    }
+}
+
+/// The places at the top of the drawer, pushed on the chat page's stack:
+/// the built-in Linux's terminal and files when the engine is in this
+/// build, then the assistant's skills and memory.
+enum LedgerAgentDrawerRoute: String, Identifiable, Hashable, CaseIterable {
+    case terminal, files, skills, memory
+
+    var id: String { rawValue }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .terminal: "终端"
+        case .files: "Linux 文件"
+        case .skills: "技能"
+        case .memory: "记忆"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .terminal: "terminal"
+        case .files: "folder"
+        case .skills: "book.pages"
+        case .memory: "brain"
+        }
+    }
+
+    static var available: [LedgerAgentDrawerRoute] {
+        LedgerLinuxMachine.engineAvailable ? allCases : [.skills, .memory]
     }
 }
 
@@ -347,6 +413,7 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     var edgeOpens: Bool
     var sharesText: Bool
     var openSettings: () -> Void
+    var openRoute: (LedgerAgentDrawerRoute) -> Void
 
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -436,7 +503,7 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
 
     private var drawer: some View {
         LedgerAgentHistoryView(sharesText: sharesText, close: { isPresented = false },
-                               openSettings: openSettings, closeDrag: closeDrag)
+                               openSettings: openSettings, openRoute: openRoute, closeDrag: closeDrag)
             .frame(width: width)
             .frame(maxHeight: .infinity)
             .background {

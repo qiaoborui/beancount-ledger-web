@@ -61,6 +61,9 @@ private struct LedgerAgentChatScreen: View {
     @State private var draft = ""
     @State private var historyPresented = false
     @State private var memoryPresented = false
+    /// A place picked at the top of the history drawer, pushed on this
+    /// page's stack.
+    @State private var drawerRoute: LedgerAgentDrawerRoute?
     /// When the app last left the screen, for a recap on a long absence.
     @State private var awaySince: Date?
     @State private var settingsPresented = false
@@ -148,8 +151,16 @@ private struct LedgerAgentChatScreen: View {
         // A drag from the leading edge opens it on a root page; a pushed one
         // leaves that edge to the system's back swipe.
         .ledgerAgentHistoryDrawer(isPresented: $historyPresented, edgeOpens: isRoot && settings.isReady,
-                                  sharesText: session.amountsVisible) {
-            settingsPresented = true
+                                  sharesText: session.amountsVisible,
+                                  openSettings: { settingsPresented = true },
+                                  openRoute: { drawerRoute = $0 })
+        .navigationDestination(item: $drawerRoute) { route in
+            switch route {
+            case .terminal: LedgerLinuxTerminalScreen()
+            case .files: LedgerLinuxFilesView(path: "/root")
+            case .skills: LedgerAgentSkillsView()
+            case .memory: LedgerAgentMemoryView()
+            }
         }
         .onChange(of: historyPresented) { _, shown in if shown { composerFocused = false } }
         .fileImporter(isPresented: $choosingFiles, allowedContentTypes: LedgerAgentAttachments.pickerTypes,
