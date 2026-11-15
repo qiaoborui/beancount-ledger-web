@@ -102,7 +102,7 @@ struct LedgerAgentHistoryView: View {
                 }
                 .padding(.horizontal, 14)
                 .frame(minHeight: 44)
-                .background(Capsule().fill(BalancedPalette.sunken))
+                .background(Capsule().fill(LedgerAgentHistoryDrawer.selectedFill))
                 .transition(.opacity)
             } else {
                 Text("账本助手")
@@ -123,7 +123,7 @@ struct LedgerAgentHistoryView: View {
                     .foregroundStyle(BalancedPalette.ink)
                     .frame(width: 44, height: 44)
                     .background {
-                        if !LedgerGlass.isAvailable { Circle().fill(BalancedPalette.sunken) }
+                        if !LedgerGlass.isAvailable { Circle().fill(LedgerAgentHistoryDrawer.selectedFill) }
                     }
                     .ledgerGlassControl()
                     .contentShape(Circle())
@@ -177,7 +177,7 @@ struct LedgerAgentHistoryView: View {
         // from the drawer's edges like Claude's selected row.
         .listRowBackground(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(item.id == sessions.current.id ? BalancedPalette.sunken : Color.clear)
+                .fill(item.id == sessions.current.id ? LedgerAgentHistoryDrawer.selectedFill : Color.clear)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 1)
         )
@@ -264,7 +264,7 @@ struct LedgerAgentHistoryView: View {
                     .frame(width: 48, height: 48)
                     .background {
                         if !LedgerGlass.isAvailable {
-                            Circle().fill(BalancedPalette.sunken)
+                            Circle().fill(LedgerAgentHistoryDrawer.selectedFill)
                         }
                     }
                     .ledgerGlassControl()
@@ -295,9 +295,9 @@ struct LedgerAgentHistoryView: View {
         .padding(.top, 12)
         .padding(.bottom, 4)
         .background {
-            LinearGradient(stops: [.init(color: BalancedPalette.page.opacity(0), location: 0),
-                                   .init(color: BalancedPalette.page.opacity(0.9), location: 0.4),
-                                   .init(color: BalancedPalette.page, location: 1)],
+            LinearGradient(stops: [.init(color: LedgerAgentHistoryDrawer.fill.opacity(0), location: 0),
+                                   .init(color: LedgerAgentHistoryDrawer.fill.opacity(0.9), location: 0.4),
+                                   .init(color: LedgerAgentHistoryDrawer.fill, location: 1)],
                            startPoint: .top, endPoint: .bottom)
                 .padding(.top, -24)
                 .ignoresSafeArea(edges: .bottom)
@@ -333,7 +333,10 @@ struct LedgerAgentDrawerDrag {
     var ended: (CGFloat, CGFloat) -> Void
 
     var gesture: some Gesture {
-        DragGesture(minimumDistance: 12)
+        // Measured on the screen, not on the view: the view moves with the
+        // finger, and a translation read in its own space would feed back
+        // into itself and make the drawer shake.
+        DragGesture(minimumDistance: 12, coordinateSpace: .global)
             .onChanged { changed($0.translation.width) }
             .onEnded { ended($0.translation.width, $0.velocity.width) }
     }
@@ -354,9 +357,24 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     /// The drawer is in the view tree: from the moment it starts to come out
     /// until it is all the way back in.
     @State private var mounted = false
+    /// Counts the moments the drawer comes out, for the haptic tap.
+    @State private var openTicks = 0
+    /// The edge drag in progress has already tapped, on passing the point
+    /// where letting go opens the drawer.
+    @State private var tickedThisDrag = false
 
     private static let overShape = UnevenRoundedRectangle(bottomTrailingRadius: 28, topTrailingRadius: 28,
                                                           style: .continuous)
+    /// The drawer's ground. In light mode it is a step darker than the page,
+    /// as Claude's sidebar is, so the page lying over it reads as a card;
+    /// in dark mode the page is dimmed instead, so the ground stays the page.
+    static let fill = Color(uiColor: UIColor {
+        $0.userInterfaceStyle == .dark ? UIColor(hex: 0x121110) : UIColor(hex: 0xF1EFE9)
+    })
+    /// The selected row and the search field on that ground.
+    static let selectedFill = Color(uiColor: UIColor {
+        $0.userInterfaceStyle == .dark ? UIColor(hex: 0x1B1918) : UIColor(hex: 0xE6E2D9)
+    })
     /// Light mode lifts the pushed page towards white, dark mode dims it.
     private static let veil = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .black : .white })
 
@@ -393,6 +411,10 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                         changed: { dx in
                             mounted = true
                             reveal = min(width, max(0, dx))
+                            if dx > width * 0.35 && !tickedThisDrag {
+                                tickedThisDrag = true
+                                openTicks += 1
+                            }
                         },
                         ended: { dx, speed in finish(open: (dx > width * 0.35 && speed > -300) || speed > 600) })
                 }
@@ -402,7 +424,12 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                 drawer.zIndex(pushes ? -1 : 1)
             }
         }
-        .onChange(of: isPresented) { _, _ in settle() }
+        .sensoryFeedback(.impact(weight: .medium), trigger: openTicks)
+        .onChange(of: isPresented) { _, shown in
+            if shown && !tickedThisDrag { openTicks += 1 }
+            tickedThisDrag = false
+            settle()
+        }
         .onChange(of: width) { _, _ in if isPresented { reveal = width } }
         .onAppear { if isPresented { settle() } }
     }
@@ -414,14 +441,16 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
             .frame(maxHeight: .infinity)
             .background {
                 if pushes {
-                    Rectangle().fill(BalancedPalette.page).ignoresSafeArea()
+                    Rectangle().fill(Self.fill).ignoresSafeArea()
                 } else {
-                    Self.overShape.fill(BalancedPalette.page)
+                    Self.overShape.fill(Self.fill)
                         .shadow(color: .black.opacity(0.18 * progress), radius: 24, x: 8, y: 0)
                         .ignoresSafeArea()
                 }
             }
-            .offset(x: reveal - width)
+            // Compact width: the drawer lies still under the page and the
+            // page is drawn aside to show it. Regular width: it slides in.
+            .offset(x: pushes ? 0 : reveal - width)
             .accessibilityHidden(!isPresented)
             .accessibilityAddTraits(.isModal)
             .accessibilityAction(.escape) { isPresented = false }
@@ -444,7 +473,7 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                 .accessibilityHidden(!isPresented)
             if pushes {
                 LedgerAgentCardCorners(radius: 44)
-                    .fill(BalancedPalette.page)
+                    .fill(Self.fill)
                     .ignoresSafeArea()
                     .opacity(progress > 0 ? 1 : 0)
                     .allowsHitTesting(false)
@@ -462,14 +491,23 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     }
 
     private func finish(open: Bool) {
-        if open != isPresented { isPresented = open } else { settle() }
+        if open != isPresented {
+            isPresented = open
+        } else {
+            tickedThisDrag = false
+            settle()
+        }
     }
 
     /// Brings the drawer to where `isPresented` says it is, and takes it out
-    /// of the view tree once it is all the way in.
+    /// of the view tree once it is all the way in. That waits for the
+    /// animation to be fully removed, not just logically complete: a spring
+    /// is "logically complete" while the page is still a point or so from
+    /// the edge, and taking the drawer away then flashed the empty strip
+    /// behind it.
     private func settle() {
         if isPresented { mounted = true }
-        withAnimation(settling) {
+        withAnimation(settling, completionCriteria: .removed) {
             reveal = isPresented ? width : 0
         } completion: {
             if !isPresented && reveal == 0 { mounted = false }
