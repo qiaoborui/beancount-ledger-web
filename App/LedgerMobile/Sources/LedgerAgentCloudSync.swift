@@ -22,6 +22,7 @@ import UIKit
 /// <folder>/ledgers/<key>/files/agent-memory.md
 /// <folder>/ledgers/<key>/files/agent-history/<id>.json, <id>.transcript, <id>.<leaf>.transcript
 /// <folder>/ledgers/<key>/files/agent-attachments/<id>/<file>
+/// <folder>/ledgers/<key>/files/agent-artifacts/<artifact-id>.json
 /// ```
 ///
 /// `<key>` comes from the ledger's Git remote, or its name, rather than its
@@ -32,8 +33,8 @@ import UIKit
 /// - Changed on one side only: that side wins, deletions included.
 /// - Changed on both: memory.md is merged line by line; a conversation keeps
 ///   the record with the later `updatedAt`, and its transcripts and
-///   attachments follow that record; deleted on one side and changed on the
-///   other keeps the change.
+///   attachments follow that record; an artifact keeps the newer file;
+///   deleted on one side and changed on the other keeps the change.
 /// API keys live in the Keychain and are never read here.
 enum LedgerAgentSyncLayout {
     static let markerName = "agent-sync.json"
@@ -45,6 +46,7 @@ enum LedgerAgentSyncLayout {
     static let memoryPath = "agent-memory.md"
     static let historyDirectory = "agent-history"
     static let attachmentsDirectory = "agent-attachments"
+    static let artifactsDirectory = "agent-artifacts"
 
     struct Marker: Codable, Equatable, Sendable {
         var formatVersion = LedgerAgentSyncLayout.formatVersion
@@ -87,6 +89,9 @@ enum LedgerAgentSyncLayout {
         guard !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { return false }
         if parts == [memoryPath] { return true }
         if parts.count == 2, parts[0] == historyDirectory { return isHistoryFile(parts[1]) }
+        if parts.count == 2, parts[0] == artifactsDirectory, parts[1].hasSuffix(".json") {
+            return LedgerAgentArtifactSpec.isValidID(String(parts[1].dropLast(5)))
+        }
         if attachments, parts.count == 3, parts[0] == attachmentsDirectory {
             return UUID(uuidString: parts[1]) != nil && !parts[2].hasPrefix(".")
         }
@@ -405,6 +410,10 @@ struct LedgerAgentSyncEngine: Sendable {
         for name in (try? fileManager.contentsOfDirectory(atPath: history.path)) ?? [] {
             add(LedgerAgentSyncLayout.historyDirectory + "/" + name)
         }
+        let artifacts = runtime.appendingPathComponent(LedgerAgentSyncLayout.artifactsDirectory, isDirectory: true)
+        for name in (try? fileManager.contentsOfDirectory(atPath: artifacts.path)) ?? [] {
+            add(LedgerAgentSyncLayout.artifactsDirectory + "/" + name)
+        }
         if includesAttachments {
             let attachments = runtime.appendingPathComponent(LedgerAgentSyncLayout.attachmentsDirectory, isDirectory: true)
             for id in (try? fileManager.contentsOfDirectory(atPath: attachments.path)) ?? [] where UUID(uuidString: id) != nil {
@@ -425,6 +434,8 @@ struct LedgerAgentSyncEngine: Sendable {
         add(LedgerAgentSyncLayout.memoryPath)
         let history = remote.appendingPathComponent(LedgerAgentSyncLayout.historyDirectory, isDirectory: true)
         for name in try FolderFiles.names(in: history) { add(LedgerAgentSyncLayout.historyDirectory + "/" + name) }
+        let artifacts = remote.appendingPathComponent(LedgerAgentSyncLayout.artifactsDirectory, isDirectory: true)
+        for name in try FolderFiles.names(in: artifacts) { add(LedgerAgentSyncLayout.artifactsDirectory + "/" + name) }
         if includesAttachments {
             let attachments = remote.appendingPathComponent(LedgerAgentSyncLayout.attachmentsDirectory, isDirectory: true)
             for id in try FolderFiles.names(in: attachments) where UUID(uuidString: id) != nil {
@@ -769,7 +780,10 @@ final class LedgerAgentCloudSync: ObservableObject {
             otherLedgers = others
             currentKey = key
             error = report.failed > 0 ? String(localized: "有 \(report.failed) 个文件这次没有同步，稍后会再试。") : nil
-            if report.changedLocally { LedgerAgentSessions.shared.reloadSaved() }
+            if report.changedLocally {
+                LedgerAgentSessions.shared.reloadSaved()
+                LedgerAgentArtifactShelf.shared.changed()
+            }
         } catch {
             guard self.repository?.descriptor.id == descriptor.id else { return }
             self.error = error.localizedDescription

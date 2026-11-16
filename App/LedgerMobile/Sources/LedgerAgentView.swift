@@ -161,6 +161,14 @@ private struct LedgerAgentChatScreen: View {
             case .files: LedgerLinuxFilesView(path: "/root")
             case .skills: LedgerAgentSkillsView()
             case .memory: LedgerAgentMemoryView()
+            case .artifacts:
+                LedgerAgentArtifactsView(onRevise: { artifact in
+                    drawerRoute = nil
+                    revise(artifact)
+                }, onAsk: { question in
+                    drawerRoute = nil
+                    ask(question)
+                })
             }
         }
         .onChange(of: historyPresented) { _, shown in if shown { composerFocused = false } }
@@ -268,6 +276,8 @@ private struct LedgerAgentChatScreen: View {
             session.openWidgetURL(url)
             return .handled
         })
+        // 继续修改 on an artifact leaves a request naming it in the composer.
+        .environment(\.ledgerAgentReviseArtifact, LedgerAgentReviseArtifact { revise($0) })
         .accessibilityIdentifier("ledger-agent")
     }
 
@@ -755,6 +765,14 @@ private struct LedgerAgentChatScreen: View {
         if editing == nil { draftBeforeEdit = draft }
         editing = message.id
         draft = message.text
+        composerFocused = true
+    }
+
+    /// Puts a request to change an artifact in the composer, for the user
+    /// to say what to change.
+    private func revise(_ artifact: LedgerAgentArtifactSpec) {
+        cancelEditing()
+        draft = artifact.revisionPrompt
         composerFocused = true
     }
 
@@ -2224,6 +2242,10 @@ struct LedgerAgentReplyBlock: View {
             LedgerAgentVisualView(visual: visual, onAsk: onAsk)
         case let .drawing(title):
             LedgerAgentVisualPlaceholder(title: title)
+        case let .artifact(artifact):
+            LedgerAgentArtifactCard(artifact: artifact, onAsk: onAsk)
+        case let .buildingArtifact(title):
+            LedgerAgentArtifactBuildingCard(title: title)
         }
     }
 

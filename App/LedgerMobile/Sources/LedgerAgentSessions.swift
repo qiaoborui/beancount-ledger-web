@@ -213,6 +213,9 @@ final class LedgerAgentSessions: ObservableObject {
         var pruneBranchTranscripts: @Sendable (UUID, Set<UUID>) async -> Void = { _, _ in }
         /// Drops attachment files of conversations other than these.
         var sweepAttachments: @Sendable (Set<UUID>) async -> Void = { _ in }
+        /// The ledger's artifacts, by id; see `LedgerAgentArtifactRecord`.
+        var loadArtifact: @Sendable (String) async -> Data? = { _ in nil }
+        var saveArtifact: @Sendable (String, Data) async throws -> Void = { _, _ in }
     }
 
     @Published private(set) var current: LedgerAgentConversation
@@ -472,8 +475,23 @@ final class LedgerAgentSessions: ObservableObject {
             ?? (conversation.clearsStoredTranscript ? Data() : nil)
         let branchTranscripts = conversation.takeUnsavedBranchTranscripts()
         let leaves = conversation.thread.inactiveLeaves
+        // The artifacts the latest answer wrote. Each reply's version is
+        // saved once, so saving the conversation again adds nothing.
+        let answer = conversation.messages.last.flatMap { $0.role == .assistant && !$0.stopped ? $0 : nil }
+        let artifacts = answer.map { LedgerAgentArtifactRecord.specs(in: $0.text) } ?? []
+        let conversationID = record.id
         Task {
             try? await storage.save(record.id, data)
+            if let answer {
+                for spec in artifacts {
+                    let existing = await storage.loadArtifact(spec.id).flatMap(LedgerAgentArtifactRecord.decode)
+                    guard let next = LedgerAgentArtifactRecord.recording(spec, in: existing, conversation: conversationID,
+                                                                         message: answer.id),
+                          let encoded = try? LedgerAgentArtifactRecord.encoder.encode(next) else { continue }
+                    try? await storage.saveArtifact(spec.id, encoded)
+                }
+                if !artifacts.isEmpty { LedgerAgentArtifactShelf.shared.changed() }
+            }
             if let transcript { try? await storage.saveTranscript(record.id, transcript) }
             for (leaf, text) in branchTranscripts {
                 try? await storage.saveBranchTranscript(record.id, leaf, Data(text.utf8))
@@ -553,6 +571,8 @@ extension LedgerAgentSessions.Storage {
             saveBranchTranscript: { try await workspace.saveAgentBranchTranscript(id: $0, leaf: $1, data: $2) },
             loadBranchTranscript: { await workspace.agentBranchTranscript(id: $0, leaf: $1) },
             pruneBranchTranscripts: { await workspace.removeAgentBranchTranscripts(id: $0, keeping: $1) },
-            sweepAttachments: { await workspace.removeAgentAttachments(keeping: $0) })
+            sweepAttachments: { await workspace.removeAgentAttachments(keeping: $0) },
+            loadArtifact: { await workspace.agentArtifact(id: $0) },
+            saveArtifact: { try await workspace.saveAgentArtifact(id: $0, data: $1) })
     }
 }

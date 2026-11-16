@@ -54,6 +54,8 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         case "read_saved_conversation": String(localized: "读取历史对话")
         case "edit_memory": String(localized: "更新记忆")
         case "write_memory": String(localized: "整理记忆")
+        case "list_artifacts": String(localized: "查看产物")
+        case "read_artifact": String(localized: "读取产物")
         default: name
         }
         if name == "get_ledger_summary", let start = argument("start"), let end = argument("end") {
@@ -67,6 +69,7 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
             return base + " · " + item
         }
         if name == "grep_files", let pattern = argument("pattern") { return base + " · " + pattern }
+        if name == "read_artifact", let id = argument("id") { return base + " · " + id }
         if name == "list_files", let pattern = argument("pattern") { return base + " · " + pattern }
         if name == "move_file" || name == "copy_file", let from = argument("from"), let to = argument("to") { return base + " · " + from + " → " + to }
         if name == "reconcile_attachment", let accounts = arrayArgument("accounts") { return base + " · " + accounts.joined(separator: "、") }
@@ -2733,6 +2736,10 @@ enum LedgerAgentReplyText {
         case visual(LedgerAgentVisual)
         /// A chart or visual still being written, with its title once known.
         case drawing(title: String?)
+        /// An artifact: a page saved to keep, shown as a card that opens it.
+        case artifact(LedgerAgentArtifactSpec)
+        /// An artifact still being written, with its title once known.
+        case buildingArtifact(title: String?)
     }
 
     struct ListItem: Equatable, Sendable {
@@ -2763,6 +2770,7 @@ enum LedgerAgentReplyText {
         func closed(_ code: String) -> Segment {
             if language == "chart", let chart = LedgerAgentChart(json: code) { return .chart(chart) }
             if language == "visual", let visual = LedgerAgentVisual(json: code, logging: true) { return .visual(visual) }
+            if language == "artifact", let artifact = LedgerAgentArtifactSpec(json: code, logging: true) { return .artifact(artifact) }
             return .code(code)
         }
         func unclosed(_ code: String) -> [Segment] {
@@ -2777,11 +2785,17 @@ enum LedgerAgentReplyText {
                     return [partial.complete ? .code(code) : .drawing(title: partial.title)]
                 }
                 return partial.complete ? [.visual(visual)] : [.visual(visual), .drawing(title: nil)]
+            case (.streaming, "artifact"):
+                // The card appears whole once the fence closes; half a page
+                // is not worth drawing inside a card.
+                return [.buildingArtifact(title: LedgerAgentArtifactSpec.partialTitle(json: code))]
             case (.streaming, _):
                 return [.code(code)]
-            case (.stopped, "visual"):
+            case (.stopped, "visual"), (.stopped, "artifact"):
+                // A stopped artifact is never saved; what it finished is
+                // drawn in the reply like a visual.
                 if let visual = LedgerAgentVisual.partial(json: code).visual { return [.visual(visual)] }
-                return blocks(lines)
+                return language == "artifact" ? [] : blocks(lines)
             case (.stopped, _):
                 return blocks(lines)
             }
@@ -2975,7 +2989,8 @@ enum LedgerAgentReplyText {
             case let .code(code): code
             case let .chart(chart): chart.title
             case let .visual(visual): visual.title
-            case .drawing: nil
+            case let .artifact(artifact): artifact.title
+            case .drawing, .buildingArtifact: nil
             }
         }
         .filter { !$0.isEmpty }
