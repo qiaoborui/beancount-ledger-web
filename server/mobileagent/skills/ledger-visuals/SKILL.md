@@ -1,6 +1,6 @@
 ---
 name: ledger-visuals
-description: 画图和做产物时的组件手册：桑基图、矩形树图、环形进度、矩阵热力表、流水列表的写法和示例。做产物、面板或较复杂的 visual 前先读。
+description: 画图和做产物时的组件手册：桑基图、矩形树图、环形进度、矩阵热力表、流水列表、样式和变体的写法和示例；附带 html.md 讲高级 HTML 产物。做产物、面板或较复杂的 visual 前先读。
 ---
 
 # 图表和产物组件手册
@@ -120,3 +120,7 @@ table 的列可写 {"title":"变化","signed":true}：正数显示 + 并标绿�
  {"type":"table","variant":"compact","title":"各账户变化","columns":["账户",{"title":"变化","signed":true}],"rows":[["招行储蓄卡","3200"],["信用卡","-1280"]]},
  {"type":"note","variant":"quote","text":"本月比上月多存了 **1,260 元**，主要来自购物减少。"}]}
 ```
+
+## 高级 HTML 产物
+
+原生组件实在做不到时（计算器、模拟器、自定义交互或图形），可以写 artifact-html 代码块，在没有网络的沙盒里运行，只能只读查询账本。写之前读附带文件：`load_skill(name="ledger-visuals", file="html.md")`。

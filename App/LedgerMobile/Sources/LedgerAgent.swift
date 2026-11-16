@@ -2785,6 +2785,7 @@ enum LedgerAgentReplyText {
             if language == "chart", let chart = LedgerAgentChart(json: code) { return .chart(chart) }
             if language == "visual", let visual = LedgerAgentVisual(json: code, logging: true) { return .visual(visual) }
             if language == "artifact", let artifact = LedgerAgentArtifactSpec(json: code, logging: true) { return .artifact(artifact) }
+            if language == "artifact-html", let artifact = LedgerAgentArtifactSpec(html: code) { return .artifact(artifact) }
             return .code(code)
         }
         func unclosed(_ code: String) -> [Segment] {
@@ -2803,6 +2804,11 @@ enum LedgerAgentReplyText {
                 // The card appears whole once the fence closes; half a page
                 // is not worth drawing inside a card.
                 return [.buildingArtifact(title: LedgerAgentArtifactSpec.partialTitle(json: code))]
+            case (.streaming, "artifact-html"):
+                return [.buildingArtifact(title: LedgerAgentArtifactSpec.partialHTMLTitle(code))]
+            case (.stopped, "artifact-html"):
+                // Half a page of HTML is neither saved nor shown.
+                return []
             case (.streaming, _):
                 return [.code(code)]
             case (.stopped, "visual"), (.stopped, "artifact"):
