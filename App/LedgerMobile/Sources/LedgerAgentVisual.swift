@@ -52,6 +52,9 @@ struct LedgerAgentVisual: Equatable, Sendable {
         case matrix(Matrix)
         /// Ledger entries drawn as the app's transaction rows.
         case transactions(Transactions)
+        /// A block with presentation options: a card around it, an accent
+        /// colour, a footnote, or one of its type's variants.
+        case styled(Block, Style)
 
         /// Drops containers nested past `maximumDepth` and empty ones left behind.
         static func pruned(_ blocks: [Block], depth: Int) -> [Block] {
@@ -65,6 +68,8 @@ struct LedgerAgentVisual: Equatable, Sendable {
                     guard depth < maximumDepth else { return nil }
                     section.blocks = pruned(section.blocks, depth: depth + 1)
                     return section.blocks.isEmpty ? nil : .section(section)
+                case let .styled(inner, style):
+                    return pruned([inner], depth: depth).first.map { .styled($0, style) }
                 case let .tabs(tabs):
                     guard depth < maximumDepth else { return nil }
                     let kept = tabs.compactMap { tab -> Tab? in
@@ -77,6 +82,40 @@ struct LedgerAgentVisual: Equatable, Sendable {
                 }
             }
         }
+    }
+
+    /// How a block is presented, beyond its data. Every block takes these,
+    /// so the model can vary the look without a new kind of block.
+    struct Style: Equatable, Sendable {
+        /// A named colour for the block's marks: bars, rings, shading, lines.
+        enum Accent: String, Equatable, Sendable, CaseIterable {
+            case ink, green, red, blue, orange, purple, teal, pink, gray
+
+            init?(name: String) {
+                switch name.lowercased() {
+                case "income", "good", "positive": self = .green
+                case "expense", "bad", "negative": self = .red
+                case "grey", "neutral", "meta": self = .gray
+                case "default", "black": self = .ink
+                default: self.init(rawValue: name.lowercased())
+                }
+            }
+        }
+
+        /// Draws the block on a card.
+        var card = false
+        var accent: Accent?
+        /// A small line under the block, such as where the numbers come from.
+        var footnote: String?
+        /// One of the block type's variants, such as `hero` for stats or
+        /// `month` for a heatmap; an unknown one draws the default.
+        var variant: String?
+        /// A fixed number of columns for blocks laid out in a grid.
+        var columns: Int?
+        /// For heatmaps: `diverging` colours gains and losses apart.
+        var scale: String?
+
+        var isPlain: Bool { self == Style() }
     }
 
     /// A titled group of blocks that can start folded.
@@ -512,6 +551,8 @@ struct LedgerAgentVisual: Equatable, Sendable {
         struct Column: Equatable, Sendable {
             var title: String
             var numeric: Bool
+            /// Colours numbers by sign: gains green, losses red.
+            var signed = false
         }
 
         struct Row: Equatable, Sendable {
@@ -759,85 +800,110 @@ private struct DecodingFailure: Error {}
 extension LedgerAgentVisual.Block: Decodable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
+        let block = try Self.content(c)
+        let style = LedgerAgentVisual.Style(c)
+        self = style.isPlain ? block : .styled(block, style)
+    }
+
+    private static func content(_ c: KeyedDecodingContainer<AnyKey>) throws -> Self {
+        let block: Self
         switch c.string("type")?.lowercased() {
         case "stats", "stat", "kpi":
             let stats = Array(c.lossy("items", as: LedgerAgentVisual.Stat.self).prefix(LedgerAgentVisual.Stat.maximum))
             guard !stats.isEmpty else { throw DecodingFailure() }
-            self = .stats(stats)
+            block = .stats(stats)
         case "chart":
-            self = .chart(try LedgerAgentChart(block: c))
+            block = .chart(try LedgerAgentChart(block: c))
         case "ranking", "rank", "bars":
             let items = Array(c.lossy("items", as: LedgerAgentVisual.Ranking.Item.self).prefix(LedgerAgentVisual.Ranking.maximumItems))
             guard !items.isEmpty else { throw DecodingFailure() }
-            self = .ranking(.init(title: c.string("title"), unit: c.string("unit"), items: items, total: c.number("total").flatMap { $0 > 0 ? $0 : nil }))
+            block = .ranking(.init(title: c.string("title"), unit: c.string("unit"), items: items, total: c.number("total").flatMap { $0 > 0 ? $0 : nil }))
         case "table":
-            self = .table(try LedgerAgentVisual.Table(c))
+            block = .table(try LedgerAgentVisual.Table(c))
         case "compare", "comparison":
             let items = Array(c.lossy("items", as: LedgerAgentVisual.Compare.Item.self).prefix(LedgerAgentVisual.Compare.maximumItems))
             guard !items.isEmpty, let left = c.string("left"), let right = c.string("right") else { throw DecodingFailure() }
-            self = .compare(.init(title: c.string("title"), unit: c.string("unit"), left: left, right: right, better: c.better(), items: items))
+            block = .compare(.init(title: c.string("title"), unit: c.string("unit"), left: left, right: right, better: c.better(), items: items))
         case "tabs":
             let tabs = Array(c.lossy("tabs", as: LedgerAgentVisual.Tab.self).prefix(LedgerAgentVisual.Tab.maximum))
             guard tabs.count >= 2, Set(tabs.map(\.label)).count == tabs.count else { throw DecodingFailure() }
-            self = .tabs(tabs)
+            block = .tabs(tabs)
         case "actions", "buttons":
             let actions = Array(c.lossy("items", as: LedgerAgentVisual.Action.self).prefix(LedgerAgentVisual.Action.maximum))
             guard !actions.isEmpty else { throw DecodingFailure() }
-            self = .actions(actions)
+            block = .actions(actions)
         case "note", "text", "markdown":
             guard let text = c.string("text") else { throw DecodingFailure() }
-            self = .note(text)
+            block = .note(text)
         case "row", "columns", "grid":
             let blocks = c.lossy("blocks", as: LedgerAgentVisual.Block.self)
             guard !blocks.isEmpty else { throw DecodingFailure() }
-            self = .row(Array(blocks.prefix(LedgerAgentVisual.maximumRowBlocks)))
+            block = .row(Array(blocks.prefix(LedgerAgentVisual.maximumRowBlocks)))
         case "section", "group", "collapse":
             let blocks = c.lossy("blocks", as: LedgerAgentVisual.Block.self)
             guard let title = c.string("title"), !blocks.isEmpty else { throw DecodingFailure() }
-            self = .section(.init(title: title, summary: c.string("summary"),
+            block = .section(.init(title: title, summary: c.string("summary"),
                                   collapsed: (try? c.decodeIfPresent(Bool.self, forKey: AnyKey("collapsed"))) ?? false,
                                   blocks: Array(blocks.prefix(LedgerAgentVisual.maximumBlocks))))
         case "progress", "budget", "meters":
             let items = Array(c.lossy("items", as: LedgerAgentVisual.Progress.Item.self).prefix(LedgerAgentVisual.Progress.maximumItems))
             guard !items.isEmpty else { throw DecodingFailure() }
-            self = .progress(.init(title: c.string("title"), unit: c.string("unit"), better: c.better() ?? .lower, items: items))
+            block = .progress(.init(title: c.string("title"), unit: c.string("unit"), better: c.better() ?? .lower, items: items))
         case "timeline", "events":
             let items = Array(c.lossy("items", as: LedgerAgentVisual.Timeline.Item.self).prefix(LedgerAgentVisual.Timeline.maximumItems))
             guard !items.isEmpty else { throw DecodingFailure() }
-            self = .timeline(.init(title: c.string("title"), unit: c.string("unit"), items: items))
+            block = .timeline(.init(title: c.string("title"), unit: c.string("unit"), items: items))
         case "kv", "keyvalue", "details", "facts":
             let items = Array(c.lossy("items", as: LedgerAgentVisual.KeyValues.Item.self).prefix(LedgerAgentVisual.KeyValues.maximumItems))
             guard !items.isEmpty else { throw DecodingFailure() }
-            self = .keyValues(.init(title: c.string("title"), items: items))
+            block = .keyValues(.init(title: c.string("title"), items: items))
         case "callout", "alert", "tip":
             guard let text = c.string("text") else { throw DecodingFailure() }
             let kind = c.string("tone").flatMap { LedgerAgentVisual.Callout.Kind(rawValue: $0.lowercased()) } ?? .info
-            self = .callout(.init(kind: kind, title: c.string("title"), text: text))
+            block = .callout(.init(kind: kind, title: c.string("title"), text: text))
         case "sankey", "flow", "flows":
-            self = .sankey(try LedgerAgentVisual.Sankey(c))
+            block = .sankey(try LedgerAgentVisual.Sankey(c))
         case "treemap", "tree":
             let items = Array(c.lossy("items", as: LedgerAgentVisual.Treemap.Item.self).filter { $0.value > 0 }
                 .prefix(LedgerAgentVisual.Treemap.maximumItems))
             guard !items.isEmpty else { throw DecodingFailure() }
-            self = .treemap(.init(title: c.string("title"), unit: c.string("unit"), items: items))
+            block = .treemap(.init(title: c.string("title"), unit: c.string("unit"), items: items))
         case "gauge", "ring", "rings":
             let items = Array(c.lossy("items", as: LedgerAgentVisual.Gauge.Item.self).prefix(LedgerAgentVisual.Gauge.maximumItems))
             guard !items.isEmpty else { throw DecodingFailure() }
-            self = .gauge(.init(title: c.string("title"), unit: c.string("unit"), better: c.better(), items: items))
+            block = .gauge(.init(title: c.string("title"), unit: c.string("unit"), better: c.better(), items: items))
         case "matrix", "pivot", "heattable":
-            self = .matrix(try LedgerAgentVisual.Matrix(c))
+            block = .matrix(try LedgerAgentVisual.Matrix(c))
         case "transactions", "entries", "ledger":
             let items = Array(c.lossy("items", as: LedgerAgentVisual.Transactions.Item.self)
                 .prefix(LedgerAgentVisual.Transactions.maximumItems))
             guard !items.isEmpty else { throw DecodingFailure() }
-            self = .transactions(.init(title: c.string("title"), unit: c.string("unit"), items: items))
+            block = .transactions(.init(title: c.string("title"), unit: c.string("unit"), items: items))
         case "heatmap", "calendar":
             let days = Array(c.lossy("days", as: LedgerAgentVisual.Heatmap.Day.self).suffix(LedgerAgentVisual.Heatmap.maximumDays))
                 .sorted { $0.date < $1.date }
             guard !days.isEmpty else { throw DecodingFailure() }
-            self = .heatmap(.init(title: c.string("title"), unit: c.string("unit"), days: days))
+            block = .heatmap(.init(title: c.string("title"), unit: c.string("unit"), days: days))
         default:
             throw DecodingFailure()
+        }
+        return block
+    }
+}
+
+extension LedgerAgentVisual.Style {
+    /// Reads `card`, `accent`, `footnote`, `variant`, `columns` and `scale`
+    /// from the block, or from a `style` object inside it.
+    fileprivate init(_ block: KeyedDecodingContainer<AnyKey>) {
+        self.init()
+        let nested = try? block.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey("style"))
+        for c in [Optional(block), nested].compactMap({ $0 }) {
+            if let card = try? c.decodeIfPresent(Bool.self, forKey: AnyKey("card")) { self.card = card }
+            if let accent = (c.string("accent") ?? c.string("color")).flatMap(Accent.init(name:)) { self.accent = accent }
+            if let footnote = c.string("footnote") { self.footnote = footnote }
+            if let variant = c.string("variant") { self.variant = variant.lowercased() }
+            if let columns = c.number("columns"), (1...4).contains(Int(columns)) { self.columns = Int(columns) }
+            if let scale = c.string("scale") { self.scale = scale.lowercased() }
         }
     }
 }
@@ -1072,9 +1138,11 @@ extension LedgerAgentVisual.Table {
             }
             let c = try decoder.container(keyedBy: AnyKey.self)
             guard let title = c.string("title") ?? c.string("label") else { throw DecodingFailure() }
-            let numeric = (try? c.decodeIfPresent(Bool.self, forKey: AnyKey("numeric"))) == true
+            let signed = (try? c.decodeIfPresent(Bool.self, forKey: AnyKey("signed"))) == true
+                || c.string("format")?.lowercased() == "signed"
+            let numeric = signed || (try? c.decodeIfPresent(Bool.self, forKey: AnyKey("numeric"))) == true
                 || ["trailing", "right"].contains(c.string("align")?.lowercased() ?? "")
-            column = Column(title: title, numeric: numeric)
+            column = Column(title: title, numeric: numeric, signed: signed)
         }
     }
 
@@ -1106,10 +1174,17 @@ extension LedgerAgentChart {
         let series = c.lossy("series", as: SeriesSpec.self).map(\.series)
         let links = try? c.decodeIfPresent([String].self, forKey: AnyKey("links"))
         let rules = c.lossy("rules", as: RuleSpec.self).map(\.rule)
-        let chart = LedgerAgentChart(type: kind, title: c.string("title"), unit: c.string("unit"),
-                                     stacked: try? c.decodeIfPresent(Bool.self, forKey: AnyKey("stacked")),
+        let percent = c.string("stacked")?.lowercased() == "percent"
+            || (try? c.decodeIfPresent(Bool.self, forKey: AnyKey("percent"))) == true
+        var chart = LedgerAgentChart(type: kind, title: c.string("title"), unit: c.string("unit"),
+                                     stacked: percent ? true : (try? c.decodeIfPresent(Bool.self, forKey: AnyKey("stacked"))),
                                      labels: labels, series: series, links: links,
                                      rules: rules.isEmpty ? nil : Array(rules.prefix(LedgerAgentChart.maximumRules)))
+        chart.percent = percent ? true : nil
+        chart.showValues = (try? c.decodeIfPresent(Bool.self, forKey: AnyKey("showValues")))
+            ?? (try? c.decodeIfPresent(Bool.self, forKey: AnyKey("values")))
+        chart.height = c.number("height").map { min(max($0, 120), 480) }
+        chart.axis = c.string("axis")?.lowercased()
         guard chart.isValid else { throw DecodingFailure() }
         self = chart
     }
@@ -1120,7 +1195,10 @@ extension LedgerAgentChart {
             let c = try decoder.container(keyedBy: AnyKey.self)
             let values = try c.decode([Flexible].self, forKey: AnyKey("values")).map(\.value)
             series = Series(name: c.string("name") ?? "", values: values,
-                            kind: c.string("kind").flatMap { Kind(rawValue: $0.lowercased()) })
+                            kind: c.string("kind").flatMap { Kind(rawValue: $0.lowercased()) },
+                            color: (c.string("color") ?? c.string("accent")).flatMap { LedgerAgentVisual.Style.Accent(name: $0)?.rawValue },
+                            dashed: try? c.decodeIfPresent(Bool.self, forKey: AnyKey("dashed")),
+                            curve: c.string("curve")?.lowercased())
         }
     }
 
@@ -1140,6 +1218,17 @@ extension LedgerAgentVisual {
     /// A number with grouping and at most two decimals, as 1,820.5.
     static func plain(_ value: Double) -> String {
         value.formatted(.number.precision(.fractionLength(0...2)).locale(Locale(identifier: "en_US")).grouping(.automatic))
+    }
+
+    /// A number shortened the Chinese way: 8,600, 1.2万, 3.45亿.
+    static func compact(_ value: Double) -> String {
+        let magnitude = abs(value)
+        func scaled(_ divisor: Double, _ suffix: String) -> String {
+            (value / divisor).formatted(.number.precision(.fractionLength(0...2)).locale(Locale(identifier: "en_US"))) + suffix
+        }
+        if magnitude >= 1e8 { return scaled(1e8, "亿") }
+        if magnitude >= 1e4 { return scaled(1e4, "万") }
+        return plain(value)
     }
 
     /// An amount with its unit: 1,820.5 元, or ¥1,820.5 for a sign unit.
@@ -1173,6 +1262,24 @@ extension LedgerAgentVisual {
     /// Weekday of a day, 0 for Monday.
     static func weekdayIndex(_ date: Date) -> Int { (utcCalendar.component(.weekday, from: date) + 5) % 7 }
     static func addingDays(_ days: Int, to date: Date) -> Date { utcCalendar.date(byAdding: .day, value: days, to: date) ?? date }
+
+    /// The first day of each month the days fall in, in order.
+    static func months(of days: [Date]) -> [Date] {
+        let firsts = days.compactMap { date -> Date? in
+            utcCalendar.date(from: utcCalendar.dateComponents([.year, .month], from: date))
+        }
+        return Array(Set(firsts)).sorted()
+    }
+
+    /// A month laid out for a Monday-first calendar: blanks before the first
+    /// day, then every day, padded to whole weeks.
+    static func calendarCells(month first: Date) -> [Date?] {
+        let count = utcCalendar.range(of: .day, in: .month, for: first)?.count ?? 30
+        var cells: [Date?] = Array(repeating: nil, count: weekdayIndex(first))
+        cells += (0..<count).map { Optional(addingDays($0, to: first)) }
+        cells += Array(repeating: nil, count: (7 - cells.count % 7) % 7)
+        return cells
+    }
 
     /// A relative change as +12% or -3.5%.
     static func percent(_ fraction: Double) -> String {

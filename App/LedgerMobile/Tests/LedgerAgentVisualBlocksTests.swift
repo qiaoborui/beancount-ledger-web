@@ -105,4 +105,75 @@ final class LedgerAgentVisualBlocksTests: XCTestCase {
         XCTAssertEqual(treemap.items[0].children.map(\.label), ["外卖"])
         XCTAssertEqual(treemap.items[0].children[0].children, [])
     }
+
+    func testStyleWrapsBlocksAndPlainBlocksStayPlain() throws {
+        let json = #"""
+        {"blocks":[
+         {"type":"note","text":"无样式"},
+         {"type":"stats","variant":"HERO","style":{"card":true,"accent":"income","footnote":"截至 10-31","columns":2},"items":[{"label":"结余","value":8240}]},
+         {"type":"section","title":"明细","accent":"nope","blocks":[{"type":"ranking","variant":"compact","items":[{"label":"a","value":1}]}]}]}
+        """#
+        let visual = try XCTUnwrap(LedgerAgentVisual(json: json))
+        guard case .note = visual.blocks[0] else { return XCTFail("\(visual.blocks[0])") }
+        guard case let .styled(.stats(stats), style) = visual.blocks[1] else { return XCTFail("\(visual.blocks[1])") }
+        XCTAssertEqual(stats.count, 1)
+        XCTAssertEqual(style, .init(card: true, accent: .green, footnote: "截至 10-31", variant: "hero", columns: 2, scale: nil))
+        // An unknown accent is ignored, so the section stays plain; its child keeps its variant.
+        guard case let .section(section) = visual.blocks[2],
+              case let .styled(.ranking, inner) = section.blocks[0] else { return XCTFail("\(visual.blocks[2])") }
+        XCTAssertEqual(inner.variant, "compact")
+        XCTAssertEqual(LedgerAgentVisual.drops(json: json), [])
+    }
+
+    func testStyledContainersStillObeyTheDepthLimit() throws {
+        let leaf = #"{"type":"note","text":"x"}"#
+        var block = leaf
+        for _ in 0..<4 { block = #"{"type":"row","card":true,"blocks":["# + block + #"]}"# }
+        let visual = try XCTUnwrap(LedgerAgentVisual(json: #"{"blocks":[{"type":"note","text":"top"},"# + block + "]}"))
+        XCTAssertEqual(visual.blocks.count, 1)
+    }
+
+    func testChartOptionsDecode() throws {
+        let json = #"{"blocks":[{"type":"chart","kind":"bar","stacked":"percent","showValues":true,"height":900,"axis":"Percent","labels":["9月","10月"],"series":[{"name":"实际","values":[1,2],"color":"expense"},{"name":"预测","values":[1,3],"kind":"line","dashed":true,"curve":"step"}]}]}"#
+        let visual = try XCTUnwrap(LedgerAgentVisual(json: json))
+        guard case let .chart(chart) = visual.blocks[0] else { return XCTFail("\(visual.blocks)") }
+        XCTAssertEqual(chart.percent, true)
+        XCTAssertEqual(chart.stacked, true)
+        XCTAssertEqual(chart.showValues, true)
+        XCTAssertEqual(chart.height, 480)
+        XCTAssertEqual(chart.axis, "percent")
+        XCTAssertEqual(chart.series[0].color, "red")
+        XCTAssertEqual(chart.series[1].dashed, true)
+        XCTAssertEqual(chart.series[1].curve, "step")
+        // A plain chart block keeps none of them.
+        let plain = try XCTUnwrap(LedgerAgentChart(json: #"{"type":"bar","labels":["a"],"series":[{"name":"s","values":[1]}]}"#))
+        XCTAssertNil(plain.percent)
+        XCTAssertNil(plain.series[0].color)
+    }
+
+    func testSignedTableColumnsAreNumeric() throws {
+        let json = #"{"blocks":[{"type":"table","columns":["账户",{"title":"变化","format":"signed"}],"rows":[["招行","+3,200"],["信用卡","-1280"]]}]}"#
+        let visual = try XCTUnwrap(LedgerAgentVisual(json: json))
+        guard case let .table(table) = visual.blocks[0] else { return XCTFail("\(visual.blocks)") }
+        XCTAssertEqual(table.columns.map(\.signed), [false, true])
+        XCTAssertTrue(table.columns[1].numeric)
+    }
+
+    func testMonthCalendarStartsOnMonday() throws {
+        let days = ["2026-11-03", "2026-10-31", "2026-11-30"].compactMap(LedgerAgentVisual.day)
+        let months = LedgerAgentVisual.months(of: days)
+        XCTAssertEqual(months.map(LedgerAgentVisual.dayString), ["2026-10-01", "2026-11-01"])
+        // 2026-11-01 is a Sunday: six blanks, then 30 days, padded to 42.
+        let cells = LedgerAgentVisual.calendarCells(month: months[1])
+        XCTAssertEqual(cells.prefix(7).filter { $0 == nil }.count, 6)
+        XCTAssertEqual(cells.compactMap { $0 }.count, 30)
+        XCTAssertEqual(cells.count % 7, 0)
+        XCTAssertEqual(cells[6].map(LedgerAgentVisual.dayString), "2026-11-01")
+    }
+
+    func testCompactNumbers() {
+        XCTAssertEqual(LedgerAgentVisual.compact(8600), "8,600")
+        XCTAssertEqual(LedgerAgentVisual.compact(12000), "1.2万")
+        XCTAssertEqual(LedgerAgentVisual.compact(-345_000_000), "-3.45亿")
+    }
 }

@@ -80,3 +80,43 @@ items 每笔：date（yyyy-mm-dd）、payee 和 narration 至少一个、amount�
   {"date":"2026-10-05","payee":"东航","narration":"上海—成都机票","account":"Expenses:Travel","amount":-1280,"tags":["国庆"]},
   {"date":"2026-10-05","payee":"公司","narration":"差旅报销","account":"Income:Reimbursement","amount":1280}]}]}
 ```
+
+## 样式和变体
+
+任何块都能加样式，不写就是默认样子。样式可以直接写在块上，也可以放进 `style` 对象：
+
+- card：true 时给块加一层卡片底和细边，适合把一组关键数字或一段结论框出来。
+- accent：块里图形的强调色，可选 green、red、blue、orange、purple、teal、pink、gray、ink（默认）。会传给容器里的子块，所以给 section 或 tabs 设一次就行。收入相关用 green，支出和超支用 red，其余按主题挑，一页里不要超过三种。
+- footnote：块下面的一行小字，写数据口径或截至日期，可用行内 Markdown。
+- variant：同一种块的另一种画法，不认识的值按默认画。
+- columns：stats 和 kv 固定几列（1 到 4）。
+
+各块的 variant：
+- stats：hero 把第一个数字放大作为主角，其余在下面排成小卡；list 每个数字一行，适合窄的 row 里。
+- ranking：compact 不画条，只留名称、金额和占比。
+- progress：ring 把每一项画成环，适合三四个预算并排。
+- heatmap：month 画成月历，每格写日期和金额，左右翻月；再加 "scale":"diverging" 时正数绿、负数红，适合看每天净收支。
+- note：quote 引用样式（左边一道强调色）、lead 大一号的导语、muted 小字。
+- table、timeline、transactions：compact 更紧凑，省去次要的一行。
+
+chart 的额外参数：
+- "stacked":"percent" 把每个标签的各系列堆成 100%，轴自动显示百分比，适合看构成随时间的变化。
+- "showValues":true 在柱子上写数值（堆叠的多系列柱不写，避免挤在一起）。
+- "height"：图的高度，120 到 480，默认 200。
+- "axis"："percent" 表示数值本身是比例（0.32 显示成 32%）；默认按 1.2万 这样的写法。
+- series 里每个系列可写 color（同 accent 的颜色名）、"dashed":true（虚线，适合预测或预算线）、curve（smooth 默认、linear、step）。
+
+table 的列可写 {"title":"变化","signed":true}：正数显示 + 并标绿，负数标红。
+
+```visual
+{"title":"本月概览","subtitle":"数据截至 2026-11-16","unit":"元","blocks":[
+ {"type":"stats","variant":"hero","style":{"card":true,"footnote":"不含转账和信用卡还款"},"items":[{"label":"本月结余","value":8240,"delta":0.18,"deltaLabel":"较上月","better":"higher"},{"label":"收入","value":20320},{"label":"支出","value":12080}]},
+ {"type":"heatmap","variant":"month","scale":"diverging","title":"每日净收支","days":[{"date":"2026-11-01","value":-320},{"date":"2026-11-05","value":20000},{"date":"2026-11-06","value":-1280}]},
+ {"type":"chart","kind":"bar","stacked":"percent","title":"支出构成的变化","labels":["9月","10月","11月"],"series":[{"name":"餐饮","values":[1600,1820.5,1400]},{"name":"居住","values":[3000,3000,3000]},{"name":"其他","values":[2100,1500,900]}]},
+ {"type":"chart","kind":"line","title":"余额走势","height":240,"labels":["9月","10月","11月","12月"],"series":[{"name":"实际","values":[42000,45800,52000,52000]},{"name":"预测","values":[42000,45800,52000,57000],"dashed":true,"color":"gray"}]},
+ {"type":"row","blocks":[
+  {"type":"progress","variant":"ring","title":"预算","items":[{"label":"餐饮","value":1400,"target":2000},{"label":"购物","value":2600,"target":2000}]},
+  {"type":"ranking","variant":"compact","accent":"blue","title":"商户","items":[{"label":"盒马","value":860},{"label":"美团","value":640}]}]},
+ {"type":"table","variant":"compact","title":"各账户变化","columns":["账户",{"title":"变化","signed":true}],"rows":[["招行储蓄卡","3200"],["信用卡","-1280"]]},
+ {"type":"note","variant":"quote","text":"本月比上月多存了 **1,260 元**，主要来自购物减少。"}]}
+```
