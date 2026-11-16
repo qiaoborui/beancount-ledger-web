@@ -15,7 +15,7 @@ struct LedgerAgentArtifactHTMLView: UIViewRepresentable {
     let reload: Int
     let runQuery: @MainActor (String) async throws -> BQLResult
     let onOpen: @MainActor (URL) -> Void
-    let onAsk: @MainActor (String) -> Void
+    let onAsk: (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -65,7 +65,7 @@ struct LedgerAgentArtifactHTMLView: UIViewRepresentable {
         var reload = 0
         var runQuery: (@MainActor (String) async throws -> BQLResult)?
         var onOpen: (@MainActor (URL) -> Void)?
-        var onAsk: (@MainActor (String) -> Void)?
+        var onAsk: ((String) -> Void)?
         private var queries = 0
         private var lastAsk: Date?
         private var rulesReady = false
