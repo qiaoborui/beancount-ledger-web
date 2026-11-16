@@ -380,14 +380,15 @@ struct LedgerAgentToolRow: View {
 }
 
 /// Reply text through the same Markdown blocks as a finished answer. While
-/// it streams, a code fence that has not closed reads as prose.
+/// it streams, a chart or visual still being written draws what it can and a
+/// placeholder for the rest.
 struct LedgerAgentStreamingReply: View {
     let text: String
     var streaming = true
     var onAsk: (String) -> Void = { _ in }
 
     var body: some View {
-        ForEach(Array(LedgerAgentReplyText.segments(text, streaming: streaming).enumerated()), id: \.offset) { _, segment in
+        ForEach(Array(LedgerAgentReplyText.segments(text, ending: streaming ? .streaming : .finished).enumerated()), id: \.offset) { _, segment in
             LedgerAgentReplyBlock(segment: segment, onAsk: onAsk)
         }
     }

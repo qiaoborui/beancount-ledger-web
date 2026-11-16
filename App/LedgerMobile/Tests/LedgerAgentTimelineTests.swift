@@ -510,20 +510,40 @@ final class LedgerAgentTimelineTests: XCTestCase {
 
     // MARK: Streaming text
 
-    func testStreamingSegmentsReadAnUnclosedFenceAsProse() {
-        let partial = "十月支出：\n```chart\n{\"type\":\"bar\",\"labels\":[\"餐饮\""
-        XCTAssertEqual(LedgerAgentReplyText.segments(partial, streaming: true),
-                       [.prose("十月支出："), .prose("{\"type\":\"bar\",\"labels\":[\"餐饮\"")])
+    func testStreamingSegmentsNeverShowAnOpenChartOrVisualAsText() {
+        let partial = "十月支出：\n```chart\n{\"type\":\"bar\",\"title\":\"十月\",\"labels\":[\"餐饮\""
+        XCTAssertEqual(LedgerAgentReplyText.segments(partial, ending: .streaming),
+                       [.prose("十月支出："), .drawing(title: "十月")])
+        // A stopped reply keeps an open chart as prose.
+        XCTAssertEqual(LedgerAgentReplyText.segments(partial, ending: .stopped),
+                       [.prose("十月支出："), .prose("{\"type\":\"bar\",\"title\":\"十月\",\"labels\":[\"餐饮\"")])
         // A finished reply still shows an unclosed fence as code.
         XCTAssertEqual(LedgerAgentReplyText.segments(partial),
-                       [.prose("十月支出："), .code("{\"type\":\"bar\",\"labels\":[\"餐饮\"")])
+                       [.prose("十月支出："), .code("{\"type\":\"bar\",\"title\":\"十月\",\"labels\":[\"餐饮\"")])
         // Once the fence closes it draws as what it is.
         let closed = partial + ",\"交通\"],\"series\":[{\"name\":\"支出\",\"values\":[812,120]}]}\n```"
-        guard case .chart? = LedgerAgentReplyText.segments(closed, streaming: true).last else {
+        guard case .chart? = LedgerAgentReplyText.segments(closed, ending: .streaming).last else {
             return XCTFail("a closed chart fence should draw as a chart")
         }
-        XCTAssertEqual(LedgerAgentReplyText.segments("```\nlet x = 1\n```\n后面", streaming: true),
+        // Other code reads as code while it streams.
+        XCTAssertEqual(LedgerAgentReplyText.segments("```\nlet x = 1\n```\n后面", ending: .streaming),
                        [.code("let x = 1"), .prose("后面")])
+        XCTAssertEqual(LedgerAgentReplyText.segments("看：\n```swift\nlet x", ending: .streaming),
+                       [.prose("看："), .code("let x")])
+    }
+
+    func testStreamingVisualDrawsFinishedBlocksAndAPlaceholder() {
+        let head = "看：\n```visual\n{\"title\":\"十月\",\"blocks\":["
+        XCTAssertEqual(LedgerAgentReplyText.segments(head, ending: .streaming), [.prose("看："), .drawing(title: "十月")])
+        let one = head + "{\"type\":\"note\",\"text\":\"一\"},{\"type\":\"note\",\"te"
+        let first = LedgerAgentVisual(title: "十月", blocks: [.note("一")])
+        XCTAssertEqual(LedgerAgentReplyText.segments(one, ending: .streaming),
+                       [.prose("看："), .visual(first), .drawing(title: nil)])
+        // Stopped there, the finished block stays and the rest is left out.
+        XCTAssertEqual(LedgerAgentReplyText.segments(one, ending: .stopped), [.prose("看："), .visual(first)])
+        // The root closed but the fence not yet: no placeholder.
+        let whole = head + "{\"type\":\"note\",\"text\":\"一\"}]}"
+        XCTAssertEqual(LedgerAgentReplyText.segments(whole, ending: .streaming), [.prose("看："), .visual(first)])
     }
 
     // MARK: Helpers

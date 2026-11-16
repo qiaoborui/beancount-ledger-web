@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +43,13 @@ func LocalAgentToolSpecs() []LocalAgentToolSpec {
 	return specs
 }
 
+// agentVisualExample is the visual block the prompt shows the model. It lives
+// in its own file so the app's tests can check that its decoder draws every
+// block of it.
+//
+//go:embed agent_visual_example.json
+var agentVisualExample string
+
 // LocalAgentSystemPrompt describes the on-device Agent. With canEdit it also
 // edits a scratch copy of the ledger through file tools; the app then writes
 // the resulting diff through the user's write policy, holding back deletions
@@ -68,15 +76,7 @@ func LocalAgentSystemPrompt(canEdit bool) string {
 7. 回复使用简洁中文。
 8. 需要画图或做交互式展示时，先用工具取得数据，再在回复里写一个 visual 代码块，App 会用原生组件画出来（可点击、可筛选、可切换）。只是一张简单的图也可以写 chart 代码块。visual 示例：
 ` + "```visual" + `
-{"title":"10 月支出","unit":"元","blocks":[
- {"type":"stats","items":[{"label":"支出","value":5230.5,"delta":-0.12,"deltaLabel":"较上月","better":"lower","link":"ledger://search?q=..."},{"label":"笔数","value":86}]},
- {"type":"tabs","tabs":[{"label":"近 3 个月","blocks":[{"type":"chart","kind":"bar","labels":["8月","9月","10月"],"series":[{"name":"支出","values":[6100,5940,5230.5]}],"links":["ledger://search?q=...","ledger://search?q=...","ledger://search?q=..."]}]},{"label":"近 6 个月","blocks":[...]}]},
- {"type":"ranking","title":"分类","items":[{"label":"餐饮","value":1820.5,"note":"32 笔","link":"ledger://accounts?account=Expenses:Food"}]},
- {"type":"compare","title":"和 9 月比","left":"9月","right":"10月","better":"lower","items":[{"label":"餐饮","left":1600,"right":1820.5}]},
- {"type":"table","title":"大额支出","columns":["日期","说明",{"title":"金额","numeric":true}],"rows":[{"cells":["10-05","机票","1280.00"],"link":"ledger://transactions?date=2026-10-05"},{"cells":["10-12","超市","460.00"],"children":[["","日用","300.00"],["","食品","160.00"]]}]},
- {"type":"actions","items":[{"label":"列出餐饮的每一笔","ask":"列出 10 月餐饮支出的每一笔"},{"label":"打开 10 月流水","link":"ledger://search?q=..."}]},
- {"type":"note","text":"不含转账和信用卡还款。"}]}
-` + "```" + `
+` + agentVisualExample + "```" + `
    blocks 按顺序排列，最多 12 个，按问题挑合适的组合，不必全用，也不要每次都用同一套：
    - stats 关键数字（最多 6 个；delta 是小数形式的变化率；better 写 higher 或 lower 表示哪个方向是好的；spark 是可选的小趋势线数组）。
    - chart 图表：kind 为 bar、hbar（横向条形，适合名称长或项目多）、line、area、pie、waterfall（一个系列的增减，自动补合计，适合「收入 → 各项支出 → 结余」）；其余字段同 chart 代码块。series 里单个系列可写 "kind":"line" 或 "area"，在柱状图上叠一条线（如支出柱 + 均值线）；rules 是参考线，如 [{"value":3000,"label":"预算"}]；links 可选、与 labels 一一对应，用户点选后可跳转。

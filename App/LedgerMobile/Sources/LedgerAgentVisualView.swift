@@ -35,6 +35,43 @@ struct LedgerAgentVisualView: View {
     }
 }
 
+/// Stands in for a chart or visual the reply is still writing, so its JSON
+/// never shows as text. It sits under the blocks already drawn, or opens
+/// with the visual's title when none is.
+struct LedgerAgentVisualPlaceholder: View {
+    let title: String?
+    @State private var dimmed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let title {
+                Text(verbatim: title).balancedFont(size: 16, weight: .semibold).foregroundStyle(BalancedPalette.ink)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                RoundedRectangle(cornerRadius: 3).frame(width: 120, height: 10)
+                RoundedRectangle(cornerRadius: 4).frame(height: 72)
+            }
+            .foregroundStyle(BalancedPalette.rule)
+            .opacity(dimmed ? 0.45 : 1)
+            Text("正在生成图表…").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+        }
+        .padding(.top, title == nil ? 0 : 12)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) {
+            if title != nil { BalancedPalette.ruleStrong.frame(height: 1) }
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dimmed = true }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title.map { String(localized: "正在生成图表：\($0)") } ?? String(localized: "正在生成图表"))
+        .accessibilityIdentifier("ledger-agent-visual-placeholder")
+    }
+}
+
 private struct LedgerAgentVisualBlocks: View {
     let blocks: [LedgerAgentVisual.Block]
     let unit: String?

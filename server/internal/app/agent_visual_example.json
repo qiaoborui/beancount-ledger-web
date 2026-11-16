@@ -1,0 +1,8 @@
+{"title":"10 月支出","unit":"元","blocks":[
+ {"type":"stats","items":[{"label":"支出","value":5230.5,"delta":-0.12,"deltaLabel":"较上月","better":"lower","link":"ledger://search?q=..."},{"label":"笔数","value":86}]},
+ {"type":"tabs","tabs":[{"label":"近 3 个月","blocks":[{"type":"chart","kind":"bar","labels":["8月","9月","10月"],"series":[{"name":"支出","values":[6100,5940,5230.5]}],"links":["ledger://search?q=...","ledger://search?q=...","ledger://search?q=..."]}]},{"label":"近 6 个月","blocks":[{"type":"chart","kind":"line","labels":["5月","6月","7月","8月","9月","10月"],"series":[{"name":"支出","values":[5480,5720,6300,6100,5940,5230.5]}]}]}]},
+ {"type":"ranking","title":"分类","items":[{"label":"餐饮","value":1820.5,"note":"32 笔","link":"ledger://accounts?account=Expenses:Food"}]},
+ {"type":"compare","title":"和 9 月比","left":"9月","right":"10月","better":"lower","items":[{"label":"餐饮","left":1600,"right":1820.5}]},
+ {"type":"table","title":"大额支出","columns":["日期","说明",{"title":"金额","numeric":true}],"rows":[{"cells":["10-05","机票","1280.00"],"link":"ledger://transactions?date=2026-10-05"},{"cells":["10-12","超市","460.00"],"children":[["","日用","300.00"],["","食品","160.00"]]}]},
+ {"type":"actions","items":[{"label":"列出餐饮的每一笔","ask":"列出 10 月餐饮支出的每一笔"},{"label":"打开 10 月流水","link":"ledger://search?q=..."}]},
+ {"type":"note","text":"不含转账和信用卡还款。"}]}
