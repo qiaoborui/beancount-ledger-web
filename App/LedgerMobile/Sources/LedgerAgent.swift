@@ -2731,6 +2731,8 @@ enum LedgerAgentReplyText {
         case code(String)
         case chart(LedgerAgentChart)
         case visual(LedgerAgentVisual)
+        /// A chart or visual still being written, with its title once known.
+        case drawing(title: String?)
     }
 
     struct ListItem: Equatable, Sendable {
@@ -2739,24 +2741,55 @@ enum LedgerAgentReplyText {
         var depth: Int
     }
 
-    /// `streaming` reads a reply still being written: a fence that has not
-    /// closed yet shows its lines as prose until it does, so half a chart or
-    /// visual never draws as a broken block.
-    static func segments(_ text: String, streaming: Bool = false) -> [Segment] {
+    /// How a reply's text ends, which decides how a fence left open at the
+    /// end reads.
+    enum Ending: Sendable {
+        /// The reply is complete: an open fence still shows as code.
+        case finished
+        /// The reply is still being written: a `visual` shows the blocks
+        /// written in full and a placeholder for the rest, a `chart` a
+        /// placeholder, so their JSON never shows as text.
+        case streaming
+        /// The user stopped the reply: a `visual` keeps its finished blocks,
+        /// and any other open fence stays prose rather than broken JSON.
+        case stopped
+    }
+
+    static func segments(_ text: String, ending: Ending = .finished) -> [Segment] {
         var segments: [Segment] = []
         var lines: [Substring] = []
         var inCode = false
         var language = ""
-        func flush() {
+        func closed(_ code: String) -> Segment {
+            if language == "chart", let chart = LedgerAgentChart(json: code) { return .chart(chart) }
+            if language == "visual", let visual = LedgerAgentVisual(json: code, logging: true) { return .visual(visual) }
+            return .code(code)
+        }
+        func unclosed(_ code: String) -> [Segment] {
+            switch (ending, language) {
+            case (.finished, _):
+                return [closed(code)]
+            case (.streaming, "chart"):
+                return [LedgerAgentChart(json: code).map(Segment.chart) ?? .drawing(title: LedgerAgentVisual.partial(json: code).title)]
+            case (.streaming, "visual"):
+                let partial = LedgerAgentVisual.partial(json: code)
+                guard let visual = partial.visual else {
+                    return [partial.complete ? .code(code) : .drawing(title: partial.title)]
+                }
+                return partial.complete ? [.visual(visual)] : [.visual(visual), .drawing(title: nil)]
+            case (.streaming, _):
+                return [.code(code)]
+            case (.stopped, "visual"):
+                if let visual = LedgerAgentVisual.partial(json: code).visual { return [.visual(visual)] }
+                return blocks(lines)
+            case (.stopped, _):
+                return blocks(lines)
+            }
+        }
+        func flush(unclosed isOpen: Bool = false) {
             if inCode {
                 let code = lines.joined(separator: "\n")
-                if language == "chart", let chart = LedgerAgentChart(json: code) {
-                    segments.append(.chart(chart))
-                } else if language == "visual", let visual = LedgerAgentVisual(json: code) {
-                    segments.append(.visual(visual))
-                } else {
-                    segments.append(.code(code))
-                }
+                segments.append(contentsOf: isOpen ? unclosed(code) : [closed(code)])
             } else {
                 segments.append(contentsOf: blocks(lines))
             }
@@ -2772,9 +2805,7 @@ enum LedgerAgentReplyText {
                 lines.append(line)
             }
         }
-        // An unclosed fence still shows as code, once the reply is complete.
-        if inCode, streaming { inCode = false }
-        flush()
+        flush(unclosed: true)
         return segments
     }
 
@@ -2944,6 +2975,7 @@ enum LedgerAgentReplyText {
             case let .code(code): code
             case let .chart(chart): chart.title
             case let .visual(visual): visual.title
+            case .drawing: nil
             }
         }
         .filter { !$0.isEmpty }

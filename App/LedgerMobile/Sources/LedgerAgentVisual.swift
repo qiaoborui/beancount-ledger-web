@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(os)
+import os
+#endif
 
 /// An interactive visual the model asks the app to draw, written in its reply
 /// as a fenced `visual` block of JSON. It is a declarative spec: the app draws
@@ -270,9 +273,46 @@ struct LedgerAgentVisual: Equatable, Sendable {
         self.blocks = blocks
     }
 
-    init?(json: String) {
-        guard let visual = try? JSONDecoder().decode(Self.self, from: Data(json.utf8)), !visual.blocks.isEmpty else { return nil }
+    /// With `logging`, the parts that did not decode go to the log once per
+    /// visual, so the prompt can be fixed where the model often goes wrong.
+    init?(json: String, logging: Bool = false) {
+        let (visual, drops) = Self.decode(json)
+        if logging, !drops.isEmpty { Self.log(drops, of: json) }
+        guard let visual, !visual.blocks.isEmpty else { return nil }
         self = visual
+    }
+
+    /// The parts of a visual that lenient decoding left out, by coding path
+    /// and block type, such as `blocks.3 (chart)`; `JSON` when none decodes.
+    static func drops(json: String) -> [String] { decode(json).drops }
+
+    private static func decode(_ json: String) -> (visual: Self?, drops: [String]) {
+        let decoder = JSONDecoder()
+        let drops = LedgerAgentVisualDrops()
+        decoder.userInfo[.ledgerAgentVisualDrops] = drops
+        do {
+            return (try decoder.decode(Self.self, from: Data(json.utf8)), drops.paths)
+        } catch {
+            return (nil, drops.paths + ["JSON"])
+        }
+    }
+
+    #if canImport(os)
+    private static let logger = Logger(subsystem: "app.beancount.ledger", category: "agent-visual")
+    /// Visuals already logged; a reply's segments are read on every redraw.
+    private static let logged = OSAllocatedUnfairLock(initialState: Set<Int>())
+    #endif
+
+    private static func log(_ drops: [String], of json: String) {
+        #if canImport(os)
+        let isNew = logged.withLock { seen in
+            if seen.count > 200 { seen.removeAll() }
+            return seen.insert(json.hashValue).inserted
+        }
+        guard isNew else { return }
+        let parts = drops.joined(separator: ", ")
+        logger.notice("visual left out \(drops.count, privacy: .public) part(s): \(parts, privacy: .public)")
+        #endif
     }
 
     /// A link the visual may open: only pages inside the ledger.
@@ -308,10 +348,34 @@ extension LedgerAgentVisual: Decodable {
     }
 }
 
-/// Decodes an element without failing the array it is in.
+/// Decodes an element without failing the array it is in, noting what it
+/// left out when the decoder collects that.
 private struct Lossy<Value: Decodable>: Decodable {
     let value: Value?
-    init(from decoder: Decoder) throws { value = try? Value(from: decoder) }
+    init(from decoder: Decoder) throws {
+        do {
+            value = try Value(from: decoder)
+        } catch {
+            value = nil
+            guard let drops = decoder.userInfo[.ledgerAgentVisualDrops] as? LedgerAgentVisualDrops else { return }
+            let type = (try? decoder.container(keyedBy: AnyKey.self))?.string("type")
+            drops.record(path: decoder.codingPath, type: type)
+        }
+    }
+}
+
+/// The parts one decode left out. A decode runs on one thread.
+private final class LedgerAgentVisualDrops: @unchecked Sendable {
+    private(set) var paths: [String] = []
+
+    func record(path: [any CodingKey], type: String?) {
+        let joined = path.map { $0.intValue.map(String.init) ?? $0.stringValue }.joined(separator: ".")
+        paths.append(type.map { "\(joined) (\($0))" } ?? joined)
+    }
+}
+
+private extension CodingUserInfoKey {
+    static var ledgerAgentVisualDrops: CodingUserInfoKey { CodingUserInfoKey(rawValue: "ledgerAgentVisualDrops")! }
 }
 
 /// A number or a numeric string.
@@ -738,5 +802,77 @@ extension LedgerAgentVisual.Table {
             if order == .orderedSame { return lhs.offset < rhs.offset }
             return ascending ? order == .orderedAscending : order == .orderedDescending
         }.map(\.element)
+    }
+}
+
+// MARK: - Streaming
+
+extension LedgerAgentVisual {
+    /// What a `visual` or `chart` fence still being written can already show.
+    struct Partial: Equatable, Sendable {
+        /// The top-level blocks written in full so far; nil until one is.
+        var visual: LedgerAgentVisual?
+        /// The root object's title, once it is written, for the placeholder.
+        var title: String?
+        /// Whether the root object has closed, though the fence has not.
+        var complete = false
+    }
+
+    /// Reads JSON cut off mid-stream. It keeps the top-level blocks already
+    /// written in full and leaves out the one being written, so a number never
+    /// shows half typed and a table does not grow row by row.
+    static func partial(json: String) -> Partial {
+        let bytes = Array(json.utf8)
+        let quote = UInt8(ascii: "\""), backslash = UInt8(ascii: "\\")
+        let open: Set<UInt8> = [UInt8(ascii: "{"), UInt8(ascii: "[")]
+        let close: Set<UInt8> = [UInt8(ascii: "}"), UInt8(ascii: "]")]
+        let blocksLevel = [UInt8(ascii: "{"), UInt8(ascii: "[")]
+        var stack: [UInt8] = []
+        var inString = false, escaped = false
+        // A root-level string after a colon is a value, not a key.
+        var afterColon = false, stringIsValue = false
+        var blocksEnd: Int?, valueEnd: Int?
+        for (index, byte) in bytes.enumerated() {
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if byte == backslash {
+                    escaped = true
+                } else if byte == quote {
+                    inString = false
+                    if stringIsValue { valueEnd = index + 1 }
+                }
+                continue
+            }
+            if byte == quote {
+                inString = true
+                stringIsValue = stack.count == 1 && afterColon
+            } else if stack.count == 1, byte == UInt8(ascii: ":") {
+                afterColon = true
+            } else if stack.count == 1, byte == UInt8(ascii: ",") {
+                afterColon = false
+            } else if open.contains(byte) {
+                stack.append(byte)
+            } else if close.contains(byte) {
+                guard stack.popLast() != nil else { return Partial() }
+                if stack.isEmpty {
+                    let visual = LedgerAgentVisual(json: String(decoding: bytes[...index], as: UTF8.self))
+                    return Partial(visual: visual, title: visual?.title ?? title(bytes, upTo: valueEnd), complete: true)
+                }
+                if stack == blocksLevel { blocksEnd = index + 1 }
+            }
+        }
+        let visual = blocksEnd.flatMap { end in
+            LedgerAgentVisual(json: String(decoding: bytes[..<end], as: UTF8.self) + "]}")
+        }
+        return Partial(visual: visual, title: visual?.title ?? title(bytes, upTo: valueEnd))
+    }
+
+    /// The root `title`, read from the text up to a root-level string value.
+    private static func title(_ bytes: [UInt8], upTo end: Int?) -> String? {
+        guard let end,
+              let object = try? JSONSerialization.jsonObject(with: Data(bytes[..<end] + Array("}".utf8))) as? [String: Any],
+              let title = (object["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { return nil }
+        return title
     }
 }

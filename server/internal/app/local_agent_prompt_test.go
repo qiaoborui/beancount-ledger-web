@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -31,5 +32,23 @@ func TestLocalAgentSystemPromptDoesNotClaimAWrite(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt lost %q", want)
 		}
+	}
+}
+
+// The visual example is shown to the model as JSON to copy, so it must be
+// valid JSON (the app's tests decode the same file) and stay in the prompt.
+func TestLocalAgentSystemPromptVisualExampleIsValidJSON(t *testing.T) {
+	var example struct {
+		Blocks []map[string]any `json:"blocks"`
+	}
+	if err := json.Unmarshal([]byte(agentVisualExample), &example); err != nil {
+		t.Fatalf("visual example is not valid JSON: %v", err)
+	}
+	if len(example.Blocks) == 0 {
+		t.Fatal("visual example has no blocks")
+	}
+	prompt := LocalAgentSystemPrompt(false)
+	if !strings.Contains(prompt, "```visual\n"+agentVisualExample+"```") {
+		t.Fatal("prompt lost the visual example fence")
 	}
 }

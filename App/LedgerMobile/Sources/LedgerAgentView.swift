@@ -1813,9 +1813,9 @@ private struct LedgerAgentAnswer: View {
             } else if !message.toolCalls.isEmpty {
                 tools
             }
-            // A stopped reply reads as it did when stopped: a fence cut off
-            // mid-chart stays prose rather than a block of broken JSON.
-            ForEach(Array(LedgerAgentReplyText.segments(message.text, streaming: message.stopped).enumerated()),
+            // A stopped reply keeps the visual blocks it finished; any other
+            // fence cut off mid-way stays prose rather than broken JSON.
+            ForEach(Array(LedgerAgentReplyText.segments(message.text, ending: message.stopped ? .stopped : .finished).enumerated()),
                     id: \.offset) { _, segment in
                 LedgerAgentReplyBlock(segment: segment, onAsk: onAsk)
             }
@@ -2222,6 +2222,8 @@ struct LedgerAgentReplyBlock: View {
             LedgerAgentChartView(chart: chart)
         case let .visual(visual):
             LedgerAgentVisualView(visual: visual, onAsk: onAsk)
+        case let .drawing(title):
+            LedgerAgentVisualPlaceholder(title: title)
         }
     }
 

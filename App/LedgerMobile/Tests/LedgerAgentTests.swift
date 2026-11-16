@@ -207,6 +207,55 @@ final class LedgerAgentTests: XCTestCase {
         XCTAssertEqual(inner, [.note("深")], "a fourth container level is dropped")
     }
 
+    /// The prompt shows the model this example to copy; every part of it
+    /// must decode, or the model learns a shape the app drops.
+    func testPromptVisualExampleDecodesInFull() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("server/internal/app/agent_visual_example.json")
+        let json = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertEqual(LedgerAgentVisual.drops(json: json), [])
+        let visual = try XCTUnwrap(LedgerAgentVisual(json: json))
+        XCTAssertEqual(visual.blocks.count, 7)
+        guard case let .tabs(tabs) = visual.blocks[1] else { return XCTFail("\(visual.blocks[1])") }
+        XCTAssertEqual(tabs.map(\.blocks.count), [1, 1])
+    }
+
+    func testVisualDropsNameWhatWasLeftOut() {
+        let json = #"{"blocks":[{"type":"note","text":"好"},{"type":"mystery"},{"type":"stats","items":[{"value":5}]},{"type":"ranking","items":[{"label":"餐饮","value":10},{"value":3}]}]}"#
+        XCTAssertEqual(LedgerAgentVisual.drops(json: json),
+                       ["blocks.1 (mystery)", "blocks.2.items.0", "blocks.2 (stats)", "blocks.3.items.1"])
+        XCTAssertEqual(LedgerAgentVisual.drops(json: "{\"blocks\":["), ["JSON"])
+    }
+
+    func testPartialVisualKeepsOnlyFinishedTopLevelBlocks() {
+        let full = #"{"title":"10 月支出","unit":"元","blocks":[{"type":"note","text":"第一块"},{"type":"tabs","tabs":[{"label":"甲","blocks":[{"type":"note","text":"a"}]},{"label":"乙","blocks":[{"type":"note","text":"b"}]}]},{"type":"stats","items":[{"label":"支出","value":5230.5}]}]}"#
+        // Before the title is written there is nothing to show.
+        XCTAssertEqual(LedgerAgentVisual.partial(json: #"{"tit"#), .init())
+        XCTAssertEqual(LedgerAgentVisual.partial(json: #"{"title":"10 月"#), .init())
+        // The title is enough for the placeholder.
+        XCTAssertEqual(LedgerAgentVisual.partial(json: #"{"title":"10 月支出","unit":"元","blocks":[{"type":"no"#),
+                       .init(title: "10 月支出"))
+        // A finished block draws; one half way through a nested tab does not.
+        let first = full.range(of: #",{"type":"tabs""#)!.lowerBound
+        let midTabs = full.range(of: #""乙""#)!.upperBound
+        for end in [first, midTabs] {
+            let partial = LedgerAgentVisual.partial(json: String(full[..<end]))
+            XCTAssertEqual(partial.visual?.blocks, [.note("第一块")])
+            XCTAssertEqual(partial.visual?.title, "10 月支出")
+            XCTAssertFalse(partial.complete)
+        }
+        // A number half typed is never shown.
+        let midNumber = full.range(of: "5230")!.upperBound
+        XCTAssertEqual(LedgerAgentVisual.partial(json: String(full[..<midNumber])).visual?.blocks.count, 2)
+        // Braces and quotes inside strings do not count.
+        XCTAssertEqual(LedgerAgentVisual.partial(json: #"{"title":"a}\"]","blocks":[{"type":"note","text":"x}]"},"#).visual?.blocks,
+                       [.note("x}]")])
+        let done = LedgerAgentVisual.partial(json: full)
+        XCTAssertTrue(done.complete)
+        XCTAssertEqual(done.visual?.blocks.count, 3)
+    }
+
     func testVisualNumberFormatting() {
         XCTAssertEqual(LedgerAgentVisual.amount(1820.5, unit: "元"), "1,820.5 元")
         XCTAssertEqual(LedgerAgentVisual.amount(-12, unit: "¥"), "-¥12")
