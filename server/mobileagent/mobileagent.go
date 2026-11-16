@@ -615,6 +615,9 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 			// Last, so the rules and tools before it stay one cacheable prefix.
 			systemPrompt += remembered.prompt()
 		}
+		if files != nil && files.linux != nil {
+			files.scriptTools = scriptable(tools)
+		}
 	}
 	history, replayed, err := priorMessages(request, systemPrompt)
 	if err != nil {

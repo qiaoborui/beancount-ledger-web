@@ -85,13 +85,22 @@ const bashToolDescription = "在 App 内置的 Linux（Alpine 3.22，aarch64）�
 	"当前目录是 /workspace，也就是本对话的草稿账本：在这里改的文件和用 edit_file 改的一样，会出现在变更卡里，所以只改你打算改的账本文件，临时文件和画的图放到 /tmp。" +
 	"可以用 apk add 装软件（需要联网，例如 apk add python3 py3-pandas py3-matplotlib bash jq），装过的会保留。" +
 	"这是在手机上解释执行的 Linux，比电脑慢 10 到 30 倍：先用 BQL 和账本工具能做的就不要用它；需要计算、批量处理文本或转换文件格式时再用。" +
-	"命令默认 120 秒超时，最多 600 秒；输出太长会截掉中间部分。看不到 /workspace 以外的手机文件。"
+	"命令默认 120 秒超时，最多 600 秒；输出太长会截掉中间部分。看不到 /workspace 以外的手机文件。" +
+	"命令里的脚本可以用 ledger 命令或 Python 的 ledger 模块调用助手的工具（查询账本、读写草稿文件等），见系统提示里的「脚本调用工具」。"
 
 // LinuxToolPrompt is appended to the system prompt when bash is offered.
 const linuxToolPrompt = "\n\n## 内置 Linux\n" +
 	"你有 bash 工具：一台在手机里运行的 Alpine Linux，/workspace 就是草稿账本。BQL、搜索和文件工具能完成的事不要用它；" +
 	"需要 python 计算、批量改写文本、解析 CSV/Excel、或者 BQL 表达不了的统计时再用。第一次用 python 前先 `apk add python3`（需要的话再加 py3-pandas 等）。" +
-	"用它改了账本文件后，和其他改动一样要 bean_check。\n"
+	"用它改了账本文件后，和其他改动一样要 bean_check。\n" +
+	"\n### 脚本调用工具\n" +
+	"bash 里的脚本可以直接调用你的工具，循环、过滤、汇总都在脚本里做完，只把需要的结论打印出来：一次 bash 顶得上很多轮工具调用，也不会把大量中间结果塞进对话。" +
+	"同一类查询要做三次以上（逐月、逐账户、逐笔核对），或要对很多结果做筛选统计时用它；只查一次的直接调工具。\n" +
+	"- shell：`ledger tools` 列出能调用的工具，`ledger help run_bql` 看参数，`ledger call run_bql '{\"query\":\"...\"}'` 调用，打印工具的原始结果（多为 JSON），出错时退出码非 0。\n" +
+	"- Python（先 `apk add python3`）：`from ledger import call`，`call(\"run_bql\", query=\"...\")` 返回解析好的 JSON，出错抛 `LedgerError`；`tools()`、`describe(name)` 同上。\n" +
+	"- 能调用的有账本查询、草稿文件的读写和 bean_check、附件和历史对话的读取；bash、ask_user、记忆、技能和设置类工具不能从脚本调用。一次 bash 最多调用 200 次。\n" +
+	"- run_bql 等账本查询读的是已经写入的账本，看不到草稿里还没写入的改动；脚本里用 edit_file/write_file 改的文件和直接改 /workspace 一样只进草稿，照常出现在变更卡里。\n" +
+	"- 先用一两次调用看清结果的结构，再写循环；只打印最终需要的内容。\n"
 
 func (s *scratch) bashTool(runner LinuxRunner) fileTool {
 	return fileTool{name: "bash", title: "运行命令",
@@ -130,10 +139,21 @@ func (s *scratch) bash(ctx context.Context, runner LinuxRunner, raw json.RawMess
 	if err != nil {
 		return nil, err
 	}
+	// The bridge lives for this run only. A bridge that cannot start leaves
+	// the command to run without it; the script then hears from ledger that
+	// there is no bridge.
+	run := command
+	var bridge *toolBridge
+	if len(s.scriptTools) > 0 {
+		if bridge, err = startBridge(ctx, s.scriptTools); err == nil {
+			defer bridge.stop()
+			run = bridge.guestPrefix() + command
+		}
+	}
 	request := linuxRunRequest{
 		ID:             fmt.Sprintf("bash-%d", linuxRunSeq.Add(1)),
 		Workspace:      s.dir,
-		Command:        command,
+		Command:        run,
 		TimeoutSeconds: timeout,
 		MaxOutputBytes: maxBashOutput,
 	}
@@ -184,6 +204,9 @@ func (s *scratch) bash(ctx context.Context, runner LinuxRunner, raw json.RawMess
 	}
 	if result.Cancelled {
 		out["cancelled"] = true
+	}
+	if bridge != nil && bridge.totalCalls() > 0 {
+		out["tool_calls"] = bridge.summary()
 	}
 	if len(changed) > 0 {
 		out["changed_files"] = changed
