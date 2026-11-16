@@ -66,6 +66,9 @@ type scratch struct {
 	// linux runs the bash tool; nil when this build or shell has no
 	// built-in Linux, and then bash is not offered.
 	linux LinuxRunner
+	// scriptTools are the turn's tools a bash command's scripts may call
+	// through the tool bridge; nil leaves the bridge off.
+	scriptTools map[string]agent.AgentTool
 }
 
 func openScratch(dir, entrypoint string) (*scratch, error) {
