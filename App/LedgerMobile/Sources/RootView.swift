@@ -715,7 +715,6 @@ struct LedgerDestinationView: View {
     var body: some View {
         switch destination {
         case .overview: OverviewView(isRoot: isRoot)
-        case .assets: LedgerAnalysisView(kind: .assets, isRoot: isRoot)
         case .incomeExpense: LedgerAnalysisView(kind: .incomeExpense, isRoot: isRoot)
         case .investments: LedgerAnalysisView(kind: .investments, isRoot: isRoot)
         case .currencies: CurrencyAnalysisView(isRoot: isRoot)
@@ -743,7 +742,6 @@ private struct LedgerRegularShell: View {
                     sidebarRow(.accounts)
                 }
                 Section("财务分析") {
-                    sidebarRow(.assets)
                     sidebarRow(.incomeExpense)
                     sidebarRow(.investments)
                 }

@@ -2,7 +2,6 @@ import Foundation
 
 enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
     case overview
-    case assets
     case incomeExpense
     case investments
     case currencies
@@ -22,7 +21,6 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
     var title: String {
         switch self {
         case .overview: String(localized: "财务概览")
-        case .assets: String(localized: "资产分析")
         case .incomeExpense: String(localized: "收支分析")
         case .investments: String(localized: "投资")
         case .currencies: String(localized: "货币与汇率")
@@ -39,7 +37,6 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
     var compactTitle: String {
         switch self {
         case .overview: String(localized: "概览")
-        case .assets: String(localized: "资产分析")
         case .incomeExpense: String(localized: "收支")
         case .investments: String(localized: "投资")
         case .currencies: String(localized: "货币")
@@ -56,7 +53,6 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
     var systemImage: String {
         switch self {
         case .overview: "house"
-        case .assets: "building.columns"
         case .incomeExpense: "chart.bar.xaxis"
         case .investments: "chart.pie"
         case .currencies: "coloncurrencysign"
@@ -1558,124 +1554,17 @@ extension LedgerAccountDetail {
     }
 }
 
-struct LedgerAssetsAnalysis: Equatable, Sendable {
-    let accountBalances: [AccountBalance]
-    let accounts: [LedgerAccount]
-    let netWorthHistory: [LedgerNetWorthPoint]
-    let monthEndNetWorth: [LedgerNetWorthPoint]
-    let netWorthWindows: LedgerNetWorthWindows?
-    let comparisons: LedgerPeriodComparisons?
-    let valuationCurrency: String
-}
-
-/// Derived balances for the assets report.
-///
-/// The report reads the same grouped totals from `assets`, `debt`, `missing`,
-/// `accountNames` and one `accountRow` per account during a single body
-/// evaluation. Recomputing the filter and grouping on each access cost several
-/// passes over every balance per render, and the per-account row lookup made it
-/// quadratic. This computes everything once per `data`.
-extension TerminalAssetsIndex {
-    /// The 资产构成 band/table group for one balance. Account type decides
-    /// first: every Liabilities:* balance is debt whatever its metadata group
-    /// (the server files payables under 应收), and an Assets account whose group
-    /// has no slot there (其他, or anything unexpected) counts as 其他资产
-    /// instead of being dropped.
-    static func compositionGroup(account: String, metadataGroup: String?) -> String {
-        if account.hasPrefix("Liabilities:") { return "liability" }
-        if let metadataGroup, ["wealth", "cash", "receivable"].contains(metadataGroup) { return metadataGroup }
-        return "asset"
-    }
-}
-
-struct TerminalAssetsIndex: Equatable {
-    let balances: [AccountBalance]
-    let valuations: [String: Int]
-    let balancesByAccount: [String: [AccountBalance]]
-    let accountNames: [String]
-    let assets: Int
-    /// Signed debt, `-Σ` of the Liabilities valuations. An overpaid card (a
-    /// positive Liabilities balance) lowers it and can take it below zero.
-    let debt: Int
-    let missing: Bool
-
-    private final class Cache: @unchecked Sendable {
-        private let lock = NSLock()
-        private var entry: (data: LedgerAssetsAnalysis, index: TerminalAssetsIndex)?
-
-        func index(for data: LedgerAssetsAnalysis) -> TerminalAssetsIndex {
-            lock.lock()
-            if let cached = entry, cached.data == data {
-                let index = cached.index
-                lock.unlock()
-                return index
-            }
-            lock.unlock()
-
-            let index = TerminalAssetsIndex(data: data)
-
-            lock.lock()
-            entry = (data, index)
-            lock.unlock()
-            return index
-        }
-    }
-
-    private static let cache = Cache()
-
-    static func index(for data: LedgerAssetsAnalysis) -> TerminalAssetsIndex {
-        cache.index(for: data)
-    }
-
-    private init(data: LedgerAssetsAnalysis) {
-        let filtered = data.accountBalances.filter {
-            $0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:")
-        }
-        balances = filtered
-
-        var grouped: [String: [AccountBalance]] = [:]
-        var values: [String: Int] = [:]
-        var assetTotal = 0
-        var debtTotal = 0
-        var hasMissing = false
-        for balance in filtered {
-            grouped[balance.account, default: []].append(balance)
-            if balance.valuationMissing == true {
-                hasMissing = true
-            } else {
-                values[balance.account, default: 0] += balance.valuation
-            }
-        }
-        balancesByAccount = grouped
-        valuations = values
-        missing = hasMissing
-
-        for (account, value) in values {
-            if account.hasPrefix("Assets:") {
-                assetTotal += value
-            } else if account.hasPrefix("Liabilities:") {
-                debtTotal -= value
-            }
-        }
-        assets = assetTotal
-        debt = debtTotal
-        accountNames = grouped.keys.sorted()
-    }
-}
-
 struct LedgerIncomeExpenseAnalysis: Equatable, Sendable {
     let dashboard: LedgerDashboard
     let statement: LedgerIncomeStatement
 }
 
 enum LedgerAnalysisResourceKind: Equatable, Sendable {
-    case assets
     case incomeExpense
     case investments
 }
 
 enum LedgerAnalysisResource: Equatable, Sendable {
-    case assets(LedgerAssetsAnalysis)
     case incomeExpense(LedgerIncomeExpenseAnalysis)
     case investments(LedgerInvestmentSummary)
 }

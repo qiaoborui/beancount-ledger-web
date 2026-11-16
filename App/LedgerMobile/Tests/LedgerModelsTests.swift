@@ -12,7 +12,7 @@ final class LedgerModelsTests: XCTestCase {
     }
 
     func testSearchRoutesThroughMoreUnlessItIsATabOrFloats() {
-        for tabs: [LedgerDestination] in [[.overview, .transactions, .accounts], [.assets]] {
+        for tabs: [LedgerDestination] in [[.overview, .transactions, .accounts], [.incomeExpense]] {
             // The assistant floats beside the tab bar: search opens from 更多.
             let withAgent = LedgerDestination.compactDirectDestinations(tabs, agentFloats: true)
             XCTAssertEqual(withAgent, tabs)
@@ -38,11 +38,11 @@ final class LedgerModelsTests: XCTestCase {
                 .transactions,
                 .imports,
                 .transactions,
-                .assets,
+                .investments,
                 .query,
                 .accounts,
             ]),
-            [.transactions, .imports, .assets]
+            [.transactions, .imports, .investments]
         )
         XCTAssertEqual(
             LedgerDestination.normalizedCompactTabs([.settings, .agent]),
@@ -214,15 +214,6 @@ final class LedgerModelsTests: XCTestCase {
             row("Expenses:Food", group: "expense", valuation: 0, closing: 9_999),
         ])
         XCTAssertEqual(totals, BalanceSheetTotals(assets: 1_020_000, liabilities: 170_000, netWorth: 850_000))
-    }
-
-    func testAssetsCompositionGroupsByAccountTypeFirst() {
-        XCTAssertEqual(TerminalAssetsIndex.compositionGroup(account: "Liabilities:Payable:Alice", metadataGroup: "receivable"), "liability")
-        XCTAssertEqual(TerminalAssetsIndex.compositionGroup(account: "Liabilities:CreditCard", metadataGroup: "credit"), "liability")
-        XCTAssertEqual(TerminalAssetsIndex.compositionGroup(account: "Assets:Misc", metadataGroup: "other"), "asset")
-        XCTAssertEqual(TerminalAssetsIndex.compositionGroup(account: "Assets:Misc", metadataGroup: nil), "asset")
-        XCTAssertEqual(TerminalAssetsIndex.compositionGroup(account: "Assets:Broker", metadataGroup: "wealth"), "wealth")
-        XCTAssertEqual(TerminalAssetsIndex.compositionGroup(account: "Assets:Receivable:Bob", metadataGroup: "receivable"), "receivable")
     }
 
     func testNetWorthTrendCutsAtThePagePeriodAndFallsBackToRangeHistory() throws {

@@ -362,9 +362,9 @@ extension View {
 
 /// The places at the top of the drawer, pushed on the chat page's stack:
 /// the built-in Linux's terminal and files when the engine is in this
-/// build, then the assistant's skills and memory.
+/// build, then the assistant's artifacts, skills and memory.
 enum LedgerAgentDrawerRoute: String, Identifiable, Hashable, CaseIterable {
-    case terminal, files, skills, memory
+    case terminal, files, artifacts, skills, memory
 
     var id: String { rawValue }
 
@@ -372,6 +372,7 @@ enum LedgerAgentDrawerRoute: String, Identifiable, Hashable, CaseIterable {
         switch self {
         case .terminal: "终端"
         case .files: "Linux 文件"
+        case .artifacts: "产物"
         case .skills: "技能"
         case .memory: "记忆"
         }
@@ -381,13 +382,14 @@ enum LedgerAgentDrawerRoute: String, Identifiable, Hashable, CaseIterable {
         switch self {
         case .terminal: "terminal"
         case .files: "folder"
+        case .artifacts: "rectangle.stack"
         case .skills: "book.pages"
         case .memory: "brain"
         }
     }
 
     static var available: [LedgerAgentDrawerRoute] {
-        LedgerLinuxMachine.engineAvailable ? allCases : [.skills, .memory]
+        LedgerLinuxMachine.engineAvailable ? allCases : [.artifacts, .skills, .memory]
     }
 }
 

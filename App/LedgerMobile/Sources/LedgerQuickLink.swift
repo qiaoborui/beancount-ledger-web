@@ -14,7 +14,6 @@ enum LedgerQuickLink: String, CaseIterable, Sendable {
     case transactions
     case accounts
     case imports
-    case assets
     case incomeExpense
     case investments
     case currencies
@@ -30,7 +29,7 @@ enum LedgerQuickLink: String, CaseIterable, Sendable {
         case .transactions: URL(string: "ledger://transactions")!
         case .accounts: URL(string: "ledger://accounts")!
         case .imports: URL(string: "ledger://imports")!
-        case .assets, .incomeExpense, .investments, .currencies, .query:
+        case .incomeExpense, .investments, .currencies, .query:
             URL(string: "ledger://page?name=" + rawValue)!
         }
     }
@@ -45,7 +44,6 @@ enum LedgerQuickLink: String, CaseIterable, Sendable {
         case .transactions: String(localized: "交易")
         case .accounts: String(localized: "账户")
         case .imports: String(localized: "导入")
-        case .assets: String(localized: "资产分析")
         case .incomeExpense: String(localized: "收支")
         case .investments: String(localized: "投资")
         case .currencies: String(localized: "货币")
@@ -72,7 +70,6 @@ enum LedgerQuickLink: String, CaseIterable, Sendable {
         case .transactions: "list.bullet"
         case .accounts: "book.closed"
         case .imports: "tray.and.arrow.down"
-        case .assets: "building.columns"
         case .incomeExpense: "chart.bar.xaxis"
         case .investments: "chart.pie"
         case .currencies: "coloncurrencysign"

@@ -36,7 +36,7 @@ struct MoreView: View {
                 // Reports read the on-device ledger only.
                 if session.isLocal {
                     NavigationLink { LedgerReportView() } label: {
-                        MoreNavigationRow(index: "04", icon: "doc.text", title: String(localized: "周报 / 月报"), detail: String(localized: "按周、按月的收支小结与小票"))
+                        MoreNavigationRow(index: "03", icon: "doc.text", title: String(localized: "周报 / 月报"), detail: String(localized: "按周、按月的收支小结与小票"))
                     }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).listRowSeparator(.hidden).navigationLinkIndicatorVisibility(.hidden).accessibilityIdentifier("more-reports")
                 }
             } header: { TerminalSectionLabel(text: String(localized: "财务分析")) }
@@ -110,7 +110,7 @@ struct MoreView: View {
     }
 
     private func destination(for kind: LedgerAnalysisKind) -> LedgerDestination {
-        switch kind { case .assets: .assets; case .incomeExpense: .incomeExpense; case .investments: .investments }
+        switch kind { case .incomeExpense: .incomeExpense; case .investments: .investments }
     }
 }
 
@@ -122,7 +122,7 @@ private struct MoreDestinationButton: View {
     var accessibilityIdentifier: String? = nil
     var body: some View {
         Group {
-            if destination == .assets || destination == .incomeExpense || destination == .investments {
+            if destination == .incomeExpense || destination == .investments {
                 NavigationLink { LedgerDestinationView(destination: destination, isRoot: false) } label: {
                     MoreNavigationRow(index: index, icon: destination.systemImage, title: destination.title, detail: detail)
                 }.navigationLinkIndicatorVisibility(.hidden)
@@ -140,7 +140,7 @@ private struct MoreDestinationButton: View {
         }.buttonStyle(.plain).listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16)).listRowBackground(Color.clear).listRowSeparator(.hidden).accessibilityIdentifier(accessibilityIdentifier ?? "more-\(destination.rawValue)")
     }
     private var index: String {
-        switch destination { case .overview: "01"; case .transactions: "02"; case .accounts: "03"; case .assets: "01"; case .incomeExpense: "02"; case .investments: "03"; case .search: "01"; case .imports: "02"; case .currencies: "03"; case .query: "04"; case .agent: "00"; case .settings: "00" }
+        switch destination { case .overview: "01"; case .transactions: "02"; case .accounts: "03"; case .incomeExpense: "01"; case .investments: "02"; case .search: "01"; case .imports: "02"; case .currencies: "03"; case .query: "04"; case .agent: "00"; case .settings: "00" }
     }
 }
 

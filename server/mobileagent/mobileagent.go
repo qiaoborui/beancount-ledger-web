@@ -611,6 +611,14 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 			}
 			systemPrompt += appSettingsPrompt
 		}
+		// Artifacts came after the settings, so they append after them too.
+		if shelf := openArtifacts(request.RuntimeRoot); shelf != nil {
+			for _, tool := range shelf.tools() {
+				tools = append(tools, tool)
+				allowed[tool.Name()] = true
+			}
+			systemPrompt += artifactPrompt
+		}
 		if remembered != nil {
 			// Last, so the rules and tools before it stay one cacheable prefix.
 			systemPrompt += remembered.prompt()

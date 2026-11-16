@@ -706,6 +706,45 @@ actor LocalLedgerWorkspace {
         try protect(file)
     }
 
+    /// runtime/agent-artifacts/<id>.json: the pages the assistant built to
+    /// keep. Like the history they stay outside every generation, so they
+    /// never enter a commit, a backup or Git sync; the assistant's cloud
+    /// folder carries them to other devices.
+    func agentArtifacts() -> [Data] {
+        guard let directory = try? importRuntimeDirectory("runtime/agent-artifacts"),
+              let names = try? fileManager.contentsOfDirectory(atPath: directory.path) else { return [] }
+        return names.compactMap { name -> Data? in
+            guard name.hasSuffix(".json"), LedgerAgentArtifactSpec.isValidID(String(name.dropLast(5))) else { return nil }
+            let file = directory.appendingPathComponent(name)
+            guard (try? itemKindIfPresent(at: file)) == .regularFile else { return nil }
+            return try? Data(contentsOf: file)
+        }
+    }
+
+    func agentArtifact(id: String) -> Data? {
+        guard LedgerAgentArtifactSpec.isValidID(id),
+              let directory = try? importRuntimeDirectory("runtime/agent-artifacts") else { return nil }
+        let file = directory.appendingPathComponent(id + ".json")
+        guard (try? itemKindIfPresent(at: file)) == .regularFile else { return nil }
+        return try? Data(contentsOf: file)
+    }
+
+    func saveAgentArtifact(id: String, data: Data) throws {
+        guard LedgerAgentArtifactSpec.isValidID(id) else { throw WorkspaceError.unsupportedItem(id) }
+        let directory = try importRuntimeDirectory("runtime/agent-artifacts")
+        try createProtectedDirectory(directory)
+        let file = directory.appendingPathComponent(id + ".json")
+        if let kind = try itemKindIfPresent(at: file), kind != .regularFile { throw WorkspaceError.unsupportedItem(file.lastPathComponent) }
+        try data.write(to: file, options: .atomic)
+        try protect(file)
+    }
+
+    func removeAgentArtifact(id: String) {
+        guard LedgerAgentArtifactSpec.isValidID(id),
+              let directory = try? importRuntimeDirectory("runtime/agent-artifacts") else { return }
+        removeIfPresent(directory.appendingPathComponent(id + ".json"))
+    }
+
     /// Applies the workspace's file protection to a memory.md the native
     /// core just wrote.
     func protectAgentMemory() {

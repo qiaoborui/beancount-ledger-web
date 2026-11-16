@@ -510,6 +510,7 @@ final class LedgerSessionTests: XCTestCase {
         let suiteName = "ledger-mobile-compact-tabs-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.set(
+            // "assets" was 资产分析, since removed: it is dropped like any unknown tab.
             ["imports", "imports", "unknown", "assets", "query", "accounts", "transactions"],
             forKey: "ledger.mobile.compact-tabs"
         )
@@ -517,7 +518,7 @@ final class LedgerSessionTests: XCTestCase {
 
         let session = LedgerSession(api: SessionMockAPI(payload: Self.payload), defaults: defaults)
 
-        XCTAssertEqual(session.compactTabDestinations, [.imports, .assets, .query])
+        XCTAssertEqual(session.compactTabDestinations, [.imports, .query, .accounts])
 
         session.setCompactTabDestinations([.accounts, .overview, .incomeExpense, .currencies, .imports])
 
@@ -1643,11 +1644,6 @@ final class LedgerSessionTests: XCTestCase {
         let july = LedgerDateRange.month(year: 2026, month: 7)
         await session.applyRange(july)
 
-        let assetsResource = try await session.analysisResource(.assets)
-        guard case let .assets(assets) = assetsResource else {
-            return XCTFail("Expected assets resource")
-        }
-        XCTAssertEqual(assets.valuationCurrency, "USD")
         var calls = await api.callCounts()
         XCTAssertEqual(calls.dashboard, 0)
         XCTAssertEqual(calls.incomeStatement, 0)

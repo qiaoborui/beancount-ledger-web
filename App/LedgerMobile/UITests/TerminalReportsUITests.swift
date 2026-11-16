@@ -21,12 +21,10 @@ final class TerminalReportsUITests: XCTestCase {
         XCTAssertTrue(expenseFilter.isSelected, app.debugDescription)
         app.compactTab("更多").tap()
         if app.buttons["返回上一页"].exists { app.buttons["返回上一页"].tap() }
-        openReport(app, id: "more-analysis-assets")
-        XCTAssertTrue(app.staticTexts["净值走势"].waitForExistence(timeout: 15), app.debugDescription)
+        openReport(app, id: "more-analysis-investments")
+        XCTAssertTrue(app.staticTexts["投资"].firstMatch.waitForExistence(timeout: 15), app.debugDescription)
         assertHeader(app)
-        capture("terminal-assets-light")
-        app.swipeUp()
-        capture("terminal-assets-accounts-light")
+        capture("terminal-investments-light")
     }
 
     func testTransactionSearchSelectionAndDetail() {

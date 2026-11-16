@@ -178,7 +178,7 @@ var (
 		"creditCards", "topPayees", "incomeBreakdown", "balanceSheet", "currencyExposure"}
 	// 更多 and 账本助手 are not tab choices: 更多 holds the pages that are not
 	// tabs and the assistant floats beside the bar.
-	appCompactTabs    = []string{"overview", "assets", "incomeExpense", "investments", "currencies", "query", "imports", "transactions", "accounts", "search"}
+	appCompactTabs    = []string{"overview", "incomeExpense", "investments", "currencies", "query", "imports", "transactions", "accounts", "search"}
 	appReportSections = []string{"overview", "categories", "daily", "largest", "coverage", "assistant"}
 	appRepeats        = []string{"daily", "weekdays", "custom"}
 	appCadences       = []string{"weekly", "monthly"}
