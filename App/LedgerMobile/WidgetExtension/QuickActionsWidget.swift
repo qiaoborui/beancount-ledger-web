@@ -10,7 +10,7 @@ import WidgetKit
 /// app asks for Face ID before the action runs.
 enum QuickActionWidgetTarget: String, AppEnum {
     case agent, record, sentence, search, overview, transactions, accounts, imports
-    case assets, incomeExpense, investments, currencies, query
+    case incomeExpense, investments, currencies, query
 
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "快捷入口")
     static let caseDisplayRepresentations: [Self: DisplayRepresentation] = [
@@ -22,7 +22,6 @@ enum QuickActionWidgetTarget: String, AppEnum {
         .transactions: DisplayRepresentation(title: "交易", image: .init(systemName: "list.bullet")),
         .accounts: DisplayRepresentation(title: "账户", image: .init(systemName: "book.closed")),
         .imports: DisplayRepresentation(title: "导入", image: .init(systemName: "tray.and.arrow.down")),
-        .assets: DisplayRepresentation(title: "资产分析", image: .init(systemName: "building.columns")),
         .incomeExpense: DisplayRepresentation(title: "收支", image: .init(systemName: "chart.bar.xaxis")),
         .investments: DisplayRepresentation(title: "投资", image: .init(systemName: "chart.pie")),
         .currencies: DisplayRepresentation(title: "货币", image: .init(systemName: "coloncurrencysign")),

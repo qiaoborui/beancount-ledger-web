@@ -414,56 +414,6 @@ final class BalancedScreenshotTests: XCTestCase {
         #endif
     }
 
-    // MARK: - b07/b08 — 资产分析
-
-    /// Light only — call with the simulator in light appearance.
-    func testCaptureAssetsLight() throws {
-        #if targetEnvironment(simulator)
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["--safe-preview", "--tab=assets"]
-        app.launch()
-        Thread.sleep(forTimeInterval: 1.5)
-        save(app.screenshot(), as: "b07-assets-top")
-        for _ in 0..<3 { app.swipeUp() }
-        Thread.sleep(forTimeInterval: 0.6)
-        save(app.screenshot(), as: "b07-assets-table")
-        #else
-        throw XCTSkip("Simulator-only screenshot capture")
-        #endif
-    }
-
-    /// b08 is dark AND masked — call with the simulator already in dark
-    /// appearance (`xcrun simctl ui <udid> appearance dark` before launch).
-    func testCaptureAssetsMaskedDark() throws {
-        #if targetEnvironment(simulator)
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["--safe-preview", "--tab=assets"]
-        app.launch()
-        Thread.sleep(forTimeInterval: 1.5)
-        // There's no privacy toggle on the analysis page itself — amounts
-        // are a session-wide flag, so flip it from the 账户 tab (where the
-        // eye button lives) and come back.
-        app.buttons["账户"].firstMatch.tap()
-        let privacyToggle = app.buttons["隐藏金额"].firstMatch
-        XCTAssertTrue(privacyToggle.waitForExistence(timeout: 5), app.debugDescription)
-        privacyToggle.tap()
-        Thread.sleep(forTimeInterval: 0.4)
-        // The More tab keeps 资产分析 pushed from the initial `--tab=assets`
-        // launch argument (it's an overflow destination, not a root tab), so
-        // switching back to it lands straight on the masked analysis page.
-        app.buttons["更多"].firstMatch.tap()
-        Thread.sleep(forTimeInterval: 1)
-        save(app.screenshot(), as: "b08-assets-masked-top")
-        for _ in 0..<3 { app.swipeUp() }
-        Thread.sleep(forTimeInterval: 0.6)
-        save(app.screenshot(), as: "b08-assets-masked-table")
-        #else
-        throw XCTSkip("Simulator-only screenshot capture")
-        #endif
-    }
-
     // MARK: - b15/b16 — 账单导入复核
 
     /// b15 is light, 部分条目勾选 — call with the simulator in light appearance.

@@ -2350,21 +2350,6 @@ final class LedgerSession: ObservableObject {
             let repository = try repository(at: contextURL)
             let resource: LedgerAnalysisResource
             switch kind {
-            case .assets:
-                guard let ledger else {
-                    throw LedgerAPIError.incompatibleServer(String(localized: "当前账本数据不可用"))
-                }
-                resource = .assets(
-                    LedgerAssetsAnalysis(
-                        accountBalances: ledger.accountBalances,
-                        accounts: ledger.accounts,
-                        netWorthHistory: ledger.netWorthHistory,
-                        monthEndNetWorth: ledger.monthEndNetWorth,
-                        netWorthWindows: ledger.netWorthWindows,
-                        comparisons: ledger.comparisons,
-                        valuationCurrency: ledger.valuationCurrency
-                    )
-                )
             case .incomeExpense:
                 async let dashboard = repository.dashboard(
                     start: range.start,
@@ -2391,12 +2376,12 @@ final class LedgerSession: ObservableObject {
                   phase == .ready, !privacyShielded else {
                 throw CancellationError()
             }
-            // Only the current presentation's three resource kinds are retained.
+            // Only the current presentation's resource kinds are retained.
             analysisCache = analysisCache.filter { $0.key.generation == generation && $0.key.localRevision == cacheKey.localRevision }
             analysisCache[cacheKey] = resource
             let displayKey = AnalysisDisplayKey(kind: kind, context: contextURL, start: range.start,
                 end: range.queryEndExclusive, currency: valuationCurrency)
-            // Bounded: three kinds for the current range plus a couple of recent ranges.
+            // Bounded: both kinds for the current range plus a few recent ranges.
             if analysisDisplayCache.count >= 9 { analysisDisplayCache.removeAll() }
             analysisDisplayCache[displayKey] = resource
             return resource

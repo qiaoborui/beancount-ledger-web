@@ -385,11 +385,11 @@ final class LedgerMobileUITests: XCTestCase {
             XCTAssertEqual(heading.frame.midY, titleMidY, accuracy: 2)
             capture("compact-flat-\(title)")
         }
-        app.buttons["more-analysis-assets"].tap()
-        let assetsTitle = app.staticTexts["资产分析"]
-        XCTAssertTrue(assetsTitle.waitForExistence(timeout: 3))
-        XCTAssertEqual(assetsTitle.frame.midY, titleMidY, accuracy: 2)
-        capture("compact-flat-assets")
+        app.buttons["more-analysis-incomeExpense"].tap()
+        let analysisTitle = app.staticTexts["收支分析"]
+        XCTAssertTrue(analysisTitle.waitForExistence(timeout: 3))
+        XCTAssertEqual(analysisTitle.frame.midY, titleMidY, accuracy: 2)
+        capture("compact-flat-income-expense")
     }
 
     func testNativeSearchRetainsFiltersAcrossTabsAndDetailNavigation() throws {
@@ -449,12 +449,12 @@ final class LedgerMobileUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 8))
         app.tabBars.buttons["更多"].tap()
-        app.buttons["more-analysis-assets"].tap()
-        XCTAssertTrue(app.staticTexts["净值走势"].waitForExistence(timeout: 3), app.debugDescription)
+        app.buttons["more-analysis-incomeExpense"].tap()
+        XCTAssertTrue(app.staticTexts["收支分析"].waitForExistence(timeout: 3), app.debugDescription)
         app.tabBars.buttons["账户"].tap()
         XCTAssertTrue(app.collectionViews["accounts-list"].waitForExistence(timeout: 3))
         app.tabBars.buttons["更多"].tap()
-        XCTAssertTrue(app.staticTexts["净值走势"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["收支分析"].waitForExistence(timeout: 3), app.debugDescription)
         app.buttons["返回上一页"].tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 3))
         app.tabBars.buttons["账户"].tap()
@@ -627,7 +627,6 @@ final class LedgerMobileUITests: XCTestCase {
             XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 3))
             capture("07-more")
 
-            openCompactAnalysis(identifier: "more-analysis-assets", kind: "assets", title: "资产分析", captureName: "08-assets")
             openCompactAnalysis(identifier: "more-analysis-incomeExpense", kind: "incomeExpense", title: "收支分析", captureName: "09-income-expense")
             openCompactAnalysis(
                 identifier: "more-analysis-investments",
@@ -658,7 +657,6 @@ final class LedgerMobileUITests: XCTestCase {
         } else {
             app.buttons["sidebar-currencies"].tap()
             exerciseCurrencies(capturePrefix: "07")
-            openRegularAnalysis(identifier: "sidebar-assets", kind: "assets", captureName: "07-assets")
             openRegularAnalysis(identifier: "sidebar-incomeExpense", kind: "incomeExpense", captureName: "08-income-expense")
             openRegularAnalysis(identifier: "sidebar-investments", kind: "investments", captureName: "10-investments")
             app.buttons["sidebar-query"].tap()
@@ -804,11 +802,11 @@ final class LedgerMobileUITests: XCTestCase {
         XCTAssertLessThan(accountsRow.frame.minY, transactionsRow.frame.minY, app.debugDescription)
         capture("compact-tabs-03-reordered")
 
-        let addAssets = app.buttons["compact-tab-add-assets"]
+        let addIncomeExpense = app.buttons["compact-tab-add-incomeExpense"]
         configurationList.swipeUp()
-        for _ in 0..<4 where !addAssets.isHittable { configurationList.swipeUp() }
-        waitUntilHittable(addAssets)
-        addAssets.tap()
+        for _ in 0..<4 where !addIncomeExpense.isHittable { configurationList.swipeUp() }
+        waitUntilHittable(addIncomeExpense)
+        addIncomeExpense.tap()
 
         XCTAssertTrue(app.staticTexts["已显示 3/3"].waitForExistence(timeout: 3))
 
@@ -817,15 +815,15 @@ final class LedgerMobileUITests: XCTestCase {
         waitUntilHittable(settingsBack)
         settingsBack.tap()
         XCTAssertTrue(app.buttons["more-overview"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.tabBars.buttons["资产分析"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.tabBars.buttons["收支"].waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(app.tabBars.buttons["更多"].exists)
         XCTAssertFalse(app.tabBars.buttons["概览"].exists)
         XCTAssertLessThan(app.tabBars.buttons["账户"].frame.minX, app.tabBars.buttons["流水"].frame.minX)
         capture("compact-tabs-04-tab-bar")
 
-        app.tabBars.buttons["资产分析"].tap()
-        XCTAssertTrue(app.staticTexts["净值走势"].waitForExistence(timeout: 4), app.debugDescription)
-        capture("compact-tabs-05-assets")
+        app.tabBars.buttons["收支"].tap()
+        XCTAssertTrue(app.staticTexts["收支分析"].waitForExistence(timeout: 4), app.debugDescription)
+        capture("compact-tabs-05-income-expense")
 
         app.tabBars.buttons["更多"].tap()
         let overviewEntry = app.buttons["more-overview"]
@@ -1464,7 +1462,7 @@ final class LedgerMobileUITests: XCTestCase {
         if app.scrollViews.firstMatch.exists {
             app.scrollViews.firstMatch.swipeDown()
         }
-        waitUntilHittable(app.buttons["more-analysis-assets"])
+        waitUntilHittable(app.buttons["more-analysis-investments"])
     }
 
     /// Opens 查询 from the compact 更多 list. The row is the last one, so the
