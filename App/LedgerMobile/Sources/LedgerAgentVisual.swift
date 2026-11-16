@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 #if canImport(os)
 import os
@@ -40,6 +41,17 @@ struct LedgerAgentVisual: Equatable, Sendable {
         case keyValues(KeyValues)
         case callout(Callout)
         case heatmap(Heatmap)
+        /// Money moving between nodes, such as income into accounts and on
+        /// into spending.
+        case sankey(Sankey)
+        /// Shares of a whole as nested rectangles, one level deep.
+        case treemap(Treemap)
+        /// Rings filled to a ratio, such as a savings rate.
+        case gauge(Gauge)
+        /// A grid of values by row and column, shaded by size.
+        case matrix(Matrix)
+        /// Ledger entries drawn as the app's transaction rows.
+        case transactions(Transactions)
 
         /// Drops containers nested past `maximumDepth` and empty ones left behind.
         static func pruned(_ blocks: [Block], depth: Int) -> [Block] {
@@ -152,6 +164,305 @@ struct LedgerAgentVisual: Equatable, Sendable {
         /// The page a day opens: the model's link, else that day's transactions.
         func link(for day: Day) -> URL? {
             day.link ?? URL(string: "ledger://transactions?date=" + LedgerAgentVisual.dayString(day.date))
+        }
+    }
+
+    /// Money moving from node to node. Flows that would close a loop are
+    /// left out, so every node has a column: sources on the left, each
+    /// other node one column right of its furthest source.
+    struct Sankey: Equatable, Sendable {
+        struct Flow: Equatable, Sendable {
+            var from: String
+            var to: String
+            var value: Double
+            var link: URL?
+        }
+
+        struct Node: Equatable, Sendable {
+            var name: String
+            var column: Int
+            var inflow: Double
+            var outflow: Double
+            /// The height the node takes: the larger of what comes in and goes out.
+            var value: Double { max(inflow, outflow) }
+        }
+
+        var title: String?
+        var unit: String?
+        var flows: [Flow]
+        var nodes: [Node]
+
+        static let maximumFlows = 60
+        static let maximumNodes = 30
+
+        init(title: String? = nil, unit: String? = nil, flows: [Flow]) {
+            self.title = title
+            self.unit = unit
+            var kept: [Flow] = []
+            var names: [String] = []
+            var edges: [String: Set<String>] = [:]
+            func reaches(_ start: String, _ goal: String) -> Bool {
+                var stack = [start], seen: Set<String> = []
+                while let node = stack.popLast() {
+                    if node == goal { return true }
+                    guard seen.insert(node).inserted else { continue }
+                    stack.append(contentsOf: edges[node] ?? [])
+                }
+                return false
+            }
+            for flow in flows where kept.count < Self.maximumFlows {
+                let added = [flow.from, flow.to].filter { !names.contains($0) }
+                guard names.count + added.count <= Self.maximumNodes, !reaches(flow.to, flow.from) else { continue }
+                names.append(contentsOf: added)
+                edges[flow.from, default: []].insert(flow.to)
+                kept.append(flow)
+            }
+            self.flows = kept
+            // Longest path from a source; the graph is acyclic, so this settles
+            // within one pass per node.
+            var column = Dictionary(uniqueKeysWithValues: names.map { ($0, 0) })
+            for _ in names {
+                var moved = false
+                for flow in kept where column[flow.to]! < column[flow.from]! + 1 {
+                    column[flow.to] = column[flow.from]! + 1
+                    moved = true
+                }
+                if !moved { break }
+            }
+            nodes = names.map { name in
+                Node(name: name, column: column[name]!,
+                     inflow: kept.filter { $0.to == name }.reduce(0) { $0 + $1.value },
+                     outflow: kept.filter { $0.from == name }.reduce(0) { $0 + $1.value })
+            }
+        }
+
+        var columnCount: Int { (nodes.map(\.column).max() ?? 0) + 1 }
+
+        /// Where each node and flow sits in a box of the given size, with
+        /// `nodeWidth`-wide bars and at least `gap` between nodes of a column.
+        struct Layout: Equatable, Sendable {
+            struct Band: Equatable, Sendable {
+                var flow: Int
+                /// The flow's top edge where it leaves and where it arrives.
+                var fromY: Double
+                var toY: Double
+                var thickness: Double
+                var fromX: Double
+                var toX: Double
+            }
+
+            var frames: [CGRect]
+            var bands: [Band]
+        }
+
+        func layout(width: Double, height: Double, nodeWidth: Double = 10, gap: Double = 10) -> Layout {
+            let columns = columnCount
+            let byColumn = (0..<columns).map { index in nodes.indices.filter { nodes[$0].column == index } }
+            // One scale for every column, set by the one that needs the most room.
+            let scale = byColumn.compactMap { members -> Double? in
+                let total = members.reduce(0) { $0 + nodes[$1].value }
+                guard total > 0 else { return nil }
+                return max(height - gap * Double(members.count - 1), 1) / total
+            }.min() ?? 0
+            let step = columns > 1 ? (width - nodeWidth) / Double(columns - 1) : 0
+            var frames = Array(repeating: CGRect.zero, count: nodes.count)
+            for (index, members) in byColumn.enumerated() {
+                let used = members.reduce(0) { $0 + nodes[$1].value * scale } + gap * Double(max(members.count - 1, 0))
+                var y = max((height - used) / 2, 0)
+                let x = columns > 1 ? Double(index) * step : (width - nodeWidth) / 2
+                for member in members {
+                    let h = max(nodes[member].value * scale, 1)
+                    frames[member] = CGRect(x: x, y: y, width: nodeWidth, height: h)
+                    y += h + gap
+                }
+            }
+            let index = Dictionary(uniqueKeysWithValues: nodes.enumerated().map { ($1.name, $0) })
+            // A node's flows stack in the order of the nodes at their other end,
+            // top to bottom, so bands cross as little as they can.
+            var outOffset = Array(repeating: 0.0, count: nodes.count)
+            var inOffset = Array(repeating: 0.0, count: nodes.count)
+            var bands = Array(repeating: Layout.Band(flow: 0, fromY: 0, toY: 0, thickness: 0, fromX: 0, toX: 0), count: flows.count)
+            let byTarget = flows.indices.sorted { frames[index[flows[$0].to]!].minY < frames[index[flows[$1].to]!].minY }
+            for flow in byTarget {
+                let source = index[flows[flow].from]!
+                let thickness = flows[flow].value * scale
+                bands[flow].flow = flow
+                bands[flow].thickness = thickness
+                bands[flow].fromY = frames[source].minY + outOffset[source]
+                bands[flow].fromX = frames[source].maxX
+                outOffset[source] += thickness
+            }
+            let bySource = flows.indices.sorted { frames[index[flows[$0].from]!].minY < frames[index[flows[$1].from]!].minY }
+            for flow in bySource {
+                let target = index[flows[flow].to]!
+                bands[flow].toY = frames[target].minY + inOffset[target]
+                bands[flow].toX = frames[target].minX
+                inOffset[target] += bands[flow].thickness
+            }
+            return Layout(frames: frames, bands: bands)
+        }
+    }
+
+    /// Shares of a whole as rectangles sized by value. An item with
+    /// children opens into them when tapped.
+    struct Treemap: Equatable, Sendable {
+        struct Item: Equatable, Sendable {
+            var label: String
+            var value: Double
+            var note: String?
+            var link: URL?
+            var children: [Item]
+        }
+
+        var title: String?
+        var unit: String?
+        var items: [Item]
+
+        static let maximumItems = 40
+
+        /// Squarified layout (Bruls, Huizing and van Wijk): rectangles as close
+        /// to square as the values allow, largest first, in the order given.
+        /// Values should be sorted from largest to smallest.
+        static func squarify(_ values: [Double], in rect: CGRect) -> [CGRect] {
+            let total = values.reduce(0) { $0 + max($1, 0) }
+            guard total > 0, rect.width > 0, rect.height > 0 else { return values.map { _ in .zero } }
+            let areas = values.map { max($0, 0) / total * Double(rect.width * rect.height) }
+            var frames: [CGRect] = []
+            var remaining = rect
+            var start = 0
+            func worst(_ row: ArraySlice<Double>, side: Double) -> Double {
+                let sum = row.reduce(0, +)
+                guard sum > 0, let largest = row.max(), let smallest = row.min(), smallest > 0 else { return .infinity }
+                return max(side * side * largest / (sum * sum), sum * sum / (side * side * smallest))
+            }
+            while start < areas.count {
+                let side = Double(min(remaining.width, remaining.height))
+                var end = start + 1
+                while end < areas.count, worst(areas[start...end], side: side) <= worst(areas[start..<end], side: side) {
+                    end += 1
+                }
+                let row = areas[start..<end]
+                let sum = row.reduce(0, +)
+                if remaining.width >= remaining.height {
+                    // A column along the left edge.
+                    let w = side > 0 ? sum / Double(remaining.height) : 0
+                    var y = Double(remaining.minY)
+                    for area in row {
+                        let h = w > 0 ? area / w : 0
+                        frames.append(CGRect(x: Double(remaining.minX), y: y, width: w, height: h))
+                        y += h
+                    }
+                    remaining = CGRect(x: Double(remaining.minX) + w, y: Double(remaining.minY),
+                                       width: max(Double(remaining.width) - w, 0), height: Double(remaining.height))
+                } else {
+                    // A row along the top edge.
+                    let h = side > 0 ? sum / Double(remaining.width) : 0
+                    var x = Double(remaining.minX)
+                    for area in row {
+                        let w = h > 0 ? area / h : 0
+                        frames.append(CGRect(x: x, y: Double(remaining.minY), width: w, height: h))
+                        x += w
+                    }
+                    remaining = CGRect(x: Double(remaining.minX), y: Double(remaining.minY) + h,
+                                       width: Double(remaining.width), height: max(Double(remaining.height) - h, 0))
+                }
+                start = end
+            }
+            return frames
+        }
+    }
+
+    /// Rings filled to a ratio: `value` of `maximum`, or `value` as a
+    /// fraction of 1 when there is no maximum.
+    struct Gauge: Equatable, Sendable {
+        struct Item: Equatable, Sendable {
+            var label: String
+            var value: Double
+            var maximum: Double?
+            /// A mark on the ring, on the same scale as `value`.
+            var target: Double?
+            var note: String?
+            var link: URL?
+
+            var ratio: Double { value / (maximum ?? 1) }
+            var targetRatio: Double? { target.map { $0 / (maximum ?? 1) } }
+        }
+
+        var title: String?
+        var unit: String?
+        /// Which way is good, for colouring against the target.
+        var better: Better?
+        var items: [Item]
+
+        static let maximumItems = 6
+    }
+
+    /// Values by row and column, such as categories by month. Blank cells
+    /// stay blank.
+    struct Matrix: Equatable, Sendable {
+        struct Row: Equatable, Sendable {
+            var label: String
+            var values: [Double?]
+            var link: URL?
+            var total: Double { values.reduce(0) { $0 + ($1 ?? 0) } }
+        }
+
+        var title: String?
+        var unit: String?
+        var columns: [String]
+        var rows: [Row]
+        /// Whether to add a total column and a total row.
+        var totals: Bool
+        /// Colours the totals row's changes when set; shading is by size either way.
+        var better: Better?
+
+        static let maximumColumns = 24
+        static let maximumRows = 40
+
+        var columnTotals: [Double] {
+            columns.indices.map { index in rows.reduce(0) { $0 + ($1.values[index] ?? 0) } }
+        }
+
+        /// The largest magnitude among the cells, which full shading stands for.
+        var peak: Double { rows.flatMap(\.values).compactMap { $0.map(abs) }.max() ?? 0 }
+    }
+
+    /// Ledger entries, newest first as given, grouped by day.
+    struct Transactions: Equatable, Sendable {
+        struct Item: Equatable, Sendable {
+            var date: Date
+            var payee: String?
+            var narration: String?
+            var account: String?
+            /// Signed: negative is money going out.
+            var amount: Double
+            var currency: String?
+            var tags: [String]
+            var link: URL?
+
+            /// The page a row opens: the model's link, else that day's transactions.
+            var destination: URL? {
+                link ?? URL(string: "ledger://transactions?date=" + LedgerAgentVisual.dayString(date))
+            }
+        }
+
+        var title: String?
+        var unit: String?
+        var items: [Item]
+
+        static let maximumItems = 100
+        /// Rows shown before 显示全部.
+        static let collapsedItems = 10
+
+        /// Items grouped by day in the order they first appear.
+        func days(_ items: [Item]) -> [(date: Date, items: [Item])] {
+            var order: [Date] = []
+            var groups: [Date: [Item]] = [:]
+            for item in items {
+                if groups[item.date] == nil { order.append(item.date) }
+                groups[item.date, default: []].append(item)
+            }
+            return order.map { ($0, groups[$0]!) }
         }
     }
 
@@ -502,6 +813,24 @@ extension LedgerAgentVisual.Block: Decodable {
             guard let text = c.string("text") else { throw DecodingFailure() }
             let kind = c.string("tone").flatMap { LedgerAgentVisual.Callout.Kind(rawValue: $0.lowercased()) } ?? .info
             self = .callout(.init(kind: kind, title: c.string("title"), text: text))
+        case "sankey", "flow", "flows":
+            self = .sankey(try LedgerAgentVisual.Sankey(c))
+        case "treemap", "tree":
+            let items = Array(c.lossy("items", as: LedgerAgentVisual.Treemap.Item.self).filter { $0.value > 0 }
+                .prefix(LedgerAgentVisual.Treemap.maximumItems))
+            guard !items.isEmpty else { throw DecodingFailure() }
+            self = .treemap(.init(title: c.string("title"), unit: c.string("unit"), items: items))
+        case "gauge", "ring", "rings":
+            let items = Array(c.lossy("items", as: LedgerAgentVisual.Gauge.Item.self).prefix(LedgerAgentVisual.Gauge.maximumItems))
+            guard !items.isEmpty else { throw DecodingFailure() }
+            self = .gauge(.init(title: c.string("title"), unit: c.string("unit"), better: c.better(), items: items))
+        case "matrix", "pivot", "heattable":
+            self = .matrix(try LedgerAgentVisual.Matrix(c))
+        case "transactions", "entries", "ledger":
+            let items = Array(c.lossy("items", as: LedgerAgentVisual.Transactions.Item.self)
+                .prefix(LedgerAgentVisual.Transactions.maximumItems))
+            guard !items.isEmpty else { throw DecodingFailure() }
+            self = .transactions(.init(title: c.string("title"), unit: c.string("unit"), items: items))
         case "heatmap", "calendar":
             let days = Array(c.lossy("days", as: LedgerAgentVisual.Heatmap.Day.self).suffix(LedgerAgentVisual.Heatmap.maximumDays))
                 .sorted { $0.date < $1.date }
@@ -510,6 +839,102 @@ extension LedgerAgentVisual.Block: Decodable {
         default:
             throw DecodingFailure()
         }
+    }
+}
+
+extension LedgerAgentVisual.Sankey {
+    fileprivate init(_ c: KeyedDecodingContainer<AnyKey>) throws {
+        var flows = c.lossy("flows", as: Flow.self)
+        if flows.isEmpty { flows = c.lossy("links", as: Flow.self) }
+        self.init(title: c.string("title"), unit: c.string("unit"), flows: flows)
+        guard !self.flows.isEmpty else { throw DecodingFailure() }
+    }
+}
+
+extension LedgerAgentVisual.Sankey.Flow: Decodable {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        guard let from = c.string("from") ?? c.string("source"), let to = c.string("to") ?? c.string("target"),
+              let value = c.number("value"), value > 0, from != to else { throw DecodingFailure() }
+        self.init(from: from, to: to, value: value, link: c.link())
+    }
+}
+
+extension LedgerAgentVisual.Treemap.Item: Decodable {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        guard let label = c.string("label"), let value = c.number("value") else { throw DecodingFailure() }
+        let children = Array(c.lossy("children", as: Leaf.self).map(\.item).filter { $0.value > 0 }
+            .prefix(LedgerAgentVisual.Treemap.maximumItems))
+        self.init(label: label, value: value, note: c.string("note"), link: c.link(), children: children)
+    }
+
+    /// A child: an item whose own children are left out.
+    private struct Leaf: Decodable {
+        let item: LedgerAgentVisual.Treemap.Item
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            guard let label = c.string("label"), let value = c.number("value") else { throw DecodingFailure() }
+            item = .init(label: label, value: value, note: c.string("note"), link: c.link(), children: [])
+        }
+    }
+}
+
+extension LedgerAgentVisual.Gauge.Item: Decodable {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        guard let label = c.string("label"), let value = c.number("value") else { throw DecodingFailure() }
+        let maximum = c.number("max") ?? c.number("total")
+        if let maximum, maximum <= 0 { throw DecodingFailure() }
+        self.init(label: label, value: value, maximum: maximum, target: c.number("target"), note: c.string("note"),
+                  link: c.link())
+    }
+}
+
+extension LedgerAgentVisual.Matrix {
+    fileprivate init(_ c: KeyedDecodingContainer<AnyKey>) throws {
+        guard let columns = try? c.decode([String].self, forKey: AnyKey("columns")), !columns.isEmpty else { throw DecodingFailure() }
+        let width = min(columns.count, Self.maximumColumns)
+        let rows = Array(c.lossy("rows", as: RowSpec.self).prefix(Self.maximumRows)).map { spec in
+            Row(label: spec.label, values: Array((spec.values + Array(repeating: nil, count: max(0, width - spec.values.count))).prefix(width)),
+                link: spec.link)
+        }
+        guard !rows.isEmpty else { throw DecodingFailure() }
+        self.init(title: c.string("title"), unit: c.string("unit"), columns: Array(columns.prefix(width)), rows: rows,
+                  totals: (try? c.decodeIfPresent(Bool.self, forKey: AnyKey("totals"))) ?? false, better: c.better())
+    }
+
+    private struct RowSpec: Decodable {
+        let label: String
+        let values: [Double?]
+        let link: URL?
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: AnyKey.self)
+            guard let label = c.string("label") else { throw DecodingFailure() }
+            self.label = label
+            values = try c.decode([OptionalNumber].self, forKey: AnyKey("values")).map(\.value)
+            link = c.link()
+        }
+    }
+
+    /// A number, or a blank for null, an empty string or anything else.
+    private struct OptionalNumber: Decodable {
+        let value: Double?
+        init(from decoder: Decoder) throws { value = (try? Flexible(from: decoder))?.value }
+    }
+}
+
+extension LedgerAgentVisual.Transactions.Item: Decodable {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        guard let raw = c.string("date"), let date = LedgerAgentVisual.day(raw), let amount = c.number("amount") ?? c.number("value")
+        else { throw DecodingFailure() }
+        let payee = c.string("payee"), narration = c.string("narration") ?? c.string("title") ?? c.string("label")
+        guard payee != nil || narration != nil else { throw DecodingFailure() }
+        let tags = ((try? c.decodeIfPresent([String].self, forKey: AnyKey("tags"))) ?? [])
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "# ")) }.filter { !$0.isEmpty }
+        self.init(date: date, payee: payee, narration: narration, account: c.string("account"), amount: amount,
+                  currency: c.string("currency"), tags: Array(tags.prefix(4)), link: c.link())
     }
 }
 

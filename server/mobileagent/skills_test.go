@@ -120,7 +120,7 @@ func TestBuiltinSkillsAreUsableOnDevice(t *testing.T) {
 			t.Errorf("%s tells the device assistant to run something it cannot", item.Name)
 		}
 	}
-	for _, want := range []string{"alipay-bill-import", "beancount-bookkeeping", "wechat-bill-import"} {
+	for _, want := range []string{"alipay-bill-import", "beancount-bookkeeping", "ledger-visuals", "wechat-bill-import"} {
 		if !slices.Contains(builtin, want) {
 			t.Errorf("built-in skill %s is missing; have %v", want, builtin)
 		}
