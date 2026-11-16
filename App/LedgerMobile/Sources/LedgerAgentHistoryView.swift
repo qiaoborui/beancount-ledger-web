@@ -17,6 +17,9 @@ struct LedgerAgentHistoryView: View {
     var close: () -> Void
     /// Opens 助手设置 on the chat page.
     var openSettings: () -> Void
+    /// Opens one of the places at the top of the drawer on the chat page's
+    /// navigation stack.
+    var openRoute: (LedgerAgentDrawerRoute) -> Void
     /// A drag to the left on the header or the footer, which moves the
     /// drawer with the finger and closes it when let go far or fast enough.
     var closeDrag: LedgerAgentDrawerDrag
@@ -44,6 +47,12 @@ struct LedgerAgentHistoryView: View {
         VStack(spacing: 0) {
             header
             List {
+                // Claude puts its places (项目, Code, …) above the
+                // conversations; these are the assistant's. A search is about
+                // conversations, so they step aside while one is typed.
+                if query.isEmpty {
+                    ForEach(LedgerAgentDrawerRoute.available) { route in place(route) }
+                }
                 if sessions.saved.isEmpty {
                     note("还没有历史对话。问过的问题会按账本存在本机。")
                 } else if groups.isEmpty {
@@ -102,7 +111,7 @@ struct LedgerAgentHistoryView: View {
                 }
                 .padding(.horizontal, 14)
                 .frame(minHeight: 44)
-                .background(Capsule().fill(BalancedPalette.sunken))
+                .background(Capsule().fill(LedgerAgentHistoryDrawer.selectedFill))
                 .transition(.opacity)
             } else {
                 Text("账本助手")
@@ -123,7 +132,7 @@ struct LedgerAgentHistoryView: View {
                     .foregroundStyle(BalancedPalette.ink)
                     .frame(width: 44, height: 44)
                     .background {
-                        if !LedgerGlass.isAvailable { Circle().fill(BalancedPalette.sunken) }
+                        if !LedgerGlass.isAvailable { Circle().fill(LedgerAgentHistoryDrawer.selectedFill) }
                     }
                     .ledgerGlassControl()
                     .contentShape(Circle())
@@ -157,6 +166,31 @@ struct LedgerAgentHistoryView: View {
             .listRowBackground(Color.clear)
     }
 
+    /// A place: its symbol and name, set like a conversation row.
+    private func place(_ route: LedgerAgentDrawerRoute) -> some View {
+        Button {
+            close()
+            openRoute(route)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: route.symbol).font(.system(size: 18, weight: .regular))
+                    .foregroundStyle(BalancedPalette.ink)
+                    .frame(width: 26)
+                    .accessibilityHidden(true)
+                Text(route.title).balancedFont(size: 17).foregroundStyle(BalancedPalette.ink)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+            }
+            .frame(minHeight: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 0, leading: 22, bottom: 0, trailing: 22))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        .accessibilityIdentifier("ledger-agent-drawer-\(route.rawValue)")
+    }
+
     private func note(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
@@ -177,7 +211,7 @@ struct LedgerAgentHistoryView: View {
         // from the drawer's edges like Claude's selected row.
         .listRowBackground(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(item.id == sessions.current.id ? BalancedPalette.sunken : Color.clear)
+                .fill(item.id == sessions.current.id ? LedgerAgentHistoryDrawer.selectedFill : Color.clear)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 1)
         )
@@ -264,7 +298,7 @@ struct LedgerAgentHistoryView: View {
                     .frame(width: 48, height: 48)
                     .background {
                         if !LedgerGlass.isAvailable {
-                            Circle().fill(BalancedPalette.sunken)
+                            Circle().fill(LedgerAgentHistoryDrawer.selectedFill)
                         }
                     }
                     .ledgerGlassControl()
@@ -295,9 +329,9 @@ struct LedgerAgentHistoryView: View {
         .padding(.top, 12)
         .padding(.bottom, 4)
         .background {
-            LinearGradient(stops: [.init(color: BalancedPalette.page.opacity(0), location: 0),
-                                   .init(color: BalancedPalette.page.opacity(0.9), location: 0.4),
-                                   .init(color: BalancedPalette.page, location: 1)],
+            LinearGradient(stops: [.init(color: LedgerAgentHistoryDrawer.fill.opacity(0), location: 0),
+                                   .init(color: LedgerAgentHistoryDrawer.fill.opacity(0.9), location: 0.4),
+                                   .init(color: LedgerAgentHistoryDrawer.fill, location: 1)],
                            startPoint: .top, endPoint: .bottom)
                 .padding(.top, -24)
                 .ignoresSafeArea(edges: .bottom)
@@ -319,9 +353,41 @@ extension View {
     /// the page stays put and the drawer slides over it. The page is hidden
     /// from assistive technology while the drawer is open.
     func ledgerAgentHistoryDrawer(isPresented: Binding<Bool>, edgeOpens: Bool, sharesText: Bool,
-                                  openSettings: @escaping () -> Void) -> some View {
+                                  openSettings: @escaping () -> Void,
+                                  openRoute: @escaping (LedgerAgentDrawerRoute) -> Void) -> some View {
         modifier(LedgerAgentHistoryDrawer(isPresented: isPresented, edgeOpens: edgeOpens, sharesText: sharesText,
-                                          openSettings: openSettings))
+                                          openSettings: openSettings, openRoute: openRoute))
+    }
+}
+
+/// The places at the top of the drawer, pushed on the chat page's stack:
+/// the built-in Linux's terminal and files when the engine is in this
+/// build, then the assistant's skills and memory.
+enum LedgerAgentDrawerRoute: String, Identifiable, Hashable, CaseIterable {
+    case terminal, files, skills, memory
+
+    var id: String { rawValue }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .terminal: "终端"
+        case .files: "Linux 文件"
+        case .skills: "技能"
+        case .memory: "记忆"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .terminal: "terminal"
+        case .files: "folder"
+        case .skills: "book.pages"
+        case .memory: "brain"
+        }
+    }
+
+    static var available: [LedgerAgentDrawerRoute] {
+        LedgerLinuxMachine.engineAvailable ? allCases : [.skills, .memory]
     }
 }
 
@@ -333,7 +399,10 @@ struct LedgerAgentDrawerDrag {
     var ended: (CGFloat, CGFloat) -> Void
 
     var gesture: some Gesture {
-        DragGesture(minimumDistance: 12)
+        // Measured on the screen, not on the view: the view moves with the
+        // finger, and a translation read in its own space would feed back
+        // into itself and make the drawer shake.
+        DragGesture(minimumDistance: 12, coordinateSpace: .global)
             .onChanged { changed($0.translation.width) }
             .onEnded { ended($0.translation.width, $0.velocity.width) }
     }
@@ -344,6 +413,7 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     var edgeOpens: Bool
     var sharesText: Bool
     var openSettings: () -> Void
+    var openRoute: (LedgerAgentDrawerRoute) -> Void
 
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -354,9 +424,24 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     /// The drawer is in the view tree: from the moment it starts to come out
     /// until it is all the way back in.
     @State private var mounted = false
+    /// Counts the moments the drawer comes out, for the haptic tap.
+    @State private var openTicks = 0
+    /// The edge drag in progress has already tapped, on passing the point
+    /// where letting go opens the drawer.
+    @State private var tickedThisDrag = false
 
     private static let overShape = UnevenRoundedRectangle(bottomTrailingRadius: 28, topTrailingRadius: 28,
                                                           style: .continuous)
+    /// The drawer's ground. In light mode it is a step darker than the page,
+    /// as Claude's sidebar is, so the page lying over it reads as a card;
+    /// in dark mode the page is dimmed instead, so the ground stays the page.
+    static let fill = Color(uiColor: UIColor {
+        $0.userInterfaceStyle == .dark ? UIColor(hex: 0x121110) : UIColor(hex: 0xF1EFE9)
+    })
+    /// The selected row and the search field on that ground.
+    static let selectedFill = Color(uiColor: UIColor {
+        $0.userInterfaceStyle == .dark ? UIColor(hex: 0x1B1918) : UIColor(hex: 0xE6E2D9)
+    })
     /// Light mode lifts the pushed page towards white, dark mode dims it.
     private static let veil = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .black : .white })
 
@@ -393,6 +478,10 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                         changed: { dx in
                             mounted = true
                             reveal = min(width, max(0, dx))
+                            if dx > width * 0.35 && !tickedThisDrag {
+                                tickedThisDrag = true
+                                openTicks += 1
+                            }
                         },
                         ended: { dx, speed in finish(open: (dx > width * 0.35 && speed > -300) || speed > 600) })
                 }
@@ -402,26 +491,33 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                 drawer.zIndex(pushes ? -1 : 1)
             }
         }
-        .onChange(of: isPresented) { _, _ in settle() }
+        .sensoryFeedback(.impact(weight: .medium), trigger: openTicks)
+        .onChange(of: isPresented) { _, shown in
+            if shown && !tickedThisDrag { openTicks += 1 }
+            tickedThisDrag = false
+            settle()
+        }
         .onChange(of: width) { _, _ in if isPresented { reveal = width } }
         .onAppear { if isPresented { settle() } }
     }
 
     private var drawer: some View {
         LedgerAgentHistoryView(sharesText: sharesText, close: { isPresented = false },
-                               openSettings: openSettings, closeDrag: closeDrag)
+                               openSettings: openSettings, openRoute: openRoute, closeDrag: closeDrag)
             .frame(width: width)
             .frame(maxHeight: .infinity)
             .background {
                 if pushes {
-                    Rectangle().fill(BalancedPalette.page).ignoresSafeArea()
+                    Rectangle().fill(Self.fill).ignoresSafeArea()
                 } else {
-                    Self.overShape.fill(BalancedPalette.page)
+                    Self.overShape.fill(Self.fill)
                         .shadow(color: .black.opacity(0.18 * progress), radius: 24, x: 8, y: 0)
                         .ignoresSafeArea()
                 }
             }
-            .offset(x: reveal - width)
+            // Compact width: the drawer lies still under the page and the
+            // page is drawn aside to show it. Regular width: it slides in.
+            .offset(x: pushes ? 0 : reveal - width)
             .accessibilityHidden(!isPresented)
             .accessibilityAddTraits(.isModal)
             .accessibilityAction(.escape) { isPresented = false }
@@ -444,12 +540,12 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                 .accessibilityHidden(!isPresented)
             if pushes {
                 LedgerAgentCardCorners(radius: 44)
-                    .fill(BalancedPalette.page)
+                    .fill(Self.fill)
                     .ignoresSafeArea()
                     .opacity(progress > 0 ? 1 : 0)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
-                LinearGradient(colors: [.black.opacity(0), .black.opacity(colorScheme == .dark ? 0.12 : 0.09)],
+                LinearGradient(colors: [.black.opacity(0), .black.opacity(colorScheme == .dark ? 0.35 : 0.09)],
                                startPoint: .leading, endPoint: .trailing)
                     .frame(width: 22)
                     .offset(x: -22)
@@ -462,14 +558,23 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     }
 
     private func finish(open: Bool) {
-        if open != isPresented { isPresented = open } else { settle() }
+        if open != isPresented {
+            isPresented = open
+        } else {
+            tickedThisDrag = false
+            settle()
+        }
     }
 
     /// Brings the drawer to where `isPresented` says it is, and takes it out
-    /// of the view tree once it is all the way in.
+    /// of the view tree once it is all the way in. That waits for the
+    /// animation to be fully removed, not just logically complete: a spring
+    /// is "logically complete" while the page is still a point or so from
+    /// the edge, and taking the drawer away then flashed the empty strip
+    /// behind it.
     private func settle() {
         if isPresented { mounted = true }
-        withAnimation(settling) {
+        withAnimation(settling, completionCriteria: .removed) {
             reveal = isPresented ? width : 0
         } completion: {
             if !isPresented && reveal == 0 { mounted = false }
