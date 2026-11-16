@@ -331,6 +331,21 @@ final class LedgerAgentSessions: ObservableObject {
         }
     }
 
+    /// Reads the history again after a sync brought in conversations from
+    /// the folder or removed ones deleted elsewhere. The ones still live
+    /// stay as they are.
+    func reloadSaved() {
+        guard let id = ledgerID, let storage else { return }
+        Task { [weak self] in
+            let records = await storage.load().compactMap { try? Self.decoder.decode(LedgerAgentSavedConversation.self, from: $0) }
+            guard let self, self.ledgerID == id else { return }
+            let live = Set([self.current.id, self.background?.id].compactMap { $0 })
+            let kept = self.saved.filter { live.contains($0.id) }
+            self.saved = []
+            self.merge(kept + records)
+        }
+    }
+
     func startNew() {
         guard !current.messages.isEmpty || current.isRunning || current.pending != nil else { return }
         show(LedgerAgentConversation())
@@ -386,7 +401,12 @@ final class LedgerAgentSessions: ObservableObject {
         }
         saved.removeAll { $0.id == id }
         unsent[id] = nil
-        if let storage { Task { await storage.remove(id) } }
+        if let storage {
+            Task {
+                await storage.remove(id)
+                LedgerAgentCloudSync.shared.localChanged()
+            }
+        }
     }
 
     /// Deletes every saved conversation except one that is answering.
@@ -407,6 +427,7 @@ final class LedgerAgentSessions: ObservableObject {
         guard let storage else { return }
         Task {
             if keep.isEmpty { await storage.removeAll() } else { for id in removed { await storage.remove(id) } }
+            LedgerAgentCloudSync.shared.localChanged()
         }
     }
 
@@ -459,6 +480,7 @@ final class LedgerAgentSessions: ObservableObject {
             }
             if !leaves.isEmpty || !branchTranscripts.isEmpty { await storage.pruneBranchTranscripts(record.id, leaves) }
             for id in removed { await storage.remove(id) }
+            LedgerAgentCloudSync.shared.localChanged()
         }
     }
 
@@ -488,7 +510,10 @@ final class LedgerAgentSessions: ObservableObject {
         guard record != before else { return }
         if let index = saved.firstIndex(where: { $0.id == id }) { saved[index] = record } else { merge([record]) }
         guard let storage, let data = try? Self.encoder.encode(record) else { return }
-        Task { try? await storage.save(id, data) }
+        Task {
+            try? await storage.save(id, data)
+            LedgerAgentCloudSync.shared.localChanged()
+        }
     }
 
     /// The oldest conversations beyond the limit, except pinned ones and the

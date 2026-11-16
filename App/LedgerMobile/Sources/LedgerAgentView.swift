@@ -34,6 +34,7 @@ struct LedgerAgentView: View {
             .task(id: session.localRepository?.descriptor.id) {
                 if let repository = session.localRepository {
                     sessions.bind(ledger: repository.descriptor.id, storage: .live(repository))
+                    LedgerAgentCloudSync.shared.attach(repository)
                     // After the bind, so AI 开账's greeting opens the new
                     // ledger's conversation instead of being dropped as the
                     // previous ledger's.

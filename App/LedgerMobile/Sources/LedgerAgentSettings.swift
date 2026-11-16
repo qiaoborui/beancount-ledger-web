@@ -107,6 +107,25 @@ final class LedgerAgentSettings: ObservableObject {
         hasKey = (try? keyStore(choice.provider).load()) != nil
     }
 
+    /// Takes the preferences again after a sync restored them on a fresh
+    /// install. Keys are not part of them; `hasKey` is read again because
+    /// the provider may have changed.
+    func reloadFromDefaults() {
+        favorites = defaults.data(forKey: favoritesKey).flatMap { try? JSONDecoder().decode([Favorite].self, from: $0) }?
+            .filter { catalog.provider($0.choice.provider) != nil } ?? []
+        let stored = defaults.data(forKey: preferenceKey).flatMap { try? JSONDecoder().decode(LedgerAgentModelChoice.self, from: $0) }
+        choice = stored.flatMap { catalog.provider($0.provider) == nil ? nil : $0 } ?? Self.defaultChoice(in: catalog)
+        thinking = defaults.string(forKey: thinkingKey).flatMap(LedgerAgentThinking.init(rawValue:)) ?? .default
+        keepsAwake = defaults.object(forKey: keepsAwakeKey) as? Bool ?? true
+        writePolicy = Self.writePolicy(in: defaults, key: writePolicyKey, legacyKey: autoWriteKey)
+        usesMemory = defaults.object(forKey: usesMemoryKey) as? Bool ?? true
+        assists = defaults.object(forKey: assistsKey) as? Bool ?? true
+        suggestions = defaults.object(forKey: suggestionsKey) as? Bool ?? true
+        contextWindows = defaults.dictionary(forKey: contextWindowsKey) as? [String: Int] ?? [:]
+        maxOutputs = defaults.dictionary(forKey: maxOutputTokensKey) as? [String: Int] ?? [:]
+        hasKey = (try? keyStore(choice.provider).load()) != nil
+    }
+
     /// The model's context window as its provider's list gave it, nil when
     /// no list said. The native side then uses its catalog's window, or for a
     /// model it does not know a common one.

@@ -88,6 +88,7 @@ struct LedgerAgentMemoryView: View {
         Task {
             do {
                 try await repository.workspace.saveAgentMemory(content)
+                LedgerAgentCloudSync.shared.localChanged()
                 text = content.trimmingCharacters(in: .whitespacesAndNewlines)
                 saved = text
                 editing = false
