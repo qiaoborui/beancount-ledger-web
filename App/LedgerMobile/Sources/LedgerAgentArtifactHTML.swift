@@ -21,8 +21,13 @@ enum LedgerAgentArtifactHTML {
         + "img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; "
         + "child-src 'none'; worker-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
 
-    /// Blocks every load but the page itself and inline data.
-    static let contentRules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^(about|data|blob):"},"action":{"type":"ignore-previous-rules"}}]"#
+    /// Blocks every load but the page itself and inline data. WebKit's rule
+    /// regexes have no alternation (`|`), so each allowed scheme is its own
+    /// rule; one `|` makes the whole list fail to compile.
+    static let contentRules = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},"#
+        + #"{"trigger":{"url-filter":"^about:"},"action":{"type":"ignore-previous-rules"}},"#
+        + #"{"trigger":{"url-filter":"^data:"},"action":{"type":"ignore-previous-rules"}},"#
+        + #"{"trigger":{"url-filter":"^blob:"},"action":{"type":"ignore-previous-rules"}}]"#
 
     /// The header line and the HTML after it, or nil when either is missing.
     static func split(_ source: String) -> ([String: Any], String)? {

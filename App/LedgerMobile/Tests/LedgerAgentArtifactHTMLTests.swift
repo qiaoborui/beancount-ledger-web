@@ -52,7 +52,11 @@ final class LedgerAgentArtifactHTMLTests: XCTestCase {
         XCTAssertTrue(document.contains("const [today,currency]=[\"2026-11-16\",\"CNY\"]"))
         XCTAssertTrue(document.hasSuffix("<p>hi</p>\n</body></html>"))
         let rules = try? JSONSerialization.jsonObject(with: Data(LedgerAgentArtifactHTML.contentRules.utf8)) as? [[String: Any]]
-        XCTAssertEqual(rules?.count, 2)
+        XCTAssertEqual(rules?.count, 4)
+        // WebKit refuses a rule list whose regexes use alternation.
+        let filters = rules?.compactMap { ($0["trigger"] as? [String: Any])?["url-filter"] as? String } ?? []
+        XCTAssertEqual(filters.count, 4)
+        XCTAssertFalse(filters.contains { $0.contains("|") || $0.contains("(") }, "\(filters)")
     }
 
     func testOnlyReadOnlyQueriesRun() {

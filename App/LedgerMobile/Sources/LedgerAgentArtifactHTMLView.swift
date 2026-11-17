@@ -1,4 +1,5 @@
 #if os(iOS)
+import os
 import SwiftUI
 import WebKit
 
@@ -68,31 +69,39 @@ struct LedgerAgentArtifactHTMLView: UIViewRepresentable {
         var onAsk: ((String) -> Void)?
         private var queries = 0
         private var lastAsk: Date?
-        private var rulesReady = false
+        private var rulesInstalled = false
 
         private static var rules: WKContentRuleList?
 
         func load(_ document: String) {
             queries = 0
             Task { @MainActor in
+                // The rules go in before the page, so it is never free to
+                // fetch. If they cannot be compiled the page still loads:
+                // its Content-Security-Policy and the refused navigations
+                // keep it offline, and a blank page would help no one.
                 await installRules()
-                // A page loaded before its rules would be free to fetch.
-                guard rulesReady else { return }
                 webView?.loadHTMLString(document, baseURL: nil)
             }
         }
 
         private func installRules() async {
-            guard !rulesReady, let webView else { return }
+            guard !rulesInstalled, let webView else { return }
             if Self.rules == nil {
-                Self.rules = try? await WKContentRuleListStore.default()
-                    .compileContentRuleList(forIdentifier: "ledger-artifact-offline",
-                                            encodedContentRuleList: LedgerAgentArtifactHTML.contentRules)
+                do {
+                    Self.rules = try await WKContentRuleListStore.default()
+                        .compileContentRuleList(forIdentifier: "ledger-artifact-offline-v2",
+                                                encodedContentRuleList: LedgerAgentArtifactHTML.contentRules)
+                } catch {
+                    Self.logger.error("artifact rule list did not compile: \(error.localizedDescription, privacy: .public)")
+                }
             }
             guard let rules = Self.rules else { return }
             webView.configuration.userContentController.add(rules)
-            rulesReady = true
+            rulesInstalled = true
         }
+
+        private static let logger = Logger(subsystem: "app.beancount.ledger", category: "agent-artifact-html")
 
         func handle(_ body: Any) async -> (Any?, String?) {
             guard let message = body as? [String: Any], let op = message["op"] as? String else { return (nil, "无效的请求") }
