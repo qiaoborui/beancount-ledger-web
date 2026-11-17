@@ -54,3 +54,19 @@ func TestLatestSlot(t *testing.T) {
 		}
 	}
 }
+
+// The phone writes task files (LedgerAutomationTask.fileText); this is the
+// text LedgerAutomationTasksTests expects it to write.
+func TestParseTaskReadsWhatThePhoneWrites(t *testing.T) {
+	written := "---\nname: \"周报: 本周 #消费\"\nschedule: weekly mon,thu 09:30\ntimezone: Asia/Singapore\nenabled: false\n" +
+		"model: \"auto/deepseek-flash\"\nthinking: low\naudit: false\n---\n\n总结本周。\n\n不要改账本。\n"
+	task, err := ParseTask("weekly", []byte(written), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Name != "周报: 本周 #消费" || task.Enabled || task.Audit || task.Model != "auto/deepseek-flash" ||
+		task.Thinking != "low" || task.Schedule.String() != "weekly mon,thu 09:30" ||
+		task.Prompt != "总结本周。\n\n不要改账本。" || task.Location.String() != "Asia/Singapore" {
+		t.Fatalf("task = %+v", task)
+	}
+}

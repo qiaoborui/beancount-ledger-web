@@ -58,8 +58,11 @@ struct LedgerAgentView: View {
     }
 
     private func attachAutomations(_ repository: LocalLedgerRepository) {
-        LedgerAutomationCenter.shared.attach(ledger: repository.descriptor.id,
-                                             source: { try await repository.automationRuns() })
+        LedgerAutomationCenter.shared.attach(
+            ledger: repository.descriptor.id,
+            source: { try await repository.automationRuns() },
+            tasks: .init(load: { try await repository.automationTasks() },
+                         save: { try await repository.saveAutomationTask(id: $0, text: $1) }))
     }
 }
 

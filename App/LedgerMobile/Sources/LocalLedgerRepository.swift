@@ -1561,6 +1561,49 @@ actor LocalLedgerRepository: LedgerRepository {
         throw LocalLedgerWorkspace.WorkspaceError.staleRevision
     }
 
+    /// The scheduled tasks in the ledger's automations/ folder.
+    func automationTasks() async throws -> LedgerAutomationTaskList {
+        guard try await workspace.currentRevision() != nil else { return LedgerAutomationTaskList() }
+        return try await workspace.withCurrentSnapshot { _, root in LedgerAutomationTaskList.read(workspace: root) }
+    }
+
+    /// Writes one scheduled task file, or removes it when `text` is nil, as a
+    /// validated commit like any other; Git sync then carries it to the host.
+    func saveAutomationTask(id: String, text: String?) async throws {
+        guard LedgerAutomationTask.isValidID(id) else {
+            throw LedgerAgentEditError.invalid(LedgerAutomationTask.ParseError.invalidID.localizedDescription)
+        }
+        let change: [String: Data?] = ["\(LedgerAutomationTask.directory)/\(id).md": text.map { Data($0.utf8) }]
+        let validator = validator, entrypoint = descriptor.entrypoint
+        for attempt in 0..<3 {
+            guard let current = try await workspace.currentRevision()?.id else { throw LocalLedgerError.previewRequired }
+            let files: LocalLedgerWorkspace.PreparedFiles
+            do {
+                files = try await workspace.prepare(expectedRevisionID: current, mutateStage: { stage in
+                    try LedgerAgentMerge.apply(change, to: stage)
+                    // The last task removed takes its folder with it.
+                    let folder = stage.appendingPathComponent(LedgerAutomationTask.directory, isDirectory: true)
+                    if let left = try? FileManager.default.contentsOfDirectory(atPath: folder.path), left.isEmpty {
+                        try? FileManager.default.removeItem(at: folder)
+                    }
+                }, validator: { root in try await validator(root, entrypoint) })
+            } catch LocalLedgerWorkspace.WorkspaceError.staleRevision where attempt < 2 {
+                continue
+            }
+            guard !files.files.isEmpty else { return }
+            let preview = PreparedBookkeepingChange(id: UUID(), ledgerID: descriptor.id, draftRevision: UUID(),
+                files: files, createdAt: Date())
+            preparedOperations[preview.id] = .init(preview: preview, importID: nil, result: nil)
+            do {
+                _ = try await commitPrepared(preview)
+                return
+            } catch LocalLedgerWorkspace.WorkspaceError.staleRevision where attempt < 2 {
+                continue
+            }
+        }
+        throw LocalLedgerWorkspace.WorkspaceError.staleRevision
+    }
+
     /// Carries the draft's own changes over every commit made since it was
     /// copied: the draft becomes the current ledger plus those changes. A file
     /// whose changes conflict takes the ledger's content and is returned.
