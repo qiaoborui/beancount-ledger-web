@@ -1,12 +1,94 @@
 {
   "sourceLanguage": "zh-Hans",
   "strings": {
+    "也可以在账本助手里点 ＋，从待导入收件箱选它来对账。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can also tap + in the assistant and pick it from the import inbox to reconcile."
+          }
+        }
+      }
+    },
+    "单个文件最多 25MB": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Each file can be up to 25 MB"
+          }
+        }
+      }
+    },
     "单个账单文件最多 10MB": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Each statement file can be up to 10 MB"
+          }
+        }
+      }
+    },
+    "发给账本助手": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send to Assistant"
+          }
+        }
+      }
+    },
+    "发送 %lld 个文件": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Send %lld file"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Send %lld files"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "取消": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "图片%lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Image %lld"
+          }
+        }
+      }
+    },
+    "存到待导入收件箱": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save to Import Inbox"
           }
         }
       }
@@ -43,12 +125,42 @@
         }
       }
     },
+    "已发给账本助手": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sent to the assistant"
+          }
+        }
+      }
+    },
     "待导入收件箱已满，请先在 Ledger 中核对或移除文件": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "The import inbox is full. Review or remove files in Ledger first"
+          }
+        }
+      }
+    },
+    "想让账本助手做什么？（可选）": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What should the assistant do? (optional)"
+          }
+        }
+      }
+    },
+    "打开 Ledger，账本助手会在新对话里带上这些文件。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Ledger: the assistant starts a new conversation with these files."
           }
         }
       }
@@ -83,12 +195,32 @@
         }
       }
     },
+    "未能保存": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't save"
+          }
+        }
+      }
+    },
     "未能保存账单": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Couldn't save statement"
+          }
+        }
+      }
+    },
+    "未能发给账本助手": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't send to the assistant"
           }
         }
       }
@@ -103,12 +235,42 @@
         }
       }
     },
+    "正在发给账本助手": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sending to the assistant"
+          }
+        }
+      }
+    },
+    "每次请选择 1–5 个文件。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose 1–5 files at a time."
+          }
+        }
+      }
+    },
     "每次请选择 1–5 个账单文件。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Choose 1–5 statement files at a time."
+          }
+        }
+      }
+    },
+    "第 %lld 个文件": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File %lld"
           }
         }
       }
@@ -149,6 +311,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "The statement file is empty"
+          }
+        }
+      }
+    },
+    "账本助手支持 CSV、Excel、PDF、HTML、文本和图片": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assistant reads CSV, Excel, PDF, HTML, text and images"
           }
         }
       }

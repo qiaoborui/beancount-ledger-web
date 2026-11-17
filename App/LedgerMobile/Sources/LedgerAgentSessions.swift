@@ -136,6 +136,25 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
     }
 }
 
+/// Files shared to 账本助手 from another app, oldest first, with what the
+/// user asked for in the share sheet.
+struct LedgerAgentSharedDelivery: Equatable, Identifiable, Sendable {
+    let id = UUID()
+    let items: [LedgerSharedImportInbox.Item]
+
+    init(items: [LedgerSharedImportInbox.Item]) {
+        self.items = items.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// The requests typed with the files; two shares asking the same thing
+    /// ask it once.
+    var note: String? {
+        var notes: [String] = []
+        for note in items.compactMap(\.note) where !notes.contains(note) { notes.append(note) }
+        return notes.isEmpty ? nil : notes.joined(separator: "\n\n")
+    }
+}
+
 /// One section of the history list: the pinned conversations, newest pin
 /// first, then the rest by when they were last used, newest first.
 struct LedgerAgentHistoryGroup: Equatable, Identifiable, Sendable {
@@ -233,6 +252,13 @@ final class LedgerAgentSessions: ObservableObject {
     /// A question from Siri or a shortcut for the conversation on screen to
     /// send once it can.
     @Published var queuedQuestion: String?
+    /// Files the share sheet sent to 账本助手, for the conversation on screen
+    /// to attach once it can.
+    @Published var queuedShare: LedgerAgentSharedDelivery?
+    /// Shared files already handed to a conversation. They stay in their
+    /// inbox until attached, and the app coming back to the front meanwhile
+    /// must not hand them over twice.
+    var takenShares: Set<UUID> = []
     /// The greeting AI 开账 left for the next conversation it opens, until the
     /// assistant screen takes it.
     @Published var pendingOpening: LedgerAgentOpening?

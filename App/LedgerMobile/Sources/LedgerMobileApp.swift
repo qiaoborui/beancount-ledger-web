@@ -87,6 +87,9 @@ struct LedgerMobileApp: App {
                             await session.automaticallyUnlockIfNeeded()
                         }
                         if phase == .active {
+                            // Files the share sheet sent to 账本助手 open it,
+                            // through the same route as a link.
+                            await session.receiveSharedAgentFilesIfAny()
                             // A notification tap that cold-started or resumed the
                             // app waited for an active scene before presenting the
                             // assistant; apply it now that the scene is active.

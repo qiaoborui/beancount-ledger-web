@@ -4,22 +4,68 @@ import Darwin
 #endif
 
 /// Files shared into Ledger remain local until the user reviews and submits them.
+///
+/// The share sheet fills one of two inboxes: the import inbox, which waits in
+/// 导入 for review, or the assistant's, which the app empties into a new
+/// 账本助手 conversation the next time it comes to the front.
 struct LedgerSharedImportInbox: Sendable {
     static let appGroupIdentifier = LedgerSharedAccess.current.appGroupIdentifier
     static let maximumBytes = 10 * 1024 * 1024
     static let maximumItems = 20
     static let maximumSharedItems = 5
     static let supportedExtensions: Set<String> = ["csv", "xlsx", "xls", "pdf", "eml", "html", "htm", "zip"]
+    /// What 账本助手 can read as an attachment (`LedgerAgentAttachments.kind`),
+    /// listed here because the share extension does not build the assistant.
+    static let agentExtensions: Set<String> = [
+        "csv", "tsv", "xlsx", "xlsm", "xls", "html", "htm", "pdf", "txt",
+        "png", "jpg", "jpeg", "heic", "heif", "webp", "gif", "bmp", "tif", "tiff",
+    ]
+    /// The assistant's own attachment limit (`LedgerAgentAttachments.maximumBytes`).
+    static let agentMaximumBytes = 25 * 1024 * 1024
+    /// What the user typed for the assistant in the share sheet.
+    static let maximumNoteLength = 2000
+
+    enum Purpose: Sendable {
+        /// Bills for 导入 to review and submit.
+        case imports
+        /// Files for 账本助手 to read in a new conversation.
+        case agent
+
+        var directoryName: String {
+            switch self {
+            case .imports: "SharedImportInbox"
+            case .agent: "SharedAgentInbox"
+            }
+        }
+
+        var extensions: Set<String> {
+            switch self {
+            case .imports: LedgerSharedImportInbox.supportedExtensions
+            case .agent: LedgerSharedImportInbox.agentExtensions
+            }
+        }
+
+        var maximumBytes: Int {
+            switch self {
+            case .imports: LedgerSharedImportInbox.maximumBytes
+            case .agent: LedgerSharedImportInbox.agentMaximumBytes
+            }
+        }
+    }
 
     struct Item: Codable, Identifiable, Equatable, Sendable {
         let id: UUID
         let name: String
         let byteCount: Int
         let createdAt: Date
+        /// The request typed with the files for 账本助手; nil for imports and
+        /// for items saved before there was one.
+        var note: String? = nil
     }
 
     enum InboxError: LocalizedError {
         case unavailable, invalidFile, unsupported, empty, tooLarge, full, missing
+        case agentUnsupported, agentTooLarge
 
         var errorDescription: String? {
             switch self {
@@ -30,21 +76,30 @@ struct LedgerSharedImportInbox: Sendable {
             case .tooLarge: String(localized: "单个账单文件最多 10MB")
             case .full: String(localized: "待导入收件箱已满，请先在 Ledger 中核对或移除文件")
             case .missing: String(localized: "该待导入文件已被移除，请重新分享")
+            case .agentUnsupported: String(localized: "账本助手支持 CSV、Excel、PDF、HTML、文本和图片")
+            case .agentTooLarge: String(localized: "单个文件最多 25MB")
             }
         }
     }
 
     let directory: URL
+    let purpose: Purpose
 
-    init(directory: URL) {
+    init(directory: URL, purpose: Purpose = .imports) {
         self.directory = directory.resolvingSymlinksInPath().standardizedFileURL
+        self.purpose = purpose
     }
 
-    static func live() throws -> Self {
+    static func live(_ purpose: Purpose = .imports) throws -> Self {
         guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
             throw InboxError.unavailable
         }
-        return Self(directory: container.appendingPathComponent("SharedImportInbox", isDirectory: true))
+        return Self(directory: container.appendingPathComponent(purpose.directoryName, isDirectory: true), purpose: purpose)
+    }
+
+    /// Whether a shared file of this name can go to this inbox.
+    func accepts(name: String) -> Bool {
+        purpose.extensions.contains((name as NSString).pathExtension.lowercased())
     }
 
     func items() throws -> [Item] {
@@ -52,7 +107,7 @@ struct LedgerSharedImportInbox: Sendable {
     }
 
     @discardableResult
-    func enqueue(fileURL: URL, originalName: String? = nil) throws -> Item {
+    func enqueue(fileURL: URL, originalName: String? = nil, note: String? = nil) throws -> Item {
         guard fileURL.isFileURL else { throw InboxError.invalidFile }
         let scoped = fileURL.startAccessingSecurityScopedResource()
         defer { if scoped { fileURL.stopAccessingSecurityScopedResource() } }
@@ -60,11 +115,12 @@ struct LedgerSharedImportInbox: Sendable {
         guard values.isRegularFile == true, values.isSymbolicLink != true else { throw InboxError.invalidFile }
         let name = originalName ?? fileURL.lastPathComponent
         try validateName(name)
-        guard (values.fileSize ?? 0) <= Self.maximumBytes else { throw InboxError.tooLarge }
+        guard (values.fileSize ?? 0) <= purpose.maximumBytes else { throw tooLarge }
+        let note = Self.normalizedNote(note)
         let data = try boundedData(at: fileURL)
         return try withLock {
             guard try storedItems().count < Self.maximumItems else { throw InboxError.full }
-            let item = Item(id: UUID(), name: name, byteCount: data.count, createdAt: Date())
+            let item = Item(id: UUID(), name: name, byteCount: data.count, createdAt: Date(), note: note)
             let staging = directory.appendingPathComponent(".pending-" + item.id.uuidString, isDirectory: true)
             try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
             defer { try? FileManager.default.removeItem(at: staging) }
@@ -96,6 +152,14 @@ struct LedgerSharedImportInbox: Sendable {
         }
     }
 
+    /// A trimmed note, nil when empty, cut to `maximumNoteLength` characters.
+    static func normalizedNote(_ note: String?) -> String? {
+        guard let text = note?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return String(text.prefix(maximumNoteLength))
+    }
+
+    private var tooLarge: InboxError { purpose == .agent ? .agentTooLarge : .tooLarge }
+
     private func itemDirectory(_ item: Item) -> URL {
         directory.appendingPathComponent(item.id.uuidString, isDirectory: true)
     }
@@ -108,8 +172,8 @@ struct LedgerSharedImportInbox: Sendable {
               !name.contains("\\"), !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw InboxError.invalidFile
         }
-        guard Self.supportedExtensions.contains((name as NSString).pathExtension.lowercased()) else {
-            throw InboxError.unsupported
+        guard accepts(name: name) else {
+            throw purpose == .agent ? InboxError.agentUnsupported : InboxError.unsupported
         }
     }
 
@@ -129,9 +193,9 @@ struct LedgerSharedImportInbox: Sendable {
         let handle = try FileHandle(forReadingFrom: url)
         #endif
         defer { try? handle.close() }
-        let data = try handle.read(upToCount: Self.maximumBytes + 1) ?? Data()
+        let data = try handle.read(upToCount: purpose.maximumBytes + 1) ?? Data()
         guard !data.isEmpty else { throw InboxError.empty }
-        guard data.count <= Self.maximumBytes else { throw InboxError.tooLarge }
+        guard data.count <= purpose.maximumBytes else { throw tooLarge }
         return data
     }
 
@@ -146,9 +210,11 @@ struct LedgerSharedImportInbox: Sendable {
         guard url.resolvingSymlinksInPath().standardizedFileURL == url.standardizedFileURL else { throw InboxError.invalidFile }
         let metadata = url.appendingPathComponent("item.json")
         let values = try metadata.resourceValues(forKeys: [.fileSizeKey, .isSymbolicLinkKey])
-        guard values.isSymbolicLink != true, (values.fileSize ?? Int.max) < 4096 else { throw InboxError.invalidFile }
+        // A note of `maximumNoteLength` characters, escaped, still fits.
+        guard values.isSymbolicLink != true, (values.fileSize ?? Int.max) < 32 * 1024 else { throw InboxError.invalidFile }
         let item = try JSONDecoder().decode(Item.self, from: Data(contentsOf: metadata))
-        guard item.id.uuidString == url.lastPathComponent, (1...Self.maximumBytes).contains(item.byteCount) else {
+        guard item.id.uuidString == url.lastPathComponent, (1...purpose.maximumBytes).contains(item.byteCount),
+              (item.note?.count ?? 0) <= Self.maximumNoteLength else {
             throw InboxError.invalidFile
         }
         try validateName(item.name)

@@ -232,6 +232,7 @@ targets:
           NSExtensionAttributes:
             NSExtensionActivationRule:
               NSExtensionActivationSupportsFileWithMaxCount: 5
+              NSExtensionActivationSupportsImageWithMaxCount: 5
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiaoborui.ledger.mobile.share
