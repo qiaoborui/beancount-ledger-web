@@ -130,10 +130,22 @@ final class LedgerAutomationCenter: ObservableObject {
     @Published private(set) var refreshedAt: Date?
     /// Runs that finished since the 定时任务 page was last looked at.
     @Published private(set) var unseen = 0
+    /// The tasks in the ledger's automations/ folder, read from the ledger
+    /// on the phone, so a task saved here shows before the host sees it.
+    @Published private(set) var tasks = LedgerAutomationTaskList()
+    /// What the host last did per task, from state.json.
+    @Published private(set) var states: [String: LedgerAutomationState.Task] = [:]
+
+    /// Reads and writes the ledger's task files.
+    struct TaskStore: Sendable {
+        var load: @Sendable () async throws -> LedgerAutomationTaskList
+        var save: @Sendable (_ id: String, _ text: String?) async throws -> Void
+    }
 
     private var ledgerID: UUID?
     private var root: URL?
     private var source: (@Sendable () async throws -> URL?)?
+    private var store: TaskStore?
     private var refreshTask: Task<Void, Never>?
     private let defaults: UserDefaults
     /// Refreshes on opening the drawer at most this often.
@@ -144,12 +156,15 @@ final class LedgerAutomationCenter: ObservableObject {
     }
 
     /// Follows the ledger on screen; another ledger starts over.
-    func attach(ledger id: UUID, source: @escaping @Sendable () async throws -> URL?) {
+    func attach(ledger id: UUID, source: @escaping @Sendable () async throws -> URL?, tasks store: TaskStore? = nil) {
         self.source = source
+        if let store { self.store = store }
         guard ledgerID != id else { return }
         ledgerID = id
         root = nil
         runs = []
+        tasks = LedgerAutomationTaskList()
+        states = [:]
         unseen = 0
         error = nil
         refreshedAt = nil
@@ -169,25 +184,29 @@ final class LedgerAutomationCenter: ObservableObject {
     /// Fetches the runs branch and adds new runs' conversations to the
     /// history. Concurrent calls share one fetch.
     func refresh() async {
+        await reloadTasks()
         if let refreshTask { return await refreshTask.value }
         guard let source, let ledger = ledgerID else { return }
         refreshing = true
         let task = Task { [weak self] in
             let outcome: Result<URL?, Error>
             do { outcome = .success(try await source()) } catch { outcome = .failure(error) }
-            let loaded: [LedgerAutomationRun]
+            let loaded: ([LedgerAutomationRun], LedgerAutomationState)
             if case let .success(root?) = outcome {
-                loaded = await Task.detached(priority: .utility) { LedgerAutomationRecords.runs(in: root) }.value
+                loaded = await Task.detached(priority: .utility) {
+                    (LedgerAutomationRecords.runs(in: root), LedgerAutomationState.read(in: root))
+                }.value
             } else {
-                loaded = []
+                loaded = ([], LedgerAutomationState())
             }
-            await self?.finishRefresh(ledger: ledger, outcome: outcome, runs: loaded)
+            await self?.finishRefresh(ledger: ledger, outcome: outcome, runs: loaded.0, state: loaded.1)
         }
         refreshTask = task
         await task.value
     }
 
-    private func finishRefresh(ledger: UUID, outcome: Result<URL?, Error>, runs loaded: [LedgerAutomationRun]) async {
+    private func finishRefresh(ledger: UUID, outcome: Result<URL?, Error>, runs loaded: [LedgerAutomationRun],
+                               state: LedgerAutomationState) async {
         refreshTask = nil
         refreshing = false
         guard ledger == ledgerID else { return }
@@ -200,16 +219,51 @@ final class LedgerAutomationCenter: ObservableObject {
             error = nil
             root = nil
             runs = []
+            states = [:]
             availability = .none
         case let .success(root?):
             error = nil
             self.root = root
             runs = loaded
-            availability = loaded.isEmpty ? .none : .available
+            states = state.tasks
+            availability = .available
             await importConversations(ledger: ledger, root: root)
         }
         updateUnseen()
     }
+
+    /// Reads the task files from the ledger on the phone.
+    func reloadTasks() async {
+        guard let store, let ledger = ledgerID else { return }
+        let loaded = (try? await store.load()) ?? LedgerAutomationTaskList()
+        guard ledger == ledgerID else { return }
+        tasks = loaded
+    }
+
+    /// Saves a task to the ledger, replacing the file `previousID` names when
+    /// the task was renamed to another file. Git sync pushes it, and the host
+    /// picks it up on its next check.
+    func save(_ task: LedgerAutomationTask, replacing previousID: String? = nil) async throws {
+        guard let store else { throw LedgerAgentEditError.invalid(String(localized: "账本还没打开")) }
+        try await store.save(task.id, task.fileText)
+        if let previousID, previousID != task.id { try await store.save(previousID, nil) }
+        await reloadTasks()
+    }
+
+    func delete(_ id: String) async throws {
+        guard let store else { throw LedgerAgentEditError.invalid(String(localized: "账本还没打开")) }
+        try await store.save(id, nil)
+        await reloadTasks()
+    }
+
+    func setEnabled(_ enabled: Bool, for task: LedgerAutomationTask) async throws {
+        var changed = task
+        changed.enabled = enabled
+        try await save(changed)
+    }
+
+    /// The runs of one task, newest first.
+    func runs(of task: String) -> [LedgerAutomationRun] { runs.filter { $0.task == task } }
 
     /// Each run's conversation joins the history once. One the user deleted
     /// stays deleted, and one continued on the phone keeps its later turns.

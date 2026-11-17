@@ -65,7 +65,8 @@ runs/<运行 id>/draft/after/…    助手改完的样子（删掉的文件没�
 
 用 Git 同步的账本会顺带拉 `automation-runs` 分支（单独的缓存，不碰账本自己的同步状态）：
 
-- 账本助手的侧边栏多了「定时任务」，列出每次运行的状态、摘要、发现数和草稿；有新运行时旁边显示数字。下拉刷新，打开侧边栏时最多每 2 分钟自动拉一次。
+- 账本助手的侧边栏多了「定时任务」。上面是任务：每个 `automations/*.md` 的频率、下次运行和上次结果，右上角 + 可以空白新建或从模板（每日巡检、每周消费小结、月初对账提醒）新建；点进去看这个任务的运行记录，能编辑、暂停、删除。改动作为一次普通的账本提交随 Git 同步推上去，主机下次检查（最多 5 分钟）时读到。手机写出的文件格式和主机解析的一致（两边各有测试对同一段文本）。
+- 下面是运行记录：每次运行的状态、摘要、发现数和草稿；有新运行时侧边栏旁边显示数字。下拉刷新，打开侧边栏时最多每 2 分钟自动拉一次。
 - 跑成功的运行会作为对话加进侧边栏的历史（带时钟图标），每次运行只加一次；删掉就不会再回来，接着聊过的保留手机上的版本。
 - 打开这个对话就能接着聊，助手拿到的是主机上那一轮的完整 transcript。第一次打开时，主机的草稿用三方合并（`draft/base` → `draft/after` 合到手机当前的草稿上）载入改动卡片，永远要手动确认才写入；账本后来改过同一处的文件保留账本内容并在卡片上说明。长按运行可以「重新载入草稿」。
 - Bark 通知的链接 `ledger://automation/run?id=<运行 id>` 直接打开那次运行的对话。
@@ -89,13 +90,18 @@ sudo install -d -m 750 -o root -g ledger-automation /etc/ledger-automation
 
 # 账本仓库的 deploy key（GitHub 仓库 Settings → Deploy keys，勾选 Allow write access）
 sudo ssh-keygen -t ed25519 -N '' -C ledger-automation@mibook -f /etc/ledger-automation/deploy-key
-ssh-keyscan -t ed25519 github.com | sudo tee /etc/ledger-automation/known_hosts >/dev/null
+# mibook 连不上 GitHub 的 22 端口，走 ssh.github.com:443（仓库地址见 env）。
+# 在 mibook 上 ssh-keyscan 拿不到回应，改从一次普通连接里取主机公钥，
+# 再核对指纹是 GitHub 公布的 SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU：
+ssh -p 443 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/gh_known_hosts -T git@ssh.github.com || true
+ssh-keygen -lf /tmp/gh_known_hosts
+sudo tee /etc/ledger-automation/known_hosts </tmp/gh_known_hosts >/dev/null && rm /tmp/gh_known_hosts
 
 # 密钥文件：不用的留空文件即可（systemd 要求文件存在）
 sudo install -m 640 -o root -g ledger-automation /dev/null /etc/ledger-automation/model-key
 sudo install -m 640 -o root -g ledger-automation /dev/null /etc/ledger-automation/bark-key
 sudo install -m 640 -o root -g ledger-automation /dev/null /etc/ledger-automation/bark-encryption-key
-sudoedit /etc/ledger-automation/model-key          # freellmapi 里给自动化单独发的 key
+sudoedit /etc/ledger-automation/model-key          # 模型网关（magpie：magpie gateway-key add ledger-automation）给自动化单独发的 key
 sudoedit /etc/ledger-automation/bark-key           # Bark App 里的 device key
 sudoedit /etc/ledger-automation/bark-encryption-key  # 可选：Bark App 加密推送设置里的 32 位 key（AES-256-CBC）
 sudo chgrp ledger-automation /etc/ledger-automation/deploy-key && sudo chmod 640 /etc/ledger-automation/deploy-key
