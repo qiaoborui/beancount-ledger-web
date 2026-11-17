@@ -89,13 +89,18 @@ sudo install -d -m 750 -o root -g ledger-automation /etc/ledger-automation
 
 # 账本仓库的 deploy key（GitHub 仓库 Settings → Deploy keys，勾选 Allow write access）
 sudo ssh-keygen -t ed25519 -N '' -C ledger-automation@mibook -f /etc/ledger-automation/deploy-key
-ssh-keyscan -t ed25519 github.com | sudo tee /etc/ledger-automation/known_hosts >/dev/null
+# mibook 连不上 GitHub 的 22 端口，走 ssh.github.com:443（仓库地址见 env）。
+# 在 mibook 上 ssh-keyscan 拿不到回应，改从一次普通连接里取主机公钥，
+# 再核对指纹是 GitHub 公布的 SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU：
+ssh -p 443 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/gh_known_hosts -T git@ssh.github.com || true
+ssh-keygen -lf /tmp/gh_known_hosts
+sudo tee /etc/ledger-automation/known_hosts </tmp/gh_known_hosts >/dev/null && rm /tmp/gh_known_hosts
 
 # 密钥文件：不用的留空文件即可（systemd 要求文件存在）
 sudo install -m 640 -o root -g ledger-automation /dev/null /etc/ledger-automation/model-key
 sudo install -m 640 -o root -g ledger-automation /dev/null /etc/ledger-automation/bark-key
 sudo install -m 640 -o root -g ledger-automation /dev/null /etc/ledger-automation/bark-encryption-key
-sudoedit /etc/ledger-automation/model-key          # freellmapi 里给自动化单独发的 key
+sudoedit /etc/ledger-automation/model-key          # 模型网关（magpie：magpie gateway-key add ledger-automation）给自动化单独发的 key
 sudoedit /etc/ledger-automation/bark-key           # Bark App 里的 device key
 sudoedit /etc/ledger-automation/bark-encryption-key  # 可选：Bark App 加密推送设置里的 32 位 key（AES-256-CBC）
 sudo chgrp ledger-automation /etc/ledger-automation/deploy-key && sudo chmod 640 /etc/ledger-automation/deploy-key
