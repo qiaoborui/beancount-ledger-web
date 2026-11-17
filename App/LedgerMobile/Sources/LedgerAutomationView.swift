@@ -354,7 +354,7 @@ private struct LedgerAutomationTaskEditor: View {
                 TextField("名称，比如：每日巡检", text: $task.name)
                 Toggle("启用", isOn: $task.enabled)
             }
-            Section("什么时候跑") {
+            Section {
                 Picker("频率", selection: $task.schedule.kind) {
                     ForEach(LedgerAutomationSchedule.Kind.allCases) { Text($0.title).tag($0) }
                 }
@@ -374,6 +374,8 @@ private struct LedgerAutomationTaskEditor: View {
                     }
                     DatePicker("时间", selection: time, displayedComponents: .hourAndMinute)
                 }
+            } header: {
+                Text("什么时候跑")
             } footer: {
                 if let next = task.schedule.nextSlot(after: Date(), in: task.zone) {
                     Text("下次：\(next.formatted(date: .abbreviated, time: .shortened))（\(task.zone.identifier)）")
