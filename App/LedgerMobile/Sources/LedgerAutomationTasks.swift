@@ -82,12 +82,15 @@ struct LedgerAutomationSchedule: Equatable, Hashable, Sendable {
 
     private var clockText: String { String(format: "%02d:%02d", hour, minute) }
 
+    /// The weekdays Monday first, as a Chinese calendar reads.
+    private var weekOrder: [Int] { weekdays.sorted { ($0 + 5) % 7 < ($1 + 5) % 7 } }
+
     /// The line the task file holds.
     var text: String {
         switch kind {
         case .hourly: minute == 0 ? "hourly" : String(format: "hourly :%02d", minute)
         case .daily: "daily \(clockText)"
-        case .weekly: "weekly \(weekdays.sorted().map { Self.weekdayNames[$0 - 1] }.joined(separator: ",")) \(clockText)"
+        case .weekly: "weekly \(weekOrder.map { Self.weekdayNames[$0 - 1] }.joined(separator: ",")) \(clockText)"
         case .monthly: "monthly \(dayOfMonth) \(clockText)"
         }
     }
@@ -98,7 +101,7 @@ struct LedgerAutomationSchedule: Equatable, Hashable, Sendable {
         case .hourly: minute == 0 ? String(localized: "每小时整点") : String(localized: "每小时第 \(minute) 分")
         case .daily: String(localized: "每天 \(clockText)")
         case .weekly:
-            String(localized: "每周\(weekdays.sorted().map { Self.weekdayTitles[$0 - 1] }.joined(separator: "、")) \(clockText)")
+            String(localized: "每周\(weekOrder.map { Self.weekdayTitles[$0 - 1] }.joined(separator: "、")) \(clockText)")
         case .monthly: String(localized: "每月 \(dayOfMonth) 日 \(clockText)")
         }
     }
