@@ -35,6 +35,7 @@ struct LedgerAgentView: View {
                 if let repository = session.localRepository {
                     sessions.bind(ledger: repository.descriptor.id, storage: .live(repository))
                     LedgerAgentCloudSync.shared.attach(repository)
+                    attachAutomations(repository)
                     // After the bind, so AI 开账's greeting opens the new
                     // ledger's conversation instead of being dropped as the
                     // previous ledger's.
@@ -48,6 +49,17 @@ struct LedgerAgentView: View {
                 if !sessions.current.isRunning, !sessions.busyElsewhere { sessions.startNew() }
                 sessions.queuedQuestion = question
             }
+            // A scheduled task's notification opens that run's conversation.
+            .task(id: session.pendingAutomationRun?.id) {
+                guard let repository = session.localRepository, let run = session.takePendingAutomationRun() else { return }
+                attachAutomations(repository)
+                await LedgerAutomationCenter.shared.open(runID: run)
+            }
+    }
+
+    private func attachAutomations(_ repository: LocalLedgerRepository) {
+        LedgerAutomationCenter.shared.attach(ledger: repository.descriptor.id,
+                                             source: { try await repository.automationRuns() })
     }
 }
 
@@ -161,6 +173,11 @@ private struct LedgerAgentChatScreen: View {
             case .files: LedgerLinuxFilesView(path: "/root")
             case .skills: LedgerAgentSkillsView()
             case .memory: LedgerAgentMemoryView()
+            case .automations:
+                LedgerAutomationView(onOpen: { run, reloadingDraft in
+                    drawerRoute = nil
+                    Task { await LedgerAutomationCenter.shared.open(run, reloadingDraft: reloadingDraft) }
+                })
             case .artifacts:
                 LedgerAgentArtifactsView(onRevise: { artifact in
                     drawerRoute = nil

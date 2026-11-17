@@ -61,6 +61,10 @@ protocol LogicalLocalStorage: Sendable {
     func synchronize(validator: @escaping LocalLedgerWorkspace.Validator) async throws -> LocalStorageSyncStatus
     func resolveConflicts(keepingLocal: Bool, validator: @escaping LocalLedgerWorkspace.Validator) async throws -> LocalStorageSyncStatus
     func exportConflictVersions() async throws -> URL
+    /// The newest run records ledger-automation pushed to the repository's
+    /// automation-runs branch, as a read-only folder; nil when the ledger is
+    /// not synced with Git or the repository has no such branch.
+    func automationRuns() async throws -> URL?
 }
 
 extension LogicalLocalStorage {
@@ -70,6 +74,7 @@ extension LogicalLocalStorage {
     func exportConflictVersions() async throws -> URL {
         throw LocalStorageError.gitFailure(String(localized: "当前账本没有待处理的同步冲突"))
     }
+    func automationRuns() async throws -> URL? { nil }
 }
 
 enum LocalStorageError: LocalizedError, Equatable {

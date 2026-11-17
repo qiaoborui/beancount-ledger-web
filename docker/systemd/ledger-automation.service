@@ -1,0 +1,31 @@
+[Unit]
+Description=Run due ledger automations (scheduled Agent tasks)
+Documentation=https://github.com/qiaoborui/beancount-ledger-web/blob/main/docs/ledger-automation.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ledger-automation
+Group=ledger-automation
+UMask=0077
+EnvironmentFile=/etc/ledger-automation/env
+LoadCredential=model-key:/etc/ledger-automation/model-key
+LoadCredential=bark-key:/etc/ledger-automation/bark-key
+LoadCredential=bark-encryption-key:/etc/ledger-automation/bark-encryption-key
+Environment="GIT_SSH_COMMAND=ssh -i /etc/ledger-automation/deploy-key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/ledger-automation/known_hosts"
+StateDirectory=ledger-automation
+StateDirectoryMode=0700
+ExecStart=/usr/local/bin/ledger-automation tick
+# One run is bounded: three Agent attempts of at most 10 minutes each.
+TimeoutStartSec=40min
+# mibook is short on memory; keep the Agent from pushing the host into swap.
+MemoryMax=768M
+MemorySwapMax=0
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/ledger-automation

@@ -1231,6 +1231,17 @@ struct LedgerAgentDraft: Equatable, Sendable {
     let baseRevisionID: UUID
 }
 
+/// A draft a scheduled task's run left on the always-on host: each file it
+/// changed as it was at the commit the run read, under `base`, and as the run
+/// left it, under `after`. A file the run added has no base copy, and one it
+/// deleted has no after copy.
+struct LedgerAgentCloudDraft: Equatable, Sendable {
+    let base: URL
+    let after: URL
+    /// Where the change came from, for the change card.
+    let source: String
+}
+
 /// What the draft amounts to against the committed ledger, ready to write.
 /// `id` names the prepared change the repository holds for the commit.
 struct LedgerAgentReview: Equatable, Sendable {
@@ -2259,6 +2270,73 @@ final class LedgerAgentConversation: ObservableObject {
         }
         draft = nil
         reopening = nil
+    }
+
+    /// Carries a scheduled task's draft into this conversation's draft,
+    /// merged three ways over what the ledger and the draft hold now, and
+    /// puts it on the change card. It is never written on its own: the card
+    /// always waits for the user. Files the ledger has since changed in the
+    /// same places stay as the ledger has them and are named on the card.
+    @discardableResult
+    func adoptCloudDraft(_ cloud: LedgerAgentCloudDraft, editor fallback: LedgerAgentEditor?) -> Bool {
+        if editor == nil { editor = fallback }
+        guard let editor, canBranch else { return false }
+        // Nothing else starts while the draft is being opened and merged.
+        switching = true
+        let existing = draft, reopening = reopening, epoch = epoch
+        Task { [weak self] in
+            var opened = existing
+            if opened == nil, let reopening { opened = await reopening.value }
+            let outcome: Result<(LedgerAgentDraft, LedgerAgentMerge.Plan, LedgerAgentReview?), Error>
+            do {
+                if opened == nil { opened = try await editor.open() }
+                guard var copy = opened else { throw LedgerAgentEditError.invalid(String(localized: "草稿打不开")) }
+                if let rebased = try? await editor.rebase(copy) { copy = rebased.0 }
+                opened = copy
+                let root = copy.root
+                let plan = try await Task.detached(priority: .userInitiated) { () throws -> LedgerAgentMerge.Plan in
+                    let plan = try LedgerAgentMerge.plan(base: cloud.base, draft: cloud.after, current: root)
+                    try LedgerAgentMerge.apply(plan.changes, to: root)
+                    return plan
+                }.value
+                let review = plan.changes.isEmpty ? nil : try await editor.review(copy)
+                outcome = .success((copy, plan, review))
+            } catch {
+                outcome = .failure(error)
+            }
+            guard let self, self.epoch == epoch else {
+                if let opened, opened.id != existing?.id { await editor.close(opened) }
+                return
+            }
+            self.switching = false
+            if let opened { self.draft = opened }
+            self.reopening = nil
+            self.restoredNotice = nil
+            let origin = String(localized: "来自\(cloud.source)的草稿，确认后才会写入。")
+            switch outcome {
+            case let .success((_, plan, review)):
+                self.draftUnreviewed = false
+                var hold = origin
+                if !plan.conflicts.isEmpty {
+                    hold += String(localized: "这些文件账本里已经改过同一处，保留了账本的内容：\(plan.conflicts.joined(separator: "、"))")
+                }
+                if let review {
+                    self.pending = .init(review: review, status: .ready, holdReason: hold)
+                } else if !plan.conflicts.isEmpty {
+                    self.pending = .init(review: nil, status: .conflict(plan.conflicts))
+                } else {
+                    self.restoredNotice = String(localized: "定时任务的草稿改动已经在账本里了，不需要再写入。")
+                }
+                self.note = String(localized: "（系统提示：用户在手机上打开了这次定时任务的结果，你在主机上做的草稿改动已经载入草稿，正等用户确认写入。）")
+            case let .failure(error):
+                switch error as? LedgerAgentEditError {
+                case let .conflict(paths)?: self.pending = .init(review: nil, status: .conflict(paths))
+                default: self.pending = .init(review: nil, status: .invalid(origin + error.localizedDescription))
+                }
+            }
+            self.onSettled?(self)
+        }
+        return true
     }
 
     /// Commits the reviewed change through the ledger's validated write path.

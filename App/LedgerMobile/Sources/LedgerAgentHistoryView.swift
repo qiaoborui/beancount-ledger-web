@@ -24,6 +24,7 @@ struct LedgerAgentHistoryView: View {
     /// drawer with the finger and closes it when let go far or fast enough.
     var closeDrag: LedgerAgentDrawerDrag
     @ObservedObject private var sessions = LedgerAgentSessions.shared
+    @ObservedObject private var automations = LedgerAutomationCenter.shared
     @State private var query = ""
     @State private var searching = false
     @FocusState private var searchFocused: Bool
@@ -83,6 +84,8 @@ struct LedgerAgentHistoryView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) { footer }
         }
         .privacySensitive()
+        // New runs of the scheduled tasks join the history below.
+        .task { automations.refreshIfStale() }
         .confirmationDialog("清空这本账本的全部历史对话？", isPresented: $confirmingClear, titleVisibility: .visible) {
             Button("清空", role: .destructive) { sessions.deleteAll() }
         }
@@ -180,6 +183,15 @@ struct LedgerAgentHistoryView: View {
                 Text(route.title).balancedFont(size: 17).foregroundStyle(BalancedPalette.ink)
                     .lineLimit(1)
                 Spacer(minLength: 4)
+                if route == .automations, automations.unseen > 0 {
+                    Text(verbatim: "\(automations.unseen)")
+                        .balancedFont(size: 12, weight: .medium)
+                        .foregroundStyle(BalancedPalette.page)
+                        .padding(.horizontal, 7)
+                        .frame(minWidth: 20, minHeight: 20)
+                        .background(Capsule().fill(BalancedPalette.ink))
+                        .accessibilityLabel("\(automations.unseen) 次新运行")
+                }
             }
             .frame(minHeight: 50)
             .contentShape(Rectangle())
@@ -254,7 +266,9 @@ struct LedgerAgentHistoryView: View {
     /// yet written shows a dot.
     private func row(_ item: LedgerAgentSavedConversation) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: "bubble.left").font(.system(size: 18, weight: .regular))
+            // A conversation a scheduled task began shows a clock.
+            Image(systemName: item.automationRun == nil ? "bubble.left" : "clock")
+                .font(.system(size: 18, weight: .regular))
                 .foregroundStyle(BalancedPalette.ink)
                 .frame(width: 26)
                 .accessibilityHidden(true)
@@ -362,9 +376,10 @@ extension View {
 
 /// The places at the top of the drawer, pushed on the chat page's stack:
 /// the built-in Linux's terminal and files when the engine is in this
-/// build, then the assistant's artifacts, skills and memory.
+/// build, then the scheduled task runs and the assistant's artifacts, skills
+/// and memory.
 enum LedgerAgentDrawerRoute: String, Identifiable, Hashable, CaseIterable {
-    case terminal, files, artifacts, skills, memory
+    case terminal, files, automations, artifacts, skills, memory
 
     var id: String { rawValue }
 
@@ -372,6 +387,7 @@ enum LedgerAgentDrawerRoute: String, Identifiable, Hashable, CaseIterable {
         switch self {
         case .terminal: "终端"
         case .files: "Linux 文件"
+        case .automations: "定时任务"
         case .artifacts: "产物"
         case .skills: "技能"
         case .memory: "记忆"
@@ -382,6 +398,7 @@ enum LedgerAgentDrawerRoute: String, Identifiable, Hashable, CaseIterable {
         switch self {
         case .terminal: "terminal"
         case .files: "folder"
+        case .automations: "clock.arrow.circlepath"
         case .artifacts: "rectangle.stack"
         case .skills: "book.pages"
         case .memory: "brain"
@@ -389,7 +406,7 @@ enum LedgerAgentDrawerRoute: String, Identifiable, Hashable, CaseIterable {
     }
 
     static var available: [LedgerAgentDrawerRoute] {
-        LedgerLinuxMachine.engineAvailable ? allCases : [.artifacts, .skills, .memory]
+        LedgerLinuxMachine.engineAvailable ? allCases : [.automations, .artifacts, .skills, .memory]
     }
 }
 

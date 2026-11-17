@@ -132,6 +132,9 @@ actor LocalLedgerRepository: LedgerRepository {
         return try await storage.resolveConflicts(keepingLocal: keepingLocal) { root in try await validate(root, entry) }
     }
     func exportSyncConflictVersions() async throws -> URL { try await storage.exportConflictVersions() }
+    /// The scheduled tasks' run records from the Git repository; nil when
+    /// there are none to read.
+    func automationRuns() async throws -> URL? { try await storage.automationRuns() }
 
     func bootstrap(start: String, end: String, today: String, valuationCurrency: String) async throws -> LedgerBootstrap {
         try await bootstrapSnapshot(start: start, end: end, today: today, valuationCurrency: valuationCurrency).payload

@@ -299,6 +299,52 @@ actor GitLocalStorage: LogicalLocalStorage {
         _ = try await transport.dispatch(push)
         return result.commit
     }
+    /// The branch ledger-automation writes its run records to.
+    static let automationRunsBranch = "automation-runs"
+
+    /// Fetches the run records branch into a cache of its own, apart from the
+    /// ledger's, and exports its newest commit once. Only the newest export
+    /// is kept. The ledger's sync state is never touched.
+    func automationRuns() async throws -> URL? {
+        let fileManager = FileManager.default
+        let root = syncRoot.appendingPathComponent("automation", isDirectory: true)
+        let exports = root.appendingPathComponent("exports", isDirectory: true)
+        try fileManager.createDirectory(at: exports, withIntermediateDirectories: true)
+        let storageRoot = root.appendingPathComponent("repository.git").path
+        let credential = try credentials.load(for: configuration.id)
+        var fetch = makeRequest("fetch", credential: credential)
+        fetch.storageRoot = storageRoot
+        fetch.branch = Self.automationRunsBranch
+        let result = try JSONDecoder().decode(FetchResult.self, from: await transport.dispatch(fetch))
+        guard result.branchExists, !result.remoteHead.isEmpty else { return nil }
+        let target = exports.appendingPathComponent(result.remoteHead, isDirectory: true)
+        if !fileManager.fileExists(atPath: target.path) {
+            let staging = exports.appendingPathComponent(".partial-" + UUID().uuidString, isDirectory: true)
+            var export = makeRequest("export")
+            export.storageRoot = storageRoot
+            export.commit = result.remoteHead
+            export.directory = staging.path
+            do {
+                _ = try await transport.dispatch(export)
+                // Another refresh may have exported the same commit meanwhile.
+                if fileManager.fileExists(atPath: target.path) {
+                    try? fileManager.removeItem(at: staging)
+                } else {
+                    try fileManager.moveItem(at: staging, to: target)
+                }
+            } catch {
+                try? fileManager.removeItem(at: staging)
+                throw error
+            }
+            try? protectTree(target)
+        }
+        for other in (try? fileManager.contentsOfDirectory(at: exports, includingPropertiesForKeys: nil)) ?? []
+        where other.lastPathComponent != target.lastPathComponent && !other.lastPathComponent.hasPrefix(".partial-") {
+            try? fileManager.removeItem(at: other)
+        }
+        return target
+    }
+
     private func export(commit: String, to directory: URL) async throws {
         if commit.isEmpty {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
