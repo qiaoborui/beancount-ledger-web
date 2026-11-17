@@ -35,6 +35,8 @@ Configuration comes from the environment (see docs/ledger-automation.md):
   LEDGER_AUTOMATION_TIMEZONE, LEDGER_AUTOMATION_MODEL_API,
   LEDGER_AUTOMATION_MODEL_BASE_URL, LEDGER_AUTOMATION_MODEL,
   LEDGER_AUTOMATION_THINKING, LEDGER_AUTOMATION_CONTEXT_WINDOW,
+  LEDGER_AUTOMATION_BARK_GROUP, LEDGER_AUTOMATION_BARK_ICON,
+  LEDGER_AUTOMATION_BARK_SOUND,
   LEDGER_AUTOMATION_MAX_OUTPUT_TOKENS, LEDGER_AUTOMATION_BARK_SERVER,
   LEDGER_AUTOMATION_GENERIC_NOTIFICATIONS, LEDGER_AUTOMATION_KEEP_RUNS,
   LEDGER_AUTOMATION_BEAN_CHECK
@@ -170,9 +172,22 @@ func configFromEnv(getenv func(string) string, logger *slog.Logger) (automation.
 			return cfg, err
 		}
 		cfg.Notifier = &automation.Bark{Server: getenv("LEDGER_AUTOMATION_BARK_SERVER"), DeviceKey: deviceKey,
-			EncryptionKey: encryption, Group: "账本定时任务"}
+			EncryptionKey: encryption,
+			Group:         orDefault(getenv("LEDGER_AUTOMATION_BARK_GROUP"), "账本定时任务"),
+			Icon:          orDefault(getenv("LEDGER_AUTOMATION_BARK_ICON"), defaultBarkIcon),
+			Sound:         orDefault(getenv("LEDGER_AUTOMATION_BARK_SOUND"), "birdsong")}
 	}
 	return cfg, nil
+}
+
+// defaultBarkIcon is the App's icon, served from this public repository.
+const defaultBarkIcon = "https://raw.githubusercontent.com/qiaoborui/beancount-ledger-web/main/App/LedgerMobile/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"
+
+func orDefault(value, fallback string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return fallback
 }
 
 // secret reads a systemd credential, falling back to an environment
