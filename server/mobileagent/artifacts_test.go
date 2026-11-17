@@ -139,3 +139,26 @@ func TestArtifactPromptShowsTheFence(t *testing.T) {
 		t.Fatal("only an absolute runtime root has artifacts")
 	}
 }
+
+func TestReadArtifactReturnsAnHTMLArtifactAsHeaderAndPage(t *testing.T) {
+	root := t.TempDir()
+	page := "{\"id\":\"calc\",\"title\":\"提前还贷计算器\"}\n<div id=\"out\"></div>\n<script>ledger.query(\"SELECT 1\")</script>"
+	savedArtifact(t, root, "calc", "提前还贷计算器", "2026-11-16T10:00:00Z", page)
+	output, err := runArtifactTool(t, "read_artifact", openArtifacts(root), `{"id":"calc"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output["format"] != "artifact-html" {
+		t.Fatalf("format = %v", output["format"])
+	}
+	header, _ := output["artifact"].(map[string]any)
+	if header["title"] != "提前还贷计算器" {
+		t.Fatalf("header = %v", output["artifact"])
+	}
+	if html, _ := output["html"].(string); !strings.HasPrefix(html, "<div id=\"out\">") || !strings.Contains(html, "ledger.query") {
+		t.Fatalf("html = %q", output["html"])
+	}
+	if _, _, ok := splitHTMLArtifact("{\"id\":\"x\"}"); ok {
+		t.Fatal("a header with no page is not an HTML artifact")
+	}
+}

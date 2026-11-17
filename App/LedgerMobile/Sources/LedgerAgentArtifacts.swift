@@ -16,17 +16,28 @@ struct LedgerAgentArtifactSpec: Equatable, Sendable {
     var id: String
     var title: String
     var summary: String?
+    /// The native page; empty for an HTML artifact.
     var visual: LedgerAgentVisual
-    /// The block's JSON as the reply wrote it, saved unchanged so the model
-    /// reads back exactly what it wrote.
+    /// An advanced artifact's page body, run in a sandboxed web view with no
+    /// network and read-only queries; see `LedgerAgentArtifactHTML`.
+    var html: String?
+    /// The block as the reply wrote it, saved unchanged so the model reads
+    /// back exactly what it wrote: the JSON of an `artifact` fence, or the
+    /// header line and HTML of an `artifact-html` one.
     var json: String
+
+    var isHTML: Bool { html != nil }
 
     static let maximumIDLength = 48
 
     init?(json: String, logging: Bool = false) {
         let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let object = (try? JSONSerialization.jsonObject(with: Data(trimmed.utf8))) as? [String: Any],
-              let visual = LedgerAgentVisual(json: trimmed, logging: logging) else { return nil }
+        guard let object = (try? JSONSerialization.jsonObject(with: Data(trimmed.utf8))) as? [String: Any] else {
+            guard let page = Self(html: trimmed) else { return nil }
+            self = page
+            return
+        }
+        guard let visual = LedgerAgentVisual(json: trimmed, logging: logging) else { return nil }
         let title = Self.text(object["title"]) ?? visual.title ?? String(localized: "未命名产物")
         self.title = title
         self.summary = Self.text(object["summary"])
@@ -35,12 +46,36 @@ struct LedgerAgentArtifactSpec: Equatable, Sendable {
         var page = visual
         page.title = nil
         self.visual = page
+        self.html = nil
+        self.json = trimmed
+    }
+
+    /// An `artifact-html` fence: a first line of JSON with id, title and
+    /// summary, then the page's HTML.
+    init?(html source: String) {
+        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.utf8.count <= LedgerAgentArtifactHTML.maximumBytes,
+              let (header, body) = LedgerAgentArtifactHTML.split(trimmed) else { return nil }
+        let title = Self.text(header["title"]) ?? String(localized: "未命名产物")
+        self.title = title
+        self.summary = Self.text(header["summary"])
+        self.id = Self.normalizedID(Self.text(header["id"]), title: title)
+        self.visual = LedgerAgentVisual(blocks: [])
+        self.html = body
         self.json = trimmed
     }
 
     /// The title and id a block still being written already shows.
     static func partialTitle(json: String) -> String? {
         LedgerAgentVisual.partial(json: json).title
+    }
+
+    /// The title of an `artifact-html` fence once its header line is written.
+    static func partialHTMLTitle(_ source: String) -> String? {
+        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let newline = trimmed.firstIndex(of: "\n"),
+              let header = (try? JSONSerialization.jsonObject(with: Data(trimmed[..<newline].utf8))) as? [String: Any] else { return nil }
+        return text(header["title"])
     }
 
     /// Lowercase letters, digits and single hyphens, at most 48 long, as the

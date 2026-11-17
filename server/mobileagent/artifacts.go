@@ -38,7 +38,8 @@ const artifactPrompt = `
 - id 用小写字母、数字和连字符，最多 48 个字符。新产物用一个不重复的 id。
 - 修改已有的产物：沿用原来的 id，App 会存成新版本。不在本次对话里的产物，先用 list_artifacts 找到 id，再用 read_artifact 读出当前内容；回复里要写出改完的完整产物，没改的部分原样保留，不能只写改动。用户说「刷新」「更新数据」时，按原来的结构重新查询再写一遍。
 - 一次回答最多一个 artifact 代码块。产物可以比 visual 完整：顶层最多 12 个块，用 section、tabs 组织更多内容；数字同样必须来自工具结果，在 subtitle 写明数据截至哪天。
-- 代码块之外只用一两句话说明产物里有什么，不要重复其内容。一次性的问题仍然用 visual、chart 或文字回答。`
+- 代码块之外只用一两句话说明产物里有什么，不要重复其内容。一次性的问题仍然用 visual、chart 或文字回答。
+- 高级产物：原生组件实在画不出来时（自定义交互、计算器、模拟器、特殊图形），可以写 artifact-html 代码块：第一行是 {"id":"...","title":"...","summary":"..."}，下面是页面的 HTML（可含 <style> 和 <script>，不用写 <html>、<head>）。页面在没有网络的沙盒里运行，不能加载任何外部脚本、图片或字体；只能通过 window.ledger.query(bql) 只读查询账本（每次打开都重新查，所以数据总是最新的）。写之前先 load_skill 读 ledger-visuals 技能里的 html.md，并先用 run_bql 把页面里要用的每条查询跑通。能用原生组件做的不要用 HTML。`
 
 // artifactFileV1 is the shell's record of one artifact. Every version keeps
 // the block as the reply wrote it, so it reads back exactly.
@@ -167,6 +168,12 @@ func (s *artifactShelf) read(raw json.RawMessage) (any, error) {
 	var spec any
 	if json.Unmarshal([]byte(version.Spec), &spec) == nil {
 		output["artifact"] = spec
+	} else if header, html, ok := splitHTMLArtifact(version.Spec); ok {
+		// An artifact-html block: the header as JSON, the page as text, so
+		// the model rewrites the fence the way it wrote it.
+		output["format"] = "artifact-html"
+		output["artifact"] = header
+		output["html"] = html
 	} else {
 		output["artifact"] = version.Spec
 	}
@@ -182,11 +189,26 @@ func (s *artifactShelf) tools() []agent.AgentTool {
 			}),
 			run: s.list},
 		fileTool{name: "read_artifact", title: "读取产物",
-			description: "按 id 读取一个产物的完整内容（与 artifact 代码块相同的 JSON），默认最新版本。修改时以它为底稿，改完在回复里写出完整的 artifact 代码块，沿用同一个 id。",
+			description: "按 id 读取一个产物的完整内容（与 artifact 代码块相同的 JSON；高级产物返回 format 为 artifact-html，artifact 是第一行的 JSON，html 是页面），默认最新版本。修改时以它为底稿，改完在回复里写出完整的代码块（artifact 或 artifact-html，与原来相同），沿用同一个 id。",
 			parameters: objectParameters(map[string]any{
 				"id":      map[string]any{"type": "string", "description": "list_artifacts 返回的产物 id"},
 				"version": map[string]any{"type": "integer", "description": "可选，读取第几版；不填是最新版", "minimum": 1},
 			}, "id"),
 			run: s.read},
 	}
+}
+
+// splitHTMLArtifact reads an artifact-html block: a first line of JSON with
+// id, title and summary, then the page's HTML.
+func splitHTMLArtifact(spec string) (map[string]any, string, bool) {
+	line, body, found := strings.Cut(strings.TrimSpace(spec), "\n")
+	if !found {
+		return nil, "", false
+	}
+	var header map[string]any
+	body = strings.TrimSpace(body)
+	if json.Unmarshal([]byte(strings.TrimSpace(line)), &header) != nil || !strings.Contains(body, "<") {
+		return nil, "", false
+	}
+	return header, body, true
 }

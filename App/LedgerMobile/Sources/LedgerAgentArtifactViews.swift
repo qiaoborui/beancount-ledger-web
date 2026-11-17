@@ -139,30 +139,66 @@ struct LedgerAgentArtifactScreen: View {
     @State private var shown: LedgerAgentArtifactSpec?
     @State private var shownVersion: Int?
     @State private var confirmingDelete = false
+    /// Bumped by 重新载入数据 so an HTML page runs its queries again.
+    @State private var reload = 0
+    @Environment(\.openURL) private var openURL
 
     private var current: LedgerAgentArtifactSpec { shown ?? artifact }
 
+    /// Today on the device's calendar, as yyyy-MM-dd.
+    private static var today: String {
+        let parts = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: current.title).balancedFont(size: 22, weight: .semibold)
+                .foregroundStyle(BalancedPalette.ink)
+                .accessibilityAddTraits(.isHeader)
+            if let summary = current.summary {
+                Text(verbatim: summary).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
+            }
+            if let caption = versionCaption {
+                Text(verbatim: caption).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(verbatim: current.title).balancedFont(size: 22, weight: .semibold)
-                            .foregroundStyle(BalancedPalette.ink)
-                            .accessibilityAddTraits(.isHeader)
-                        if let summary = current.summary {
-                            Text(verbatim: summary).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
-                        }
-                        if let caption = versionCaption {
-                            Text(verbatim: caption).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
-                        }
+            Group {
+                if let html = current.html {
+                    // The page scrolls itself, under the heading.
+                    VStack(alignment: .leading, spacing: 10) {
+                        heading
+                        LedgerAgentArtifactHTMLView(
+                            html: html,
+                            context: .init(title: current.title, today: Self.today,
+                                           currency: session.ledger?.valuationCurrency ?? "CNY"),
+                            reload: reload,
+                            runQuery: { query in try await session.runBQL(query: query) },
+                            onOpen: { url in openURL(url) },
+                            onAsk: onAsk)
+                            .id(current.json)
                     }
-                    LedgerAgentVisualView(visual: current.visual, onAsk: onAsk)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 16)
+                    .frame(maxWidth: 760, alignment: .leading)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            heading
+                            LedgerAgentVisualView(visual: current.visual, onAsk: onAsk)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 16)
+                        .frame(maxWidth: 760, alignment: .leading)
+                        .frame(maxWidth: .infinity)
+                    }
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
-                .frame(maxWidth: 760, alignment: .leading)
-                .frame(maxWidth: .infinity)
             }
             .background(BalancedPalette.page)
             .navigationBarTitleDisplayMode(.inline)
@@ -196,9 +232,16 @@ struct LedgerAgentArtifactScreen: View {
             if let onRevise {
                 Button("继续修改", systemImage: "pencil") { onRevise(current) }
                     .accessibilityIdentifier("ledger-agent-artifact-revise")
-                Button("用最新数据刷新", systemImage: "arrow.clockwise") {
-                    onAsk(String(localized: "用最新的账本数据刷新产物「\(current.title)」（id: \(current.id)），结构不变。"))
+                if !current.isHTML {
+                    Button("用最新数据刷新", systemImage: "arrow.clockwise") {
+                        onAsk(String(localized: "用最新的账本数据刷新产物「\(current.title)」（id: \(current.id)），结构不变。"))
+                    }
                 }
+            }
+            if current.isHTML {
+                // The page queries the ledger as it loads, so loading it
+                // again is the refresh; no model call.
+                Button("重新载入数据", systemImage: "arrow.clockwise") { reload += 1 }
             }
             if let record, record.versions.count > 1 {
                 Menu("历史版本") {
@@ -214,7 +257,7 @@ struct LedgerAgentArtifactScreen: View {
                     }
                 }
             }
-            Button("复制 JSON", systemImage: "doc.on.doc") { UIPasteboard.general.string = current.json }
+            Button(current.isHTML ? "复制源码" : "复制 JSON", systemImage: "doc.on.doc") { UIPasteboard.general.string = current.json }
             if onDelete != nil {
                 Button("删除", systemImage: "trash", role: .destructive) { confirmingDelete = true }
             }

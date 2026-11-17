@@ -2686,6 +2686,12 @@ struct LedgerAgentChart: Codable, Equatable, Sendable {
         /// In a bar, line or area chart, draws this series as another of
         /// those kinds, such as a line over bars.
         var kind: Kind? = nil
+        /// A named accent (see `LedgerAgentVisual.Style.Accent`) for this series.
+        var color: String? = nil
+        /// Draws a line or area series dashed, such as a forecast.
+        var dashed: Bool? = nil
+        /// `smooth` (the default), `linear` or `step`.
+        var curve: String? = nil
     }
 
     /// A horizontal reference line, such as a budget or an average.
@@ -2706,6 +2712,14 @@ struct LedgerAgentChart: Codable, Equatable, Sendable {
     /// dropped rather than failing the chart.
     var links: [String]? = nil
     var rules: [Rule]? = nil
+    /// Stacks bars to 100%, each label's series as shares of its total.
+    var percent: Bool? = nil
+    /// Writes each bar's value on it.
+    var showValues: Bool? = nil
+    /// The plot's height in points, 120 to 480.
+    var height: Double? = nil
+    /// How the value axis reads: `percent` for fractions, `compact` for 1.2万.
+    var axis: String? = nil
 
     static let maximumLabels = 60
     static let maximumSeries = 8
@@ -2849,6 +2863,7 @@ enum LedgerAgentReplyText {
             if language == "chart", let chart = LedgerAgentChart(json: code) { return .chart(chart) }
             if language == "visual", let visual = LedgerAgentVisual(json: code, logging: true) { return .visual(visual) }
             if language == "artifact", let artifact = LedgerAgentArtifactSpec(json: code, logging: true) { return .artifact(artifact) }
+            if language == "artifact-html", let artifact = LedgerAgentArtifactSpec(html: code) { return .artifact(artifact) }
             return .code(code)
         }
         func unclosed(_ code: String) -> [Segment] {
@@ -2867,6 +2882,11 @@ enum LedgerAgentReplyText {
                 // The card appears whole once the fence closes; half a page
                 // is not worth drawing inside a card.
                 return [.buildingArtifact(title: LedgerAgentArtifactSpec.partialTitle(json: code))]
+            case (.streaming, "artifact-html"):
+                return [.buildingArtifact(title: LedgerAgentArtifactSpec.partialHTMLTitle(code))]
+            case (.stopped, "artifact-html"):
+                // Half a page of HTML is neither saved nor shown.
+                return []
             case (.streaming, _):
                 return [.code(code)]
             case (.stopped, "visual"), (.stopped, "artifact"):
