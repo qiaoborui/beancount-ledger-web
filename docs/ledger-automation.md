@@ -107,7 +107,7 @@ sudoedit /etc/ledger-automation/bark-encryption-key  # 可选：Bark App 加密�
 sudo chgrp ledger-automation /etc/ledger-automation/deploy-key && sudo chmod 640 /etc/ledger-automation/deploy-key
 
 sudo install -m 640 -o root -g ledger-automation docker/systemd/ledger-automation.env.example /etc/ledger-automation/env
-sudoedit /etc/ledger-automation/env                 # 填仓库地址和模型 id
+sudoedit /etc/ledger-automation/env                 # 填仓库地址、模型 id 和模型的上下文、输出上限（不填时按 8192 token 回答，推理模型容易把它全花在思考上）
 sudo install -m 644 docker/systemd/ledger-automation.service docker/systemd/ledger-automation.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 ```

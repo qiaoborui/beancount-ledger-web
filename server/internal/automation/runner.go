@@ -27,6 +27,12 @@ type ModelConfig struct {
 	Model    string
 	APIKey   string
 	Thinking string
+	// ContextWindow and MaxOutputTokens are the model's limits. A custom
+	// endpoint is not in any catalog, so without them the Agent assumes a
+	// 128k window and an 8192-token reply, and a reasoning model can spend
+	// the whole reply thinking. Zero keeps the assumption.
+	ContextWindow   int
+	MaxOutputTokens int
 }
 
 // Config describes one runner.
@@ -425,6 +431,12 @@ func (r *Runner) runAgent(ctx context.Context, task Task, job job, sha, workspac
 		"custom":      map[string]string{"api": r.cfg.Model.API, "baseURL": r.cfg.Model.BaseURL},
 		"thinking":    firstNonEmpty(task.Thinking, r.cfg.Model.Thinking),
 		"scratchRoot": scratch, "conversationId": record.ConversationID, "message": message,
+	}
+	if r.cfg.Model.ContextWindow > 0 {
+		request["contextWindow"] = r.cfg.Model.ContextWindow
+	}
+	if r.cfg.Model.MaxOutputTokens > 0 {
+		request["maxOutputTokens"] = r.cfg.Model.MaxOutputTokens
 	}
 	raw, err := json.Marshal(request)
 	if err != nil {
