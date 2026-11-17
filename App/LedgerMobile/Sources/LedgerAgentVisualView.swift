@@ -80,28 +80,127 @@ private struct LedgerAgentVisualBlocks: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                switch block {
-                case let .stats(stats): LedgerAgentStatsView(stats: stats, unit: unit)
-                case let .chart(chart): LedgerAgentChartView(chart: chart, fallbackUnit: unit)
-                case let .ranking(ranking): LedgerAgentRankingView(ranking: ranking, unit: ranking.unit ?? unit)
-                case let .table(table): LedgerAgentTableView(table: table)
-                case let .compare(compare): LedgerAgentCompareView(compare: compare, unit: compare.unit ?? unit)
-                case let .tabs(tabs): LedgerAgentTabsView(tabs: tabs, unit: unit, onAsk: onAsk)
-                case let .actions(actions): LedgerAgentActionsView(actions: actions, onAsk: onAsk)
-                case let .note(text):
-                    Text(LedgerAgentVisualText.inline(text)).balancedFont(size: 13).foregroundStyle(BalancedPalette.secondary)
-                        .lineSpacing(3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                case let .row(children): LedgerAgentRowView(blocks: children, unit: unit, onAsk: onAsk)
-                case let .section(section): LedgerAgentSectionView(section: section, unit: unit, onAsk: onAsk)
-                case let .progress(progress): LedgerAgentProgressView(progress: progress, unit: progress.unit ?? unit)
-                case let .timeline(timeline): LedgerAgentTimelineView(timeline: timeline, unit: timeline.unit ?? unit)
-                case let .keyValues(values): LedgerAgentKeyValuesView(values: values)
-                case let .callout(callout): LedgerAgentCalloutView(callout: callout)
-                case let .heatmap(heatmap): LedgerAgentHeatmapView(heatmap: heatmap, unit: heatmap.unit ?? unit)
+                if case let .styled(inner, style) = block {
+                    LedgerAgentStyledBlock(block: inner, style: style, unit: unit, onAsk: onAsk)
+                } else {
+                    // A block's variant is its own; a container's children
+                    // start plain again.
+                    LedgerAgentVisualBlockContent(block: block, unit: unit, onAsk: onAsk)
+                        .environment(\.ledgerAgentStyle, LedgerAgentVisual.Style())
                 }
             }
         }
+    }
+}
+
+private struct LedgerAgentVisualBlockContent: View {
+    let block: LedgerAgentVisual.Block
+    let unit: String?
+    let onAsk: (String) -> Void
+
+    var body: some View {
+        switch block {
+        case let .stats(stats): LedgerAgentStatsView(stats: stats, unit: unit)
+        case let .chart(chart): LedgerAgentChartView(chart: chart, fallbackUnit: unit)
+        case let .ranking(ranking): LedgerAgentRankingView(ranking: ranking, unit: ranking.unit ?? unit)
+        case let .table(table): LedgerAgentTableView(table: table)
+        case let .compare(compare): LedgerAgentCompareView(compare: compare, unit: compare.unit ?? unit)
+        case let .tabs(tabs): LedgerAgentTabsView(tabs: tabs, unit: unit, onAsk: onAsk)
+        case let .actions(actions): LedgerAgentActionsView(actions: actions, onAsk: onAsk)
+        case let .note(text): LedgerAgentNoteView(text: text)
+        case let .row(children): LedgerAgentRowView(blocks: children, unit: unit, onAsk: onAsk)
+        case let .section(section): LedgerAgentSectionView(section: section, unit: unit, onAsk: onAsk)
+        case let .progress(progress): LedgerAgentProgressView(progress: progress, unit: progress.unit ?? unit)
+        case let .timeline(timeline): LedgerAgentTimelineView(timeline: timeline, unit: timeline.unit ?? unit)
+        case let .keyValues(values): LedgerAgentKeyValuesView(values: values)
+        case let .callout(callout): LedgerAgentCalloutView(callout: callout)
+        case let .heatmap(heatmap): LedgerAgentHeatmapView(heatmap: heatmap, unit: heatmap.unit ?? unit)
+        case let .sankey(sankey): LedgerAgentSankeyView(sankey: sankey, unit: sankey.unit ?? unit)
+        case let .treemap(treemap): LedgerAgentTreemapView(treemap: treemap, unit: treemap.unit ?? unit)
+        case let .gauge(gauge): LedgerAgentGaugeView(gauge: gauge, unit: gauge.unit ?? unit)
+        case let .matrix(matrix): LedgerAgentMatrixView(matrix: matrix, unit: matrix.unit ?? unit)
+        case let .transactions(list): LedgerAgentTransactionsView(list: list, unit: list.unit ?? unit)
+        case let .styled(inner, style): LedgerAgentStyledBlock(block: inner, style: style, unit: unit, onAsk: onAsk)
+        }
+    }
+}
+
+/// A block with its style: an accent for its marks and those of its
+/// children, a card around it, a footnote under it.
+private struct LedgerAgentStyledBlock: View {
+    let block: LedgerAgentVisual.Block
+    let style: LedgerAgentVisual.Style
+    let unit: String?
+    let onAsk: (String) -> Void
+    @Environment(\.ledgerAgentAccent) private var inherited
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LedgerAgentVisualBlockContent(block: block, unit: unit, onAsk: onAsk)
+                .environment(\.ledgerAgentStyle, style)
+            if let footnote = style.footnote {
+                Text(LedgerAgentVisualText.inline(footnote)).balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(style.card ? 14 : 0)
+        .background {
+            if style.card {
+                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(BalancedPalette.sunken)
+                RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(BalancedPalette.rule, lineWidth: 1)
+            }
+        }
+        .environment(\.ledgerAgentAccent, style.accent.map(LedgerAgentVisualText.color) ?? inherited)
+    }
+}
+
+private struct LedgerAgentNoteView: View {
+    let text: String
+    @Environment(\.ledgerAgentStyle) private var style
+    @Environment(\.ledgerAgentAccent) private var accent
+
+    var body: some View {
+        switch style.variant {
+        case "quote":
+            Text(LedgerAgentVisualText.inline(text)).balancedFont(size: 14.5).foregroundStyle(BalancedPalette.ink)
+                .lineSpacing(4)
+                .padding(.leading, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .leading) { (accent ?? BalancedPalette.ruleStrong).frame(width: 3) }
+        case "muted", "small":
+            Text(LedgerAgentVisualText.inline(text)).balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case "lead", "large":
+            Text(LedgerAgentVisualText.inline(text)).balancedFont(size: 16, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                .lineSpacing(4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        default:
+            Text(LedgerAgentVisualText.inline(text)).balancedFont(size: 13).foregroundStyle(BalancedPalette.secondary)
+                .lineSpacing(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct LedgerAgentAccentKey: EnvironmentKey {
+    static let defaultValue: Color? = nil
+}
+
+private struct LedgerAgentStyleKey: EnvironmentKey {
+    static let defaultValue = LedgerAgentVisual.Style()
+}
+
+extension EnvironmentValues {
+    /// The colour a styled block chose for its marks; nil keeps the page's ink.
+    fileprivate var ledgerAgentAccent: Color? {
+        get { self[LedgerAgentAccentKey.self] }
+        set { self[LedgerAgentAccentKey.self] = newValue }
+    }
+
+    /// The style of the block being drawn, for its variant and columns.
+    fileprivate var ledgerAgentStyle: LedgerAgentVisual.Style {
+        get { self[LedgerAgentStyleKey.self] }
+        set { self[LedgerAgentStyleKey.self] = newValue }
     }
 }
 
@@ -112,6 +211,20 @@ enum LedgerAgentVisualText {
             ?? AttributedString(text)
         for run in string.runs where run.link != nil { string[run.range].underlineStyle = .single }
         return string
+    }
+
+    static func color(_ accent: LedgerAgentVisual.Style.Accent) -> Color {
+        switch accent {
+        case .ink: BalancedPalette.ink
+        case .green: BalancedPalette.income
+        case .red: BalancedPalette.expense
+        case .blue: .blue
+        case .orange: .orange
+        case .purple: .purple
+        case .teal: .teal
+        case .pink: .pink
+        case .gray: BalancedPalette.meta
+        }
     }
 
     static func color(_ tone: LedgerAgentVisual.Tone) -> Color {
@@ -164,16 +277,63 @@ private struct LedgerAgentLinked<Content: View>: View {
 private struct LedgerAgentStatsView: View {
     let stats: [LedgerAgentVisual.Stat]
     let unit: String?
+    @Environment(\.ledgerAgentAccent) private var accent
+    @Environment(\.ledgerAgentStyle) private var style
+
+    private var grid: [GridItem] {
+        if let columns = style.columns {
+            return Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .topLeading), count: columns)
+        }
+        return [GridItem(.adaptive(minimum: 140), spacing: 12, alignment: .topLeading)]
+    }
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12, alignment: .topLeading)], alignment: .leading, spacing: 14) {
+        switch style.variant {
+        case "hero":
+            // The first number large, the rest as tiles beneath it.
+            VStack(alignment: .leading, spacing: 14) {
+                if let first = stats.first { LedgerAgentLinked(link: first.link) { tile(first, size: 34) } }
+                if stats.count > 1 { tiles(Array(stats.dropFirst())) }
+            }
+        case "list", "rows":
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(stats.enumerated()), id: \.offset) { _, stat in
+                    LedgerAgentLinked(link: stat.link) { listRow(stat) }
+                }
+            }
+        default:
+            tiles(stats)
+        }
+    }
+
+    private func tiles(_ stats: [LedgerAgentVisual.Stat]) -> some View {
+        LazyVGrid(columns: grid, alignment: .leading, spacing: 14) {
             ForEach(Array(stats.enumerated()), id: \.offset) { _, stat in
                 LedgerAgentLinked(link: stat.link) { tile(stat) }
             }
         }
     }
 
-    private func tile(_ stat: LedgerAgentVisual.Stat) -> some View {
+    private func listRow(_ stat: LedgerAgentVisual.Stat) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(verbatim: stat.label).balancedFont(size: 14).foregroundStyle(BalancedPalette.secondary).lineLimit(1)
+            Spacer(minLength: 8)
+            if let delta = stat.delta {
+                Text(verbatim: LedgerAgentVisual.percent(delta)).balancedFont(size: 12).monospacedDigit()
+                    .foregroundStyle(LedgerAgentVisualText.color(LedgerAgentVisual.tone(of: delta, better: stat.better)))
+            }
+            Text(verbatim: stat.value.map { LedgerAgentVisual.amount($0, unit: stat.unit ?? unit) } ?? stat.text ?? "")
+                .balancedFont(size: 16, weight: .semibold).monospacedDigit().foregroundStyle(accent ?? BalancedPalette.ink)
+            if stat.link != nil {
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(BalancedPalette.edge)
+            }
+        }
+        .padding(.vertical, 9)
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func tile(_ stat: LedgerAgentVisual.Stat, size: CGFloat = 21) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
                 Text(verbatim: stat.label).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta).lineLimit(1)
@@ -182,13 +342,13 @@ private struct LedgerAgentStatsView: View {
                 }
             }
             Text(verbatim: stat.value.map { LedgerAgentVisual.amount($0, unit: stat.unit ?? unit) } ?? stat.text ?? "")
-                .balancedFont(size: 21, weight: .semibold).monospacedDigit().foregroundStyle(BalancedPalette.ink)
+                .balancedFont(size: size, weight: .semibold).monospacedDigit().foregroundStyle(BalancedPalette.ink)
                 .lineLimit(1).minimumScaleFactor(0.6)
             if let spark = stat.spark {
                 Chart(Array(spark.enumerated()), id: \.offset) { index, value in
                     LineMark(x: .value("序号", index), y: .value("金额", value))
                         .interpolationMethod(.monotone)
-                        .foregroundStyle(BalancedPalette.secondary)
+                        .foregroundStyle(accent ?? BalancedPalette.secondary)
                         .lineStyle(StrokeStyle(lineWidth: 1.5))
                 }
                 .chartXAxis(.hidden)
@@ -211,7 +371,7 @@ private struct LedgerAgentStatsView: View {
         }
         .padding(.leading, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .leading) { BalancedPalette.ruleStrong.frame(width: 2) }
+        .overlay(alignment: .leading) { (accent ?? BalancedPalette.ruleStrong).frame(width: 2) }
         .accessibilityElement(children: .combine)
     }
 }
@@ -227,6 +387,7 @@ struct LedgerAgentChartView: View {
     @State private var selected: String?
     @State private var hidden: Set<String> = []
     @Environment(\.openURL) private var openURL
+    @Environment(\.ledgerAgentAccent) private var accent
 
     private static let palette: [Color] = [BalancedPalette.ink, BalancedPalette.expense, BalancedPalette.income,
                                            BalancedPalette.meta, BalancedPalette.secondary, BalancedPalette.edge,
@@ -240,9 +401,39 @@ struct LedgerAgentChartView: View {
         isWaterfall ? Self.waterfallNames : isPie ? chart.labels : chart.series.map(\.name)
     }
     private var colors: [Color] {
-        isWaterfall ? [BalancedPalette.income, BalancedPalette.expense, BalancedPalette.ink]
-            : names.indices.map { Self.palette[$0 % Self.palette.count] }
+        if isWaterfall { return [BalancedPalette.income, BalancedPalette.expense, accent ?? BalancedPalette.ink] }
+        return names.indices.map { index in
+            if !isPie, let name = chart.series[index].color, let named = LedgerAgentVisual.Style.Accent(rawValue: name) {
+                return LedgerAgentVisualText.color(named)
+            }
+            if index == 0, let accent { return accent }
+            return Self.palette[index % Self.palette.count]
+        }
     }
+    /// Bars carry their values when asked, unless stacked segments would crowd them.
+    private var labelsBars: Bool {
+        chart.showValues == true && chart.percent != true && (chart.stacked == false || chart.series.count == 1)
+    }
+    private var stacking: MarkStackingMethod { chart.percent == true ? .normalized : .standard }
+    private func interpolation(_ series: String) -> InterpolationMethod {
+        switch chart.series.first(where: { $0.name == series })?.curve {
+        case "linear": .linear
+        case "step": .stepCenter
+        default: .monotone
+        }
+    }
+    private func dash(_ series: String) -> [CGFloat] {
+        chart.series.first(where: { $0.name == series })?.dashed == true ? [5, 3] : []
+    }
+    /// A value-axis label: percent for shares, else 1.2万 style.
+    private func axisText(_ value: AxisValue) -> String {
+        guard let number = value.as(Double.self) else { return "" }
+        if chart.percent == true || chart.axis == "percent" {
+            return LedgerAgentVisual.percent(number).replacingOccurrences(of: "+", with: "")
+        }
+        return LedgerAgentVisual.compact(number)
+    }
+    private func valueLabel(_ value: Double) -> String { labelsBars ? LedgerAgentVisual.compact(value) : "" }
     private var visiblePoints: [LedgerAgentChart.Point] {
         chart.points.filter { !hidden.contains(isPie ? $0.label : $0.series) }
     }
@@ -250,7 +441,7 @@ struct LedgerAgentChartView: View {
         switch chart.type {
         case .pie: 220
         case .hbar: min(max(CGFloat(chart.labels.count) * CGFloat(max(chart.series.count, 1)) * 26, 140), 520)
-        default: 200
+        default: chart.height.map { CGFloat($0) } ?? 200
         }
     }
 
@@ -296,22 +487,29 @@ struct LedgerAgentChartView: View {
                             .foregroundStyle(by: .value("系列", point.series))
                             .position(by: .value("系列", point.series))
                             .opacity(dims(point.label) ? 0.35 : 1)
+                            .annotation(position: .top, spacing: 2) {
+                                Text(verbatim: valueLabel(point.value)).font(.system(size: 9.5)).foregroundStyle(BalancedPalette.meta)
+                            }
                     } else {
-                        BarMark(x: .value("项目", point.label), y: .value("金额", point.value))
+                        BarMark(x: .value("项目", point.label), y: .value("金额", point.value), stacking: stacking)
                             .foregroundStyle(by: .value("系列", point.series))
                             .opacity(dims(point.label) ? 0.35 : 1)
+                            .annotation(position: .top, spacing: 2) {
+                                Text(verbatim: valueLabel(point.value)).font(.system(size: 9.5)).foregroundStyle(BalancedPalette.meta)
+                            }
                     }
                 } else {
                     if kind == .area {
                         AreaMark(x: .value("项目", point.label), y: .value("金额", point.value),
                                  stacking: chart.stacked == true ? .standard : .unstacked)
                             .foregroundStyle(by: .value("系列", point.series))
-                            .interpolationMethod(.monotone)
+                            .interpolationMethod(interpolation(point.series))
                             .opacity(0.22)
                     }
                     LineMark(x: .value("项目", point.label), y: .value("金额", point.value))
                         .foregroundStyle(by: .value("系列", point.series))
-                        .interpolationMethod(.monotone)
+                        .interpolationMethod(interpolation(point.series))
+                        .lineStyle(StrokeStyle(lineWidth: 2, dash: dash(point.series)))
                     PointMark(x: .value("项目", point.label), y: .value("金额", point.value))
                         .foregroundStyle(by: .value("系列", point.series))
                         .symbolSize(selected == point.label ? 60 : 18)
@@ -325,7 +523,12 @@ struct LedgerAgentChartView: View {
             }
         }
         .chartXAxis { AxisMarks { AxisValueLabel().font(.system(size: 10.5)) } }
-        .chartYAxis { AxisMarks { AxisGridLine(); AxisValueLabel().font(.system(size: 10.5)) } }
+        .chartYAxis {
+            AxisMarks { value in
+                AxisGridLine()
+                AxisValueLabel { Text(verbatim: axisText(value)).font(.system(size: 10.5)) }
+            }
+        }
     }
 
     @ChartContentBuilder private var rules: some ChartContent {
@@ -348,10 +551,16 @@ struct LedgerAgentChartView: View {
                         .foregroundStyle(by: .value("系列", point.series))
                         .position(by: .value("系列", point.series))
                         .opacity(dims(point.label) ? 0.35 : 1)
+                        .annotation(position: .trailing, spacing: 3) {
+                            Text(verbatim: valueLabel(point.value)).font(.system(size: 9.5)).foregroundStyle(BalancedPalette.meta)
+                        }
                 } else {
-                    BarMark(x: .value("金额", point.value), y: .value("项目", point.label))
+                    BarMark(x: .value("金额", point.value), y: .value("项目", point.label), stacking: stacking)
                         .foregroundStyle(by: .value("系列", point.series))
                         .opacity(dims(point.label) ? 0.35 : 1)
+                        .annotation(position: .trailing, spacing: 3) {
+                            Text(verbatim: valueLabel(point.value)).font(.system(size: 9.5)).foregroundStyle(BalancedPalette.meta)
+                        }
                 }
             }
             ForEach(Array((chart.rules ?? []).enumerated()), id: \.offset) { _, rule in
@@ -360,7 +569,12 @@ struct LedgerAgentChartView: View {
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
             }
         }
-        .chartXAxis { AxisMarks { AxisGridLine(); AxisValueLabel().font(.system(size: 10.5)) } }
+        .chartXAxis {
+            AxisMarks { value in
+                AxisGridLine()
+                AxisValueLabel { Text(verbatim: axisText(value)).font(.system(size: 10.5)) }
+            }
+        }
         .chartYAxis { AxisMarks { AxisValueLabel().font(.system(size: 11)) } }
     }
 
@@ -505,6 +719,8 @@ private struct LedgerAgentRankingView: View {
     let ranking: LedgerAgentVisual.Ranking
     let unit: String?
     @State private var expanded = false
+    @Environment(\.ledgerAgentAccent) private var accent
+    @Environment(\.ledgerAgentStyle) private var style
 
     private static let collapsed = 6
 
@@ -531,13 +747,15 @@ private struct LedgerAgentRankingView: View {
                                     .frame(minWidth: 40, alignment: .trailing)
                             }
                         }
-                        GeometryReader { geometry in
-                            ZStack(alignment: .leading) {
-                                BalancedPalette.rule
-                                BalancedPalette.ink.frame(width: top > 0 ? geometry.size.width * max(item.value, 0) / top : 0)
+                        if style.variant != "compact" {
+                            GeometryReader { geometry in
+                                ZStack(alignment: .leading) {
+                                    BalancedPalette.rule
+                                    (accent ?? BalancedPalette.ink).frame(width: top > 0 ? geometry.size.width * max(item.value, 0) / top : 0)
+                                }
                             }
+                            .frame(height: 4)
                         }
-                        .frame(height: 4)
                         if let note = item.note {
                             Text(verbatim: note).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
                         }
@@ -582,6 +800,9 @@ private struct LedgerAgentTableView: View {
     @State private var expanded = false
     @State private var chip: String?
     @Environment(\.openURL) private var openURL
+    @Environment(\.ledgerAgentStyle) private var style
+
+    private var compact: Bool { style.variant == "compact" }
 
     private var hasChildren: Bool { table.rows.contains { !$0.children.isEmpty } }
 
@@ -686,6 +907,20 @@ private struct LedgerAgentTableView: View {
         }
     }
 
+    /// A signed column writes gains with a plus.
+    private func signedText(_ cell: String, column: Int) -> String {
+        guard table.columns[column].signed, let value = LedgerAgentVisual.number(cell), value > 0,
+              !cell.hasPrefix("+") else { return cell }
+        return "+" + cell
+    }
+
+    private func color(_ cell: String, column: Int, child: Bool) -> Color {
+        if table.columns[column].signed, let value = LedgerAgentVisual.number(cell.replacingOccurrences(of: "+", with: "")), value != 0 {
+            return value > 0 ? BalancedPalette.income : BalancedPalette.expense
+        }
+        return child ? BalancedPalette.secondary : BalancedPalette.ink
+    }
+
     @ViewBuilder private func rowView(_ row: LedgerAgentVisual.Table.Row, key: Int, child: Bool) -> some View {
         let isOpen = open.contains(key)
         GridRow {
@@ -701,11 +936,11 @@ private struct LedgerAgentTableView: View {
                 .frame(width: 14, height: 14)
             }
             ForEach(Array(row.cells.enumerated()), id: \.offset) { index, cell in
-                Text(LedgerAgentVisualText.inline(cell))
-                    .balancedFont(size: child ? 13 : 14).monospacedDigit()
-                    .foregroundStyle(child ? BalancedPalette.secondary : BalancedPalette.ink)
+                Text(LedgerAgentVisualText.inline(signedText(cell, column: index)))
+                    .balancedFont(size: child || compact ? 13 : 14).monospacedDigit()
+                    .foregroundStyle(color(cell, column: index, child: child))
                     .padding(.leading, child && index == 0 ? 12 : 0)
-                    .padding(.vertical, child ? 5 : 7)
+                    .padding(.vertical, compact ? 3 : child ? 5 : 7)
             }
             Group {
                 if row.link == nil {
@@ -740,6 +975,7 @@ private struct LedgerAgentTableView: View {
 private struct LedgerAgentCompareView: View {
     let compare: LedgerAgentVisual.Compare
     let unit: String?
+    @Environment(\.ledgerAgentAccent) private var accent
 
     var body: some View {
         let top = compare.items.flatMap { [abs($0.left), abs($0.right)] }.max() ?? 0
@@ -749,7 +985,7 @@ private struct LedgerAgentCompareView: View {
             LedgerAgentVisualCaption(text: compare.title)
             HStack(spacing: 14) {
                 legend(compare.left, color: BalancedPalette.ruleStrong)
-                legend(compare.right, color: BalancedPalette.ink)
+                legend(compare.right, color: accent ?? BalancedPalette.ink)
                 Spacer()
                 Text("变化").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
             }
@@ -792,7 +1028,7 @@ private struct LedgerAgentCompareView: View {
             }
             if let top, top > 0 {
                 bar(entry.left, top: top, color: BalancedPalette.ruleStrong)
-                bar(entry.right, top: top, color: BalancedPalette.ink)
+                bar(entry.right, top: top, color: accent ?? BalancedPalette.ink)
             }
             Text(verbatim: "\(compare.left) \(LedgerAgentVisual.amount(entry.left, unit: unit)) → \(compare.right) \(LedgerAgentVisual.amount(entry.right, unit: unit))")
                 .balancedFont(size: 11.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
@@ -906,8 +1142,24 @@ private struct LedgerAgentSectionView: View {
 private struct LedgerAgentProgressView: View {
     let progress: LedgerAgentVisual.Progress
     let unit: String?
+    @Environment(\.ledgerAgentAccent) private var accent
+    @Environment(\.ledgerAgentStyle) private var style
 
     var body: some View {
+        if style.variant == "ring" || style.variant == "rings" {
+            // Each meter as a ring filled to its target.
+            LedgerAgentGaugeView(gauge: .init(title: progress.title, unit: progress.unit, better: progress.better,
+                                              items: progress.items.map {
+                                                  .init(label: $0.label, value: $0.value, maximum: $0.target, target: nil,
+                                                        note: $0.note, link: $0.link)
+                                              }),
+                                 unit: unit)
+        } else {
+            bars
+        }
+    }
+
+    private var bars: some View {
         VStack(alignment: .leading, spacing: 12) {
             LedgerAgentVisualCaption(text: progress.title)
             ForEach(Array(progress.items.enumerated()), id: \.offset) { _, item in
@@ -920,7 +1172,7 @@ private struct LedgerAgentProgressView: View {
         let ratio = item.value / item.target
         let over = ratio > 1
         let tone = LedgerAgentVisual.tone(of: item.value - item.target, better: progress.better)
-        let fill: Color = over ? LedgerAgentVisualText.color(tone) : (ratio >= 0.85 && progress.better == .lower ? BalancedPalette.expense.opacity(0.7) : BalancedPalette.ink)
+        let fill: Color = over ? LedgerAgentVisualText.color(tone) : (ratio >= 0.85 && progress.better == .lower ? BalancedPalette.expense.opacity(0.7) : accent ?? BalancedPalette.ink)
         let rest = item.target - item.value
         return VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -960,6 +1212,8 @@ private struct LedgerAgentTimelineView: View {
     let timeline: LedgerAgentVisual.Timeline
     let unit: String?
     @State private var expanded = false
+    @Environment(\.ledgerAgentAccent) private var accent
+    @Environment(\.ledgerAgentStyle) private var style
 
     private static let collapsed = 8
 
@@ -971,7 +1225,7 @@ private struct LedgerAgentTimelineView: View {
                 LedgerAgentLinked(link: item.link) {
                     HStack(alignment: .top, spacing: 10) {
                         VStack(spacing: 0) {
-                            Circle().fill(item.tone == .neutral ? BalancedPalette.ink : LedgerAgentVisualText.color(item.tone))
+                            Circle().fill(item.tone == .neutral ? accent ?? BalancedPalette.ink : LedgerAgentVisualText.color(item.tone))
                                 .frame(width: 7, height: 7).padding(.top, 6)
                             if index < items.count - 1 { BalancedPalette.rule.frame(width: 1).frame(maxHeight: .infinity) }
                         }
@@ -989,7 +1243,7 @@ private struct LedgerAgentTimelineView: View {
                                         .foregroundStyle(item.tone == .neutral ? BalancedPalette.ink : LedgerAgentVisualText.color(item.tone))
                                 }
                             }
-                            if let detail = item.detail {
+                            if let detail = item.detail, style.variant != "compact" {
                                 Text(verbatim: detail).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
                             }
                         }
@@ -1010,11 +1264,24 @@ private struct LedgerAgentTimelineView: View {
 
 private struct LedgerAgentKeyValuesView: View {
     let values: LedgerAgentVisual.KeyValues
+    @Environment(\.ledgerAgentStyle) private var style
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             LedgerAgentVisualCaption(text: values.title).padding(.bottom, 4)
-            ForEach(Array(values.items.enumerated()), id: \.offset) { _, item in
+            if let columns = style.columns, columns > 1 {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16, alignment: .topLeading), count: columns),
+                          alignment: .leading, spacing: 0) {
+                    ForEach(Array(values.items.enumerated()), id: \.offset) { _, item in row(item) }
+                }
+            } else {
+                ForEach(Array(values.items.enumerated()), id: \.offset) { _, item in row(item) }
+            }
+        }
+    }
+
+    private func row(_ item: LedgerAgentVisual.KeyValues.Item) -> some View {
+        Group {
                 LedgerAgentLinked(link: item.link) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text(verbatim: item.label).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
@@ -1030,7 +1297,6 @@ private struct LedgerAgentKeyValuesView: View {
                     .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
                 }
                 .accessibilityElement(children: .combine)
-            }
         }
     }
 }
@@ -1084,7 +1350,22 @@ private struct LedgerAgentHeatmapView: View {
     let heatmap: LedgerAgentVisual.Heatmap
     let unit: String?
     @State private var selected: Date?
+    /// The month on screen in the month view, as its first day.
+    @State private var month: Date?
     @Environment(\.openURL) private var openURL
+    @Environment(\.ledgerAgentAccent) private var accent
+    @Environment(\.ledgerAgentStyle) private var style
+
+    private var diverging: Bool { style.scale == "diverging" }
+
+    /// The fill for a day: shades of the accent, or for a diverging scale
+    /// gains in green and losses in red.
+    private func fill(_ value: Double, top: Double) -> Color {
+        guard value != 0 else { return BalancedPalette.rule }
+        let level = top > 0 ? abs(value) / top : 0
+        let base = diverging ? (value > 0 ? BalancedPalette.income : BalancedPalette.expense) : accent ?? BalancedPalette.ink
+        return base.opacity(0.12 + 0.88 * level)
+    }
 
     private static let cell: CGFloat = 14
     private static let gap: CGFloat = 3
@@ -1110,6 +1391,16 @@ private struct LedgerAgentHeatmapView: View {
         let top = heatmap.days.map { abs($0.value) }.max() ?? 0
         VStack(alignment: .leading, spacing: 8) {
             LedgerAgentVisualCaption(text: heatmap.title, aside: unit.map { String(localized: "单位：\($0)") })
+            if style.variant == "month" || style.variant == "calendar" {
+                monthView(top: top)
+            } else {
+                weeksView(top: top)
+            }
+            if let selected { selection(selected) }
+        }
+    }
+
+    @ViewBuilder private func weeksView(top: Double) -> some View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: Self.gap) {
                     ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
@@ -1128,14 +1419,77 @@ private struct LedgerAgentHeatmapView: View {
                 Spacer()
                 Text("少")
                 ForEach([0.12, 0.35, 0.6, 1.0], id: \.self) { level in
-                    RoundedRectangle(cornerRadius: 2).fill(BalancedPalette.ink.opacity(level)).frame(width: 10, height: 10)
+                    RoundedRectangle(cornerRadius: 2).fill((diverging ? BalancedPalette.expense : accent ?? BalancedPalette.ink).opacity(level))
+                        .frame(width: 10, height: 10)
                 }
                 Text("多")
                 Spacer()
                 Text(verbatim: heatmap.days.last.map { LedgerAgentVisual.dayString($0.date) } ?? "")
             }
             .balancedFont(size: 11).monospacedDigit().foregroundStyle(BalancedPalette.meta)
-            if let selected {
+    }
+
+    /// One month as a calendar: a row per week, Monday first, each day with
+    /// its date and amount; ‹ › move between the months the data covers.
+    @ViewBuilder private func monthView(top: Double) -> some View {
+        let months = LedgerAgentVisual.months(of: heatmap.days.map(\.date))
+        let shown = month.flatMap { months.contains($0) ? $0 : nil } ?? months.last
+        if let shown {
+            let byDay = Dictionary(heatmap.days.map { ($0.date, $0) }, uniquingKeysWith: { $1 })
+            let index = months.firstIndex(of: shown) ?? 0
+            VStack(spacing: 6) {
+                HStack {
+                    Button { month = months[max(index - 1, 0)] } label: {
+                        Image(systemName: "chevron.left").frame(width: 32, height: 32).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(index == 0).accessibilityLabel(Text("上个月"))
+                    Spacer()
+                    Text(verbatim: String(LedgerAgentVisual.dayString(shown).prefix(7)))
+                        .balancedFont(size: 13.5, weight: .medium).monospacedDigit().foregroundStyle(BalancedPalette.ink)
+                    Spacer()
+                    Button { month = months[min(index + 1, months.count - 1)] } label: {
+                        Image(systemName: "chevron.right").frame(width: 32, height: 32).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).disabled(index == months.count - 1).accessibilityLabel(Text("下个月"))
+                }
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(BalancedPalette.secondary)
+                HStack(spacing: 3) {
+                    ForEach(["一", "二", "三", "四", "五", "六", "日"], id: \.self) { name in
+                        Text(verbatim: name).balancedFont(size: 11).foregroundStyle(BalancedPalette.meta).frame(maxWidth: .infinity)
+                    }
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 7), spacing: 3) {
+                    ForEach(Array(LedgerAgentVisual.calendarCells(month: shown).enumerated()), id: \.offset) { _, date in
+                        if let date {
+                            let day = byDay[date]
+                            let value = day?.value ?? 0
+                            VStack(spacing: 1) {
+                                Text(verbatim: String(LedgerAgentVisual.dayString(date).suffix(2)))
+                                    .balancedFont(size: 10.5).monospacedDigit()
+                                Text(verbatim: day == nil || value == 0 ? " " : LedgerAgentVisual.compact(value))
+                                    .balancedFont(size: 9.5).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+                            }
+                            .foregroundStyle(top > 0 && abs(value) / top > 0.55 ? BalancedPalette.page : BalancedPalette.ink)
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                            .background(day == nil ? Color.clear : fill(value, top: top), in: RoundedRectangle(cornerRadius: 4))
+                            .overlay {
+                                if selected == date { RoundedRectangle(cornerRadius: 4).stroke(BalancedPalette.expense, lineWidth: 1.5) }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture { selected = selected == date ? nil : date }
+                            .accessibilityElement()
+                            .accessibilityLabel(Text(verbatim: "\(LedgerAgentVisual.dayString(date)) \(LedgerAgentVisual.amount(value, unit: unit))"))
+                            .accessibilityAddTraits(.isButton)
+                        } else {
+                            Color.clear.frame(minHeight: 40)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func selection(_ selected: Date) -> some View {
                 let day = heatmap.days.first { $0.date == selected } ?? .init(date: selected, value: 0)
                 HStack {
                     Text(verbatim: LedgerAgentVisual.dayString(day.date)).balancedFont(size: 13.5, weight: .medium)
@@ -1155,15 +1509,12 @@ private struct LedgerAgentHeatmapView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 4)
                 .background(BalancedPalette.sunken)
-            }
-        }
     }
 
     @ViewBuilder private func square(_ day: LedgerAgentVisual.Heatmap.Day?, top: Double) -> some View {
         if let day {
-            let level = top > 0 ? abs(day.value) / top : 0
             RoundedRectangle(cornerRadius: 2)
-                .fill(day.value == 0 ? BalancedPalette.rule : BalancedPalette.ink.opacity(0.12 + 0.88 * level))
+                .fill(fill(day.value, top: top))
                 .frame(width: Self.cell, height: Self.cell)
                 .overlay {
                     if selected == day.date { RoundedRectangle(cornerRadius: 2).stroke(BalancedPalette.expense, lineWidth: 1.5) }
@@ -1217,6 +1568,511 @@ private struct LedgerAgentActionsView: View {
     private func isAsk(_ action: LedgerAgentVisual.Action) -> Bool {
         if case .ask = action.target { return true }
         return false
+    }
+}
+// MARK: - Sankey
+
+/// Flows between nodes as bands whose width is the amount. Tapping a node
+/// lists what comes in and goes out of it.
+private struct LedgerAgentSankeyView: View {
+    let sankey: LedgerAgentVisual.Sankey
+    let unit: String?
+    @State private var selected: Int?
+    @Environment(\.ledgerAgentAccent) private var accent
+    @Environment(\.openURL) private var openURL
+
+    private static let nodeWidth: CGFloat = 10
+    /// Room beside the outer columns for their names.
+    private static let labelRoom: CGFloat = 76
+
+    private var height: CGFloat {
+        let tallest = (0..<sankey.columnCount).map { column in sankey.nodes.filter { $0.column == column }.count }.max() ?? 1
+        return min(max(CGFloat(tallest) * 44, 180), 420)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LedgerAgentVisualCaption(text: sankey.title, aside: unit.map { String(localized: "单位：\($0)") })
+            GeometryReader { geometry in
+                let inset = sankey.columnCount > 1 ? Self.labelRoom : 0
+                let plotWidth = max(geometry.size.width - inset * 2, 40)
+                let layout = sankey.layout(width: Double(plotWidth), height: Double(geometry.size.height),
+                                           nodeWidth: Double(Self.nodeWidth), gap: 12)
+                Canvas { context, _ in
+                    context.translateBy(x: inset, y: 0)
+                    for band in layout.bands {
+                        let flow = sankey.flows[band.flow]
+                        let lit = selected.map { sankey.nodes[$0].name == flow.from || sankey.nodes[$0].name == flow.to } ?? true
+                        context.fill(ribbon(band), with: .color((accent ?? BalancedPalette.ink).opacity(lit ? 0.18 : 0.05)))
+                    }
+                    for (index, frame) in layout.frames.enumerated() {
+                        let node = sankey.nodes[index]
+                        let lit = selected == nil || selected == index
+                        context.fill(Path(roundedRect: frame, cornerRadius: 2),
+                                     with: .color((accent ?? BalancedPalette.ink).opacity(lit ? 1 : 0.35)))
+                        let last = node.column == sankey.columnCount - 1 && sankey.columnCount > 1
+                        let label = Text(verbatim: node.name).font(.system(size: 11.5, weight: selected == index ? .semibold : .regular))
+                            .foregroundStyle(BalancedPalette.secondary)
+                        let amount = Text(verbatim: LedgerAgentVisual.plain(node.value)).font(.system(size: 10.5).monospacedDigit())
+                            .foregroundStyle(BalancedPalette.meta)
+                        let x = last ? frame.minX - 5 : frame.maxX + 5
+                        let anchor: UnitPoint = last ? .trailing : .leading
+                        if frame.height >= 26 {
+                            context.draw(label, at: CGPoint(x: x, y: frame.midY - 7), anchor: anchor)
+                            context.draw(amount, at: CGPoint(x: x, y: frame.midY + 7), anchor: anchor)
+                        } else {
+                            context.draw(label, at: CGPoint(x: x, y: frame.midY), anchor: anchor)
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { location in
+                    let point = CGPoint(x: location.x - inset, y: location.y)
+                    let hit = layout.frames.firstIndex { $0.insetBy(dx: -14, dy: -4).contains(point) }
+                    withAnimation(.easeInOut(duration: 0.15)) { selected = hit == selected ? nil : hit }
+                }
+            }
+            .frame(height: height)
+            .accessibilityElement()
+            .accessibilityLabel(Text(verbatim: sankey.flows.map { "\($0.from) → \($0.to) \(LedgerAgentVisual.amount($0.value, unit: unit))" }
+                .joined(separator: "，")))
+            if let selected { detail(selected) }
+        }
+    }
+
+    private func ribbon(_ band: LedgerAgentVisual.Sankey.Layout.Band) -> Path {
+        let midX = (band.fromX + band.toX) / 2
+        var path = Path()
+        path.move(to: CGPoint(x: band.fromX, y: band.fromY))
+        path.addCurve(to: CGPoint(x: band.toX, y: band.toY), control1: CGPoint(x: midX, y: band.fromY),
+                      control2: CGPoint(x: midX, y: band.toY))
+        path.addLine(to: CGPoint(x: band.toX, y: band.toY + band.thickness))
+        path.addCurve(to: CGPoint(x: band.fromX, y: band.fromY + band.thickness),
+                      control1: CGPoint(x: midX, y: band.toY + band.thickness),
+                      control2: CGPoint(x: midX, y: band.fromY + band.thickness))
+        path.closeSubpath()
+        return path
+    }
+
+    private func detail(_ index: Int) -> some View {
+        let node = sankey.nodes[index]
+        let incoming = sankey.flows.filter { $0.to == node.name }
+        let outgoing = sankey.flows.filter { $0.from == node.name }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(verbatim: node.name).balancedFont(size: 13.5, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                Spacer()
+                Text(verbatim: LedgerAgentVisual.amount(node.value, unit: unit)).balancedFont(size: 13.5).monospacedDigit()
+                    .foregroundStyle(BalancedPalette.ink)
+            }
+            ForEach(Array((incoming + outgoing).enumerated()), id: \.offset) { _, flow in
+                LedgerAgentLinked(link: flow.link) {
+                    HStack(spacing: 6) {
+                        Image(systemName: flow.to == node.name ? "arrow.right.to.line" : "arrow.right")
+                            .font(.system(size: 10, weight: .semibold)).foregroundStyle(BalancedPalette.meta)
+                        Text(verbatim: flow.to == node.name ? flow.from : flow.to).balancedFont(size: 13)
+                            .foregroundStyle(BalancedPalette.secondary)
+                        if flow.link != nil {
+                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(BalancedPalette.edge)
+                        }
+                        Spacer()
+                        Text(verbatim: LedgerAgentVisual.amount(flow.value, unit: unit)).balancedFont(size: 13).monospacedDigit()
+                            .foregroundStyle(BalancedPalette.secondary)
+                    }
+                    .frame(minHeight: 28)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(BalancedPalette.sunken)
+    }
+}
+
+// MARK: - Treemap
+
+/// Rectangles sized by share. Tapping one with children opens it; tapping
+/// a leaf selects it and offers its page.
+private struct LedgerAgentTreemapView: View {
+    let treemap: LedgerAgentVisual.Treemap
+    let unit: String?
+    @State private var opened: Int?
+    @State private var selected: Int?
+    @Environment(\.ledgerAgentAccent) private var accent
+    @Environment(\.openURL) private var openURL
+
+    private var items: [LedgerAgentVisual.Treemap.Item] {
+        let shown = opened.map { treemap.items[$0].children } ?? treemap.items
+        return shown.sorted { $0.value > $1.value }
+    }
+
+    var body: some View {
+        let items = items
+        let total = items.reduce(0) { $0 + $1.value }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                if let opened {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { self.opened = nil; selected = nil }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+                            Text(verbatim: treemap.title ?? String(localized: "全部"))
+                            Text(verbatim: "/ " + treemap.items[opened].label).foregroundStyle(BalancedPalette.ink)
+                        }
+                        .balancedFont(size: 14, weight: .semibold).foregroundStyle(BalancedPalette.secondary)
+                        .frame(minHeight: 28).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    LedgerAgentVisualCaption(text: treemap.title)
+                }
+                Spacer()
+                if let unit { Text(verbatim: String(localized: "单位：\(unit)")).balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta) }
+            }
+            GeometryReader { geometry in
+                let frames = LedgerAgentVisual.Treemap.squarify(items.map(\.value),
+                                                                 in: CGRect(origin: .zero, size: geometry.size))
+                ZStack(alignment: .topLeading) {
+                    ForEach(Array(zip(items.indices, frames)), id: \.0) { index, frame in
+                        tile(items[index], index: index, share: total > 0 ? items[index].value / total : 0, rank: index,
+                             count: items.count)
+                            .frame(width: max(frame.width - 2, 0), height: max(frame.height - 2, 0))
+                            .offset(x: frame.minX + 1, y: frame.minY + 1)
+                    }
+                }
+            }
+            .frame(height: 240)
+            .animation(.easeInOut(duration: 0.2), value: opened)
+            if let selected, items.indices.contains(selected) { detail(items[selected], share: total > 0 ? items[selected].value / total : 0) }
+        }
+    }
+
+    private func tile(_ item: LedgerAgentVisual.Treemap.Item, index: Int, share: Double, rank: Int, count: Int) -> some View {
+        let shade = 0.9 - 0.6 * Double(rank) / Double(max(count - 1, 1))
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                if opened == nil, !item.children.isEmpty, let position = treemap.items.firstIndex(of: item) {
+                    opened = position
+                    selected = nil
+                } else {
+                    selected = selected == index ? nil : index
+                }
+            }
+        } label: {
+            GeometryReader { geometry in
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill((accent ?? BalancedPalette.ink).opacity(shade))
+                    if geometry.size.width > 44, geometry.size.height > 30 {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(verbatim: item.label).balancedFont(size: 12, weight: .medium).lineLimit(1)
+                            Text(verbatim: LedgerAgentVisual.percent(share).replacingOccurrences(of: "+", with: ""))
+                                .balancedFont(size: 11).monospacedDigit().opacity(0.8)
+                        }
+                        .foregroundStyle(shade > 0.5 ? BalancedPalette.page : BalancedPalette.ink)
+                        .padding(6)
+                    }
+                    if !item.children.isEmpty, opened == nil, geometry.size.width > 30, geometry.size.height > 30 {
+                        Image(systemName: "square.grid.2x2").font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(shade > 0.5 ? BalancedPalette.page : BalancedPalette.ink).opacity(0.7)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(5)
+                    }
+                }
+                .overlay {
+                    if selected == index { RoundedRectangle(cornerRadius: 3).stroke(BalancedPalette.expense, lineWidth: 2) }
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(verbatim: "\(item.label) \(LedgerAgentVisual.amount(item.value, unit: unit))"))
+        .accessibilityHint(Text(item.children.isEmpty ? "选中查看" : "展开这一项"))
+    }
+
+    private func detail(_ item: LedgerAgentVisual.Treemap.Item, share: Double) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: item.label).balancedFont(size: 13.5, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                if let note = item.note { Text(verbatim: note).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta) }
+            }
+            Spacer()
+            Text(verbatim: LedgerAgentVisual.amount(item.value, unit: unit)).balancedFont(size: 13.5).monospacedDigit()
+                .foregroundStyle(BalancedPalette.ink)
+            Text(verbatim: LedgerAgentVisual.percent(share).replacingOccurrences(of: "+", with: ""))
+                .balancedFont(size: 12).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+            if let link = item.link {
+                Button { openURL(link) } label: {
+                    Image(systemName: "arrow.up.right").font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(BalancedPalette.ink).frame(width: 32, height: 32).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("打开账本里的对应页面"))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(BalancedPalette.sunken)
+    }
+}
+
+// MARK: - Gauge
+
+private struct LedgerAgentGaugeView: View {
+    let gauge: LedgerAgentVisual.Gauge
+    let unit: String?
+    @Environment(\.ledgerAgentAccent) private var accent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            LedgerAgentVisualCaption(text: gauge.title)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12, alignment: .top)], spacing: 14) {
+                ForEach(Array(gauge.items.enumerated()), id: \.offset) { _, item in
+                    LedgerAgentLinked(link: item.link) { ring(item) }
+                }
+            }
+        }
+    }
+
+    private func ring(_ item: LedgerAgentVisual.Gauge.Item) -> some View {
+        let ratio = item.ratio
+        let tone: LedgerAgentVisual.Tone = item.target.map { LedgerAgentVisual.tone(of: item.value - $0, better: gauge.better) } ?? .neutral
+        let color = tone == .neutral ? accent ?? BalancedPalette.ink : LedgerAgentVisualText.color(tone)
+        return VStack(spacing: 6) {
+            ZStack {
+                Circle().stroke(BalancedPalette.rule, lineWidth: 8)
+                Circle().trim(from: 0, to: min(max(ratio, 0), 1))
+                    .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                if ratio > 1 {
+                    // Past full, the overshoot laps the ring a second time, thinner.
+                    Circle().trim(from: 0, to: min(ratio - 1, 1))
+                        .stroke(color.opacity(0.5), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .padding(9)
+                }
+                if let target = item.targetRatio, target > 0, target <= 1 {
+                    Capsule().fill(BalancedPalette.expense).frame(width: 2, height: 12)
+                        .offset(y: -38)
+                        .rotationEffect(.degrees(360 * target))
+                }
+                VStack(spacing: 0) {
+                    Text(verbatim: LedgerAgentVisual.percent(ratio).replacingOccurrences(of: "+", with: ""))
+                        .balancedFont(size: 17, weight: .semibold).monospacedDigit().foregroundStyle(BalancedPalette.ink)
+                        .minimumScaleFactor(0.6).lineLimit(1)
+                    if let maximum = item.maximum {
+                        Text(verbatim: "\(LedgerAgentVisual.plain(item.value))/\(LedgerAgentVisual.plain(maximum))")
+                            .balancedFont(size: 9.5).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                            .minimumScaleFactor(0.6).lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
+            .frame(width: 84, height: 84)
+            HStack(spacing: 3) {
+                Text(verbatim: item.label).balancedFont(size: 13).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                if item.link != nil {
+                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(BalancedPalette.edge)
+                }
+            }
+            if let note = item.note {
+                Text(verbatim: note).balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta).multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Matrix
+
+/// A grid of values, each cell shaded by its size against the largest.
+/// Tapping a cell names its row and column underneath.
+private struct LedgerAgentMatrixView: View {
+    let matrix: LedgerAgentVisual.Matrix
+    let unit: String?
+    @State private var selected: Cell?
+    @Environment(\.ledgerAgentAccent) private var accent
+    @Environment(\.openURL) private var openURL
+
+    private struct Cell: Equatable {
+        let row: Int
+        let column: Int
+    }
+
+    private static let labelWidth: CGFloat = 76
+    private static let cellWidth: CGFloat = 62
+
+    var body: some View {
+        let peak = matrix.peak
+        VStack(alignment: .leading, spacing: 8) {
+            LedgerAgentVisualCaption(text: matrix.title, aside: unit.map { String(localized: "单位：\($0)") })
+            HStack(alignment: .top, spacing: 0) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Color.clear.frame(height: 22)
+                    ForEach(Array(matrix.rows.enumerated()), id: \.offset) { _, row in
+                        LedgerAgentLinked(link: row.link) {
+                            Text(verbatim: row.label).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                                .frame(width: Self.labelWidth, height: 30, alignment: .leading)
+                        }
+                    }
+                    if matrix.totals {
+                        Text("合计").balancedFont(size: 12.5, weight: .semibold).foregroundStyle(BalancedPalette.ink)
+                            .frame(width: Self.labelWidth, height: 30, alignment: .leading)
+                    }
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 2) {
+                            ForEach(Array(matrix.columns.enumerated()), id: \.offset) { _, column in
+                                Text(verbatim: column).balancedFont(size: 11).foregroundStyle(BalancedPalette.meta).lineLimit(1)
+                                    .frame(width: Self.cellWidth, height: 22)
+                            }
+                            if matrix.totals {
+                                Text("合计").balancedFont(size: 11, weight: .semibold).foregroundStyle(BalancedPalette.meta)
+                                    .frame(width: Self.cellWidth, height: 22)
+                            }
+                        }
+                        ForEach(Array(matrix.rows.enumerated()), id: \.offset) { rowIndex, row in
+                            HStack(spacing: 2) {
+                                ForEach(Array(row.values.enumerated()), id: \.offset) { columnIndex, value in
+                                    cell(value, peak: peak, cell: Cell(row: rowIndex, column: columnIndex))
+                                }
+                                if matrix.totals { total(row.total) }
+                            }
+                        }
+                        if matrix.totals {
+                            HStack(spacing: 2) {
+                                ForEach(Array(matrix.columnTotals.enumerated()), id: \.offset) { _, value in total(value) }
+                                total(matrix.columnTotals.reduce(0, +))
+                            }
+                        }
+                    }
+                }
+            }
+            if let selected, let value = matrix.rows[selected.row].values[selected.column] {
+                let row = matrix.rows[selected.row]
+                HStack {
+                    Text(verbatim: "\(row.label) · \(matrix.columns[selected.column])").balancedFont(size: 13.5, weight: .medium)
+                        .foregroundStyle(BalancedPalette.ink)
+                    Spacer()
+                    Text(verbatim: LedgerAgentVisual.amount(value, unit: unit)).balancedFont(size: 13.5).monospacedDigit()
+                        .foregroundStyle(BalancedPalette.ink)
+                    if row.total != 0 {
+                        Text(verbatim: LedgerAgentVisual.percent(value / row.total).replacingOccurrences(of: "+", with: ""))
+                            .balancedFont(size: 12).monospacedDigit().foregroundStyle(BalancedPalette.meta)
+                    }
+                    if let link = row.link {
+                        Button { openURL(link) } label: {
+                            Image(systemName: "arrow.up.right").font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(BalancedPalette.ink).frame(width: 32, height: 32).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text("打开账本里的对应页面"))
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(BalancedPalette.sunken)
+            }
+        }
+    }
+
+    @ViewBuilder private func cell(_ value: Double?, peak: Double, cell: Cell) -> some View {
+        let level = value.map { peak > 0 ? abs($0) / peak : 0 } ?? 0
+        Text(verbatim: value.map(LedgerAgentVisual.plain) ?? "")
+            .balancedFont(size: 11.5).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+            .foregroundStyle(level > 0.55 ? BalancedPalette.page : BalancedPalette.ink)
+            .padding(.horizontal, 3)
+            .frame(width: Self.cellWidth, height: 30)
+            .background(value == nil ? Color.clear : (accent ?? BalancedPalette.ink).opacity(0.06 + 0.84 * level),
+                        in: RoundedRectangle(cornerRadius: 2))
+            .overlay {
+                if selected == cell { RoundedRectangle(cornerRadius: 2).stroke(BalancedPalette.expense, lineWidth: 1.5) }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard value != nil else { return }
+                withAnimation(.easeInOut(duration: 0.15)) { selected = selected == cell ? nil : cell }
+            }
+            .accessibilityElement()
+            .accessibilityLabel(Text(verbatim: "\(matrix.rows[cell.row].label) \(matrix.columns[cell.column]) \(value.map { LedgerAgentVisual.amount($0, unit: unit) } ?? "")"))
+    }
+
+    private func total(_ value: Double) -> some View {
+        Text(verbatim: LedgerAgentVisual.plain(value))
+            .balancedFont(size: 11.5, weight: .semibold).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+            .foregroundStyle(BalancedPalette.ink)
+            .frame(width: Self.cellWidth, height: 30)
+            .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
+    }
+}
+
+// MARK: - Transactions
+
+/// Entries in the app's transaction-row voice, under a date per day. A row
+/// opens its day's transactions unless the model linked another page.
+private struct LedgerAgentTransactionsView: View {
+    let list: LedgerAgentVisual.Transactions
+    let unit: String?
+    @State private var expanded = false
+    @Environment(\.ledgerAgentStyle) private var style
+
+    var body: some View {
+        let shown = expanded ? list.items : Array(list.items.prefix(LedgerAgentVisual.Transactions.collapsedItems))
+        VStack(alignment: .leading, spacing: 0) {
+            LedgerAgentVisualCaption(text: list.title).padding(.bottom, 6)
+            ForEach(Array(list.days(shown).enumerated()), id: \.offset) { _, day in
+                Text(verbatim: LedgerAgentVisual.dayString(day.date)).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                    .padding(.top, 8).padding(.bottom, 2)
+                ForEach(Array(day.items.enumerated()), id: \.offset) { _, item in
+                    LedgerAgentLinked(link: item.destination) { row(item) }
+                }
+            }
+            if list.items.count > LedgerAgentVisual.Transactions.collapsedItems {
+                LedgerAgentExpandButton(expanded: $expanded, count: list.items.count, noun: String(localized: "笔"))
+            }
+        }
+    }
+
+    private func row(_ item: LedgerAgentVisual.Transactions.Item) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: symbol(item.account))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(BalancedPalette.secondary)
+                .frame(width: 30, height: 30)
+                .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: [item.payee, item.narration].compactMap { $0 }.joined(separator: " · "))
+                    .balancedFont(size: 14).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                let meta = ([item.account.map(Self.shortAccount)].compactMap { $0 } + item.tags.map { "#" + $0 }).joined(separator: "  ")
+                if !meta.isEmpty, style.variant != "compact" {
+                    Text(verbatim: meta).balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 8)
+            Text(verbatim: (item.amount > 0 ? "+" : "") + LedgerAgentVisual.amount(item.amount, unit: item.currency ?? unit))
+                .balancedFont(size: 14).monospacedDigit()
+                .foregroundStyle(item.amount > 0 ? BalancedPalette.income : BalancedPalette.ink)
+        }
+        .padding(.vertical, 7)
+        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The last two parts of an account, which say what it is.
+    private static func shortAccount(_ account: String) -> String {
+        account.split(separator: ":").suffix(2).joined(separator: ":")
+    }
+
+    private func symbol(_ account: String?) -> String {
+        switch account?.split(separator: ":").first.map(String.init) {
+        case "Income": "arrow.down.left"
+        case "Assets": "building.columns"
+        case "Liabilities": "creditcard"
+        case "Equity": "scalemass"
+        default: "arrow.up.right"
+        }
     }
 }
 #endif
