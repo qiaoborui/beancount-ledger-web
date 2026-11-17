@@ -30,7 +30,8 @@ type ModelConfig struct {
 	// ContextWindow and MaxOutputTokens are the model's limits. A custom
 	// endpoint is not in any catalog, so without them the Agent assumes a
 	// 128k window and an 8192-token reply, and a reasoning model can spend
-	// the whole reply thinking. Zero keeps the assumption.
+	// the whole reply thinking. Zero takes what the endpoint's model list
+	// says (ListModels), and failing that keeps the assumption.
 	ContextWindow   int
 	MaxOutputTokens int
 }
@@ -63,14 +64,22 @@ type Config struct {
 	CommitEmail string
 	// RunTurn runs one Agent turn: mobileagent.RunTurnJSON.
 	RunTurn func(requestJSON string) string
-	Now     func() time.Time
-	Logger  *slog.Logger
+	// ListModels reads the endpoint's model list: mobileagent.ListModelsJSON.
+	// Optional; it supplies the limits the configuration leaves out.
+	ListModels func(requestJSON string) string
+	Now        func() time.Time
+	Logger     *slog.Logger
 	// Sleep is replaced by tests.
 	Sleep func(ctx context.Context, d time.Duration)
 }
 
 // Runner runs the scheduled tasks of one ledger.
-type Runner struct{ cfg Config }
+type Runner struct {
+	cfg    Config
+	limits map[string]modelLimits
+}
+
+type modelLimits struct{ contextWindow, maxOutputTokens int }
 
 // NewRunner fills the defaults of cfg.
 func NewRunner(cfg Config) (*Runner, error) {
@@ -126,7 +135,7 @@ func NewRunner(cfg Config) (*Runner, error) {
 			}
 		}
 	}
-	return &Runner{cfg: cfg}, nil
+	return &Runner{cfg: cfg, limits: map[string]modelLimits{}}, nil
 }
 
 func (r *Runner) mirrorDir() string { return filepath.Join(r.cfg.Home, "mirror.git") }
@@ -432,11 +441,12 @@ func (r *Runner) runAgent(ctx context.Context, task Task, job job, sha, workspac
 		"thinking":    firstNonEmpty(task.Thinking, r.cfg.Model.Thinking),
 		"scratchRoot": scratch, "conversationId": record.ConversationID, "message": message,
 	}
-	if r.cfg.Model.ContextWindow > 0 {
-		request["contextWindow"] = r.cfg.Model.ContextWindow
+	limits := r.modelLimits(record.Model)
+	if limits.contextWindow > 0 {
+		request["contextWindow"] = limits.contextWindow
 	}
-	if r.cfg.Model.MaxOutputTokens > 0 {
-		request["maxOutputTokens"] = r.cfg.Model.MaxOutputTokens
+	if limits.maxOutputTokens > 0 {
+		request["maxOutputTokens"] = limits.maxOutputTokens
 	}
 	raw, err := json.Marshal(request)
 	if err != nil {
@@ -726,4 +736,55 @@ func (r *Runner) Check(ctx context.Context) (CheckReport, error) {
 			State: state.Tasks[task.ID]})
 	}
 	return report, nil
+}
+
+// modelLimits are the configured limits of model, each one the
+// configuration leaves out taken from the endpoint's model list. The list
+// is read once per model and run of the program; a list that cannot be read
+// leaves the Agent's assumption.
+func (r *Runner) modelLimits(model string) modelLimits {
+	limits := modelLimits{r.cfg.Model.ContextWindow, r.cfg.Model.MaxOutputTokens}
+	if (limits.contextWindow > 0 && limits.maxOutputTokens > 0) || r.cfg.ListModels == nil {
+		return limits
+	}
+	listed, cached := r.limits[model]
+	if !cached {
+		listed = r.listedLimits(model)
+		r.limits[model] = listed
+	}
+	if limits.contextWindow <= 0 {
+		limits.contextWindow = listed.contextWindow
+	}
+	if limits.maxOutputTokens <= 0 {
+		limits.maxOutputTokens = listed.maxOutputTokens
+	}
+	return limits
+}
+
+func (r *Runner) listedLimits(model string) modelLimits {
+	raw, err := json.Marshal(map[string]any{"version": 1, "provider": "custom", "apiKey": r.cfg.Model.APIKey,
+		"custom": map[string]string{"api": r.cfg.Model.API, "baseURL": r.cfg.Model.BaseURL}})
+	if err != nil {
+		return modelLimits{}
+	}
+	var response struct {
+		OK     bool   `json:"ok"`
+		Error  string `json:"error"`
+		Models []struct {
+			ID              string `json:"id"`
+			ContextWindow   int    `json:"contextWindow"`
+			MaxOutputTokens int    `json:"maxOutputTokens"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal([]byte(r.cfg.ListModels(string(raw))), &response); err != nil || !response.OK {
+		r.cfg.Logger.Warn("model list unreadable; using the assumed limits", "error", firstNonEmpty(response.Error, fmt.Sprint(err)))
+		return modelLimits{}
+	}
+	for _, listed := range response.Models {
+		if listed.ID == model {
+			return modelLimits{listed.ContextWindow, listed.MaxOutputTokens}
+		}
+	}
+	r.cfg.Logger.Warn("model not in the endpoint's list; using the assumed limits", "model", model)
+	return modelLimits{}
 }

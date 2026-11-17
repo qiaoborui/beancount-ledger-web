@@ -23,6 +23,12 @@ import (
 // freellmapi gateway on mibook.
 func fakeGateway(t *testing.T, calls *atomic.Int32) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") && r.Header.Get("Authorization") == "Bearer gateway-key" {
+			// magpie's shape: the limits sit on each entry.
+			fmt.Fprint(w, `{"object":"list","data":[{"id":"other","max_output_tokens":1},`+
+				`{"id":"auto","object":"model","context_length":1048576,"max_output_tokens":32768}]}`)
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, "/chat/completions") || r.Header.Get("Authorization") != "Bearer gateway-key" {
 			http.Error(w, "unexpected request "+r.URL.Path, http.StatusUnauthorized)
 			return
@@ -32,7 +38,7 @@ func fakeGateway(t *testing.T, calls *atomic.Int32) *httptest.Server {
 			t.Errorf("request lacks the automation prompt: %s", body)
 		}
 		if !strings.Contains(string(body), "32768") {
-			t.Errorf("request does not carry the configured reply limit: %s", body)
+			t.Errorf("request does not carry the listed reply limit: %s", body)
 		}
 		calls.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -73,13 +79,12 @@ func TestTickRunsTheRealAgentAgainstAnOpenAICompatibleGateway(t *testing.T) {
 	git(work, "push", "--quiet", "origin", "HEAD:main")
 
 	env := map[string]string{
-		"LEDGER_AUTOMATION_HOME":              filepath.Join(base, "home"),
-		"LEDGER_AUTOMATION_REPO":              remote,
-		"LEDGER_AUTOMATION_MODEL_BASE_URL":    gateway.URL + "/v1",
-		"LEDGER_AUTOMATION_MODEL":             "auto",
-		"LEDGER_AUTOMATION_MODEL_KEY":         "gateway-key",
-		"LEDGER_AUTOMATION_TIMEZONE":          "Asia/Singapore",
-		"LEDGER_AUTOMATION_MAX_OUTPUT_TOKENS": "32768",
+		"LEDGER_AUTOMATION_HOME":           filepath.Join(base, "home"),
+		"LEDGER_AUTOMATION_REPO":           remote,
+		"LEDGER_AUTOMATION_MODEL_BASE_URL": gateway.URL + "/v1",
+		"LEDGER_AUTOMATION_MODEL":          "auto",
+		"LEDGER_AUTOMATION_MODEL_KEY":      "gateway-key",
+		"LEDGER_AUTOMATION_TIMEZONE":       "Asia/Singapore",
 	}
 	cfg, err := configFromEnv(func(key string) string { return env[key] }, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {

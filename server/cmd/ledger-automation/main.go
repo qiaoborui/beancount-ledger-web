@@ -120,6 +120,7 @@ func configFromEnv(getenv func(string) string, logger *slog.Logger) (automation.
 		},
 		GenericNotifications: truthy(getenv("LEDGER_AUTOMATION_GENERIC_NOTIFICATIONS")),
 		RunTurn:              mobileagent.RunTurnJSON,
+		ListModels:           mobileagent.ListModelsJSON,
 		Logger:               logger,
 	}
 	if cfg.Home == "" {
