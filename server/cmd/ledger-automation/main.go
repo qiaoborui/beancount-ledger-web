@@ -34,7 +34,8 @@ Configuration comes from the environment (see docs/ledger-automation.md):
   LEDGER_AUTOMATION_RUNS_BRANCH, LEDGER_AUTOMATION_ENTRYPOINT,
   LEDGER_AUTOMATION_TIMEZONE, LEDGER_AUTOMATION_MODEL_API,
   LEDGER_AUTOMATION_MODEL_BASE_URL, LEDGER_AUTOMATION_MODEL,
-  LEDGER_AUTOMATION_THINKING, LEDGER_AUTOMATION_BARK_SERVER,
+  LEDGER_AUTOMATION_THINKING, LEDGER_AUTOMATION_CONTEXT_WINDOW,
+  LEDGER_AUTOMATION_MAX_OUTPUT_TOKENS, LEDGER_AUTOMATION_BARK_SERVER,
   LEDGER_AUTOMATION_GENERIC_NOTIFICATIONS, LEDGER_AUTOMATION_KEEP_RUNS,
   LEDGER_AUTOMATION_BEAN_CHECK
 Secrets are read from systemd credentials (model-key, bark-key,
@@ -119,6 +120,7 @@ func configFromEnv(getenv func(string) string, logger *slog.Logger) (automation.
 		},
 		GenericNotifications: truthy(getenv("LEDGER_AUTOMATION_GENERIC_NOTIFICATIONS")),
 		RunTurn:              mobileagent.RunTurnJSON,
+		ListModels:           mobileagent.ListModelsJSON,
 		Logger:               logger,
 	}
 	if cfg.Home == "" {
@@ -134,6 +136,18 @@ func configFromEnv(getenv func(string) string, logger *slog.Logger) (automation.
 			return cfg, fmt.Errorf("LEDGER_AUTOMATION_TIMEZONE: %w", err)
 		}
 		cfg.Location = location
+	}
+	for name, limit := range map[string]*int{
+		"LEDGER_AUTOMATION_CONTEXT_WINDOW":    &cfg.Model.ContextWindow,
+		"LEDGER_AUTOMATION_MAX_OUTPUT_TOKENS": &cfg.Model.MaxOutputTokens,
+	} {
+		if text := getenv(name); text != "" {
+			value, err := strconv.Atoi(text)
+			if err != nil || value < 0 {
+				return cfg, fmt.Errorf("%s must be a token count, not %q", name, text)
+			}
+			*limit = value
+		}
 	}
 	if keep := getenv("LEDGER_AUTOMATION_KEEP_RUNS"); keep != "" {
 		value, err := strconv.Atoi(keep)

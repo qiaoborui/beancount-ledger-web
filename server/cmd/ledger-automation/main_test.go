@@ -23,6 +23,12 @@ import (
 // freellmapi gateway on mibook.
 func fakeGateway(t *testing.T, calls *atomic.Int32) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") && r.Header.Get("Authorization") == "Bearer gateway-key" {
+			// magpie's shape: the limits sit on each entry.
+			fmt.Fprint(w, `{"object":"list","data":[{"id":"other","max_output_tokens":1},`+
+				`{"id":"auto","object":"model","context_length":1048576,"max_output_tokens":32768}]}`)
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, "/chat/completions") || r.Header.Get("Authorization") != "Bearer gateway-key" {
 			http.Error(w, "unexpected request "+r.URL.Path, http.StatusUnauthorized)
 			return
@@ -30,6 +36,9 @@ func fakeGateway(t *testing.T, calls *atomic.Int32) *httptest.Server {
 		body, _ := io.ReadAll(r.Body)
 		if !strings.Contains(string(body), "无人值守") {
 			t.Errorf("request lacks the automation prompt: %s", body)
+		}
+		if !strings.Contains(string(body), "32768") {
+			t.Errorf("request does not carry the listed reply limit: %s", body)
 		}
 		calls.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
