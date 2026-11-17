@@ -238,3 +238,46 @@ func draftPatch(ctx context.Context, scratch string) (string, error) {
 	}
 	return git(ctx, scratch, "diff", "--cached", "--binary", "--no-color")
 }
+
+// writeDraftTrees writes each file the Agent changed twice under dir: as it
+// was at the pinned commit in draft/base/<path>, and as the Agent left it in
+// draft/after/<path>. A file the Agent added has no base copy and one it
+// deleted has no after copy. The phone merges these over its own draft the
+// way it merges any draft, so it never has to apply a patch.
+func writeDraftTrees(ctx context.Context, scratch, sha, dir string) ([]string, error) {
+	listed, err := git(ctx, scratch, "diff", "--cached", "--name-only", "--no-renames", "-z", sha)
+	if err != nil {
+		return nil, err
+	}
+	paths := []string{}
+	for _, path := range strings.Split(listed, "\x00") {
+		if path == "" {
+			continue
+		}
+		clean := filepath.Clean(filepath.FromSlash(path))
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("draft path %q leaves the ledger", path)
+		}
+		paths = append(paths, path)
+		if blob, err := git(ctx, scratch, "cat-file", "blob", sha+":"+path); err == nil {
+			if err := writeFile(filepath.Join(dir, "draft", "base", clean), []byte(blob)); err != nil {
+				return nil, err
+			}
+		}
+		if data, err := os.ReadFile(filepath.Join(scratch, clean)); err == nil {
+			if err := writeFile(filepath.Join(dir, "draft", "after", clean), data); err != nil {
+				return nil, err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
+	return paths, nil
+}
+
+func writeFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}

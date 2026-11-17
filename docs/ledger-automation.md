@@ -55,9 +55,20 @@ runs/<运行 id>/findings.json    确定性巡检结果（模型挂了也有）
 runs/<运行 id>/conversation.json  App 历史格式（LedgerAgentSavedConversation v1）
 runs/<运行 id>/transcript       助手 transcript，手机接着聊时原样带上
 runs/<运行 id>/draft.patch      相对 run.json 里那个提交的补丁，git apply 可用
+runs/<运行 id>/draft/base/…     草稿改到的每个文件在那个提交里的样子（新增的文件没有）
+runs/<运行 id>/draft/after/…    助手改完的样子（删掉的文件没有）；run.json 的 draftFiles 列出这些路径
 ```
 
 运行 id 形如 `20261117T1300Z-daily-audit`（slot 的 UTC 时间 + 任务 id，手动运行加 `-manual`）。默认只保留最近 200 次。
+
+## 在手机上看结果、接着聊
+
+用 Git 同步的账本会顺带拉 `automation-runs` 分支（单独的缓存，不碰账本自己的同步状态）：
+
+- 账本助手的侧边栏多了「定时任务」，列出每次运行的状态、摘要、发现数和草稿；有新运行时旁边显示数字。下拉刷新，打开侧边栏时最多每 2 分钟自动拉一次。
+- 跑成功的运行会作为对话加进侧边栏的历史（带时钟图标），每次运行只加一次；删掉就不会再回来，接着聊过的保留手机上的版本。
+- 打开这个对话就能接着聊，助手拿到的是主机上那一轮的完整 transcript。第一次打开时，主机的草稿用三方合并（`draft/base` → `draft/after` 合到手机当前的草稿上）载入改动卡片，永远要手动确认才写入；账本后来改过同一处的文件保留账本内容并在卡片上说明。长按运行可以「重新载入草稿」。
+- Bark 通知的链接 `ledger://automation/run?id=<运行 id>` 直接打开那次运行的对话。
 
 ## 在 mibook 上安装
 

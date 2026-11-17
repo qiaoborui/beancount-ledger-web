@@ -3683,6 +3683,13 @@ final class LedgerSession: ObservableObject {
         defer { pendingAgentQuestion = nil }
         return pendingAgentQuestion?.text
     }
+    /// A scheduled task run a notification asked for, until the assistant
+    /// opens it.
+    @Published private(set) var pendingAutomationRun: LedgerAgentPendingAutomationRun?
+    func takePendingAutomationRun() -> String? {
+        defer { pendingAutomationRun = nil }
+        return pendingAutomationRun?.runID
+    }
     @Published var externalAccount: LedgerExternalAccount?
     @Published var globalSearchQuery = ""
     @Published var globalSearchScope: LedgerGlobalSearchScope = .all
@@ -3786,6 +3793,10 @@ final class LedgerSession: ObservableObject {
         case let .agent(question):
             LedgerCrashLog.shared.record("外部路由：打开账本助手")
             pendingAgentQuestion = LedgerAgentPendingQuestion(text: question)
+            agentPresented = true
+        case let .automationRun(id):
+            LedgerCrashLog.shared.record("外部路由：打开定时任务运行")
+            pendingAutomationRun = LedgerAgentPendingAutomationRun(runID: id)
             agentPresented = true
         case let .report(target):
             // Reports read the on-device ledger only.
@@ -3924,6 +3935,7 @@ final class LedgerSession: ObservableObject {
         case .transactions: return "transactions"
         case .search: return "search"
         case .agent: return "agent"
+        case .automationRun: return "automation"
         case .report: return "report"
         case .record: return "record"
         case .sentence: return "sentence"

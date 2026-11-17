@@ -304,9 +304,12 @@ type RunRecord struct {
 	Findings       int       `json:"findings"`
 	NewFindings    int       `json:"newFindings"`
 	HasDraft       bool      `json:"hasDraft"`
-	Model          string    `json:"model"`
-	AuditMs        int64     `json:"auditMs,omitempty"`
-	AgentMs        int64     `json:"agentMs,omitempty"`
+	// DraftFiles are the ledger paths the draft changes; draft/base and
+	// draft/after hold each one before and after.
+	DraftFiles []string `json:"draftFiles,omitempty"`
+	Model      string   `json:"model"`
+	AuditMs    int64    `json:"auditMs,omitempty"`
+	AgentMs    int64    `json:"agentMs,omitempty"`
 }
 
 // Status values of a run.
@@ -454,18 +457,24 @@ func (r *Runner) runAgent(ctx context.Context, task Task, job job, sha, workspac
 			if err := os.WriteFile(filepath.Join(dir, "draft.patch"), []byte(patch), 0o600); err != nil {
 				return "", err
 			}
-			record.HasDraft = true
+			_ = os.RemoveAll(filepath.Join(dir, "draft"))
+			files, err := writeDraftTrees(ctx, scratch, sha, dir)
+			if err != nil {
+				return "", fmt.Errorf("collect draft: %w", err)
+			}
+			record.HasDraft, record.DraftFiles = true, files
 		}
 	}
 	if !record.HasDraft {
 		_ = os.Remove(filepath.Join(dir, "draft.patch"))
+		_ = os.RemoveAll(filepath.Join(dir, "draft"))
 	}
 	if response.Transcript != "" {
 		if err := os.WriteFile(filepath.Join(dir, "transcript"), []byte(response.Transcript), 0o600); err != nil {
 			return "", err
 		}
 	}
-	conversation := savedConversation(record.ConversationID, task, job.slot, record.StartedAt, r.cfg.Now(), response)
+	conversation := savedConversation(record.ConversationID, job.runID, task, job.slot, record.StartedAt, r.cfg.Now(), response)
 	if err := writeJSON(filepath.Join(dir, "conversation.json"), conversation); err != nil {
 		return "", err
 	}
@@ -627,7 +636,9 @@ func newUUID() string {
 // savedConversation is the run as a conversation in the App's history
 // format (LedgerAgentSavedConversation, version 1), so opening it on the
 // phone continues it like any other conversation.
-func savedConversation(id string, task Task, slot, started, finished time.Time, response agentResponse) map[string]any {
+// automationRun names the run, so the App marks it in the history and finds
+// the run's draft when it is first opened.
+func savedConversation(id, runID string, task Task, slot, started, finished time.Time, response agentResponse) map[string]any {
 	toolCalls := response.ToolCalls
 	if toolCalls == nil {
 		toolCalls = []json.RawMessage{}
@@ -645,6 +656,7 @@ func savedConversation(id string, task Task, slot, started, finished time.Time, 
 		},
 		"unwrittenChange": false,
 		"generatedTitle":  task.Name + " · " + slot.In(task.Location).Format("01-02 15:04"),
+		"automationRun":   runID,
 	}
 }
 

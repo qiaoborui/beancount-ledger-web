@@ -13,6 +13,9 @@ enum LedgerExternalRoute: Equatable, Sendable {
     case sentence
     /// 周报 / 月报, over the current tab: one period, or the latest when nil.
     case report(LedgerReportRouteTarget?)
+    /// One run of a scheduled task, from its notification: the assistant
+    /// opens the run's conversation.
+    case automationRun(String)
 
     var destination: LedgerDestination {
         switch self {
@@ -20,7 +23,7 @@ enum LedgerExternalRoute: Equatable, Sendable {
         case .account: .accounts
         case .transactions: .transactions
         case .search: .search
-        case .agent: .agent
+        case .agent, .automationRun: .agent
         case .record, .sentence: .transactions
         case .report: .overview
         }
@@ -35,15 +38,16 @@ enum LedgerExternalRoute: Equatable, Sendable {
     /// 账本助手 is a full-screen cover over the current tab rather than a tab of its own.
     var opensAgent: Bool {
         switch self {
-        case .agent, .page(.agent): true
+        case .agent, .page(.agent), .automationRun: true
         default: false
         }
     }
 
     static func parse(_ url: URL) -> Self? {
         guard url.scheme?.lowercased() == "ledger", url.user == nil, url.password == nil,
-              url.port == nil, url.path.isEmpty || url.path == "/", url.fragment == nil,
+              url.port == nil, url.fragment == nil,
               let host = url.host?.lowercased(),
+              url.path.isEmpty || url.path == "/" || (host == "automation" && url.path == "/run"),
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
         var query: [String: String] = [:]
         for item in components.queryItems ?? [] {
@@ -66,6 +70,10 @@ enum LedgerExternalRoute: Equatable, Sendable {
             let currency = query["currency"] ?? ""
             guard currency.count <= 32, currency.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
             return .account(account, currency)
+        case "automation":
+            guard url.path == "/run", Set(query.keys) == ["id"], let id = query["id"],
+                  LedgerAutomationRun.isValidID(id) else { return nil }
+            return .automationRun(id)
         case "record":
             guard !query.isEmpty else { return .record }
             guard query == ["mode": "sentence"] else { return nil }
@@ -116,6 +124,11 @@ enum LedgerExternalRoute: Equatable, Sendable {
 struct LedgerAgentPendingQuestion: Identifiable, Equatable, Sendable {
     let id = UUID()
     let text: String
+}
+
+struct LedgerAgentPendingAutomationRun: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let runID: String
 }
 
 struct LedgerQuickEntryRequest: Identifiable, Equatable, Sendable {

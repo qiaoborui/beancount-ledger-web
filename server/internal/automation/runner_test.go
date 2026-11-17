@@ -147,6 +147,15 @@ func TestTickRunsDueTaskAndRecordsTheRun(t *testing.T) {
 	if !strings.Contains(string(patch), "-2026-11-13 * \"美团\"") {
 		t.Fatalf("patch = %s", patch)
 	}
+	// The changed file is there before and after, for the phone's merge.
+	if len(record.DraftFiles) != 1 {
+		t.Fatalf("draft files = %v", record.DraftFiles)
+	}
+	before, _ := os.ReadFile(filepath.Join(runDir, "draft", "base", record.DraftFiles[0]))
+	after, _ := os.ReadFile(filepath.Join(runDir, "draft", "after", record.DraftFiles[0]))
+	if !strings.Contains(string(before), "2026-11-13 * \"美团\"") || len(after) == 0 || string(before) == string(after) {
+		t.Fatalf("draft trees: before %q after %q", before, after)
+	}
 	var conversation map[string]any
 	data, _ = os.ReadFile(filepath.Join(runDir, "conversation.json"))
 	_ = json.Unmarshal(data, &conversation)

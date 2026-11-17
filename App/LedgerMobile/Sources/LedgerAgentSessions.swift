@@ -71,6 +71,9 @@ struct LedgerAgentSavedConversation: Codable, Equatable, Identifiable, Sendable 
     var branches: [Branch]? = nil
     /// The last message of the version on screen, which `messages` ends on.
     var activeLeaf: UUID? = nil
+    /// The scheduled task run this conversation began as, by its run id;
+    /// absent for a conversation started on the phone.
+    var automationRun: String? = nil
 
     /// The user's name, the model's, or the first question.
     var title: String {
@@ -216,6 +219,9 @@ final class LedgerAgentSessions: ObservableObject {
         /// The ledger's artifacts, by id; see `LedgerAgentArtifactRecord`.
         var loadArtifact: @Sendable (String) async -> Data? = { _ in nil }
         var saveArtifact: @Sendable (String, Data) async throws -> Void = { _, _ in }
+        /// The ledger's draft editor, for carrying a scheduled task's draft
+        /// into a conversation reopened from the history.
+        var editor: LedgerAgentEditor? = nil
     }
 
     @Published private(set) var current: LedgerAgentConversation
@@ -234,6 +240,11 @@ final class LedgerAgentSessions: ObservableObject {
     /// ledger is dropped when that one is bound instead of opening here.
     var pendingOpeningLedger: UUID?
     private var ledgerID: UUID?
+    /// The ledger whose history this is.
+    var boundLedger: UUID? { ledgerID }
+    /// The draft of a scheduled task's run, by run id, handed out the first
+    /// time its conversation is opened, or again when forced.
+    var automationDraft: (@MainActor (_ run: String, _ force: Bool) -> LedgerAgentCloudDraft?)?
     private var storage: Storage?
     private var loading: Task<Void, Never>?
     /// What the composer held when the user left each conversation; kept
@@ -366,19 +377,45 @@ final class LedgerAgentSessions: ObservableObject {
         show(next)
     }
 
-    func open(_ id: UUID) {
-        guard id != current.id else { return }
-        if let background, background.id == id { return show(background) }
-        guard let record = saved.first(where: { $0.id == id }) else { return }
-        let reopened = LedgerAgentConversation(restoring: record)
-        show(reopened)
-        // A transcript dropped with an unwritten change no longer matches
-        // the ledger the model will read; the visible history is enough.
-        guard !record.unwrittenChange, let storage else { return }
-        Task { [weak reopened] in
-            guard let data = await storage.loadTranscript(id) else { return }
-            reopened?.adoptTranscript(String(decoding: data, as: UTF8.self))
+    /// Shows a saved conversation. One a scheduled task ran also gets the
+    /// run's draft on its change card, the first time it is opened, or again
+    /// with `reloadingAutomationDraft`.
+    func open(_ id: UUID, reloadingAutomationDraft: Bool = false) {
+        if id != current.id {
+            if let background, background.id == id {
+                show(background)
+            } else {
+                guard let record = saved.first(where: { $0.id == id }) else { return }
+                let reopened = LedgerAgentConversation(restoring: record)
+                show(reopened)
+                // A transcript dropped with an unwritten change no longer
+                // matches the ledger the model will read; the visible history
+                // is enough.
+                if !record.unwrittenChange, let storage {
+                    Task { [weak reopened] in
+                        guard let data = await storage.loadTranscript(id) else { return }
+                        reopened?.adoptTranscript(String(decoding: data, as: UTF8.self))
+                    }
+                }
+            }
         }
+        guard current.id == id, let run = saved.first(where: { $0.id == id })?.automationRun,
+              let cloud = automationDraft?(run, reloadingAutomationDraft) else { return }
+        current.adoptCloudDraft(cloud, editor: storage?.editor)
+    }
+
+    /// Adds a scheduled task run's conversation to the history, with the
+    /// transcript the model continues from. A copy the user has continued
+    /// since is newer and stays.
+    func addAutomationConversation(_ record: LedgerAgentSavedConversation, transcript: Data?) async {
+        guard let storage else { return }
+        if let existing = saved.first(where: { $0.id == record.id }), existing.updatedAt >= record.updatedAt { return }
+        merge([record])
+        guard let data = try? Self.encoder.encode(record) else { return }
+        try? await storage.save(record.id, data)
+        if let transcript, !transcript.isEmpty { try? await storage.saveTranscript(record.id, transcript) }
+        for id in prune() { await storage.remove(id) }
+        LedgerAgentCloudSync.shared.localChanged()
     }
 
     /// After a notification about the conversation in the background, show it.
@@ -465,6 +502,7 @@ final class LedgerAgentSessions: ObservableObject {
         if let previous = saved.first(where: { $0.id == record.id }) {
             record.customTitle = previous.customTitle
             record.pinnedAt = previous.pinnedAt
+            record.automationRun = previous.automationRun
         }
         merge([record])
         guard let storage, let data = try? Self.encoder.encode(record) else { return }
@@ -573,6 +611,7 @@ extension LedgerAgentSessions.Storage {
             pruneBranchTranscripts: { await workspace.removeAgentBranchTranscripts(id: $0, keeping: $1) },
             sweepAttachments: { await workspace.removeAgentAttachments(keeping: $0) },
             loadArtifact: { await workspace.agentArtifact(id: $0) },
-            saveArtifact: { try await workspace.saveAgentArtifact(id: $0, data: $1) })
+            saveArtifact: { try await workspace.saveAgentArtifact(id: $0, data: $1) },
+            editor: .live(repository))
     }
 }
