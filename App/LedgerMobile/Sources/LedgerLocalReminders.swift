@@ -276,28 +276,54 @@ final class LedgerNotificationDelegate: NSObject, UNUserNotificationCenterDelega
         center.setNotificationCategories(LedgerLocalReminders.shared.categories)
     }
 
+    // The completion-handler forms on purpose, not the `async` ones: the
+    // bridged `async` method finishes off the main thread here (it is
+    // nonisolated), and UIKit's handler for a tap throws "Call must be made on
+    // main thread" when it is called there. That crashed a tap on a 账本助手
+    // notification in 1.4.28.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                            didReceive response: UNNotificationResponse) async {
+                                            didReceive response: UNNotificationResponse,
+                                            withCompletionHandler completionHandler: @escaping () -> Void) {
+        // Read what the tap needs here, so only plain values cross to the main thread.
         let content = response.notification.request.content
-        if content.threadIdentifier == LedgerAgentNotifications.thread {
-            await MainActor.run {
+        let isAgent = content.threadIdentifier == LedgerAgentNotifications.thread
+        let reminderURL = LedgerReminderNotification.isReminder(categoryIdentifier: content.categoryIdentifier)
+            ? LedgerReminderNotification.url(forAction: response.actionIdentifier, userInfo: content.userInfo)
+            : nil
+        Self.onMain({
+            if isAgent {
                 LedgerCrashLog.shared.record("收到账本助手通知")
                 LedgerAgentNotifications.shared.route()
+            } else if let reminderURL {
+                LedgerLocalReminders.shared.route(reminderURL)
             }
-            return
-        }
-        guard LedgerReminderNotification.isReminder(categoryIdentifier: content.categoryIdentifier),
-              let url = LedgerReminderNotification.url(forAction: response.actionIdentifier,
-                                                       userInfo: content.userInfo) else { return }
-        await MainActor.run { LedgerLocalReminders.shared.route(url) }
+        }, then: completionHandler)
     }
 
     /// In the app, the banner still shows: away from the Agent screen for the
     /// assistant, and anywhere for a reminder.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                            willPresent notification: UNNotification) async
-        -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+                                            willPresent notification: UNNotification,
+                                            withCompletionHandler completionHandler:
+                                                @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
+    }
+
+    /// Runs `work`, then `completion`, both on the main thread: at once when
+    /// called there (UIKit delivers taps on it, also during a cold launch), and
+    /// otherwise on the main queue, never on the calling thread.
+    nonisolated static func onMain(_ work: @escaping @MainActor @Sendable () -> Void,
+                                   then completion: @escaping () -> Void) {
+        nonisolated(unsafe) let completion = completion
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { work() }
+            completion()
+        } else {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { work() }
+                completion()
+            }
+        }
     }
 }
 #endif
