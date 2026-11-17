@@ -5874,6 +5874,16 @@
         }
       }
     },
+    "单个文件最多 25MB" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Each file can be up to 25 MB"
+          }
+        }
+      }
+    },
     "单个账单文件最多 10MB" : {
       "localizations" : {
         "en" : {
@@ -20424,6 +20434,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The ledger is written; waiting for the index to update."
+          }
+        }
+      }
+    },
+    "账本助手支持 CSV、Excel、PDF、HTML、文本和图片" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The assistant reads CSV, Excel, PDF, HTML, text and images"
           }
         }
       }

@@ -49,12 +49,30 @@ struct LedgerAgentView: View {
                 if !sessions.current.isRunning, !sessions.busyElsewhere { sessions.startNew() }
                 sessions.queuedQuestion = question
             }
+            // Files the share sheet sent here start a conversation of their
+            // own, unless one is answering; they wait in their inbox till then.
+            .task(id: "\(session.localRepository?.descriptor.id.uuidString ?? "")#\(session.sharedAgentRevision)") {
+                await takeSharedFiles()
+            }
             // A scheduled task's notification opens that run's conversation.
             .task(id: session.pendingAutomationRun?.id) {
                 guard let repository = session.localRepository, let run = session.takePendingAutomationRun() else { return }
                 attachAutomations(repository)
                 await LedgerAutomationCenter.shared.open(runID: run)
             }
+    }
+
+    private func takeSharedFiles() async {
+        guard session.localRepository != nil, sessions.queuedShare == nil else { return }
+        let waiting = await Task.detached(priority: .userInitiated) {
+            (try? LedgerSharedImportInbox.appInbox(.agent).items()) ?? []
+        }.value
+        let items = waiting.filter { !sessions.takenShares.contains($0.id) }
+        guard !items.isEmpty, sessions.queuedShare == nil,
+              !sessions.current.isRunning, !sessions.busyElsewhere else { return }
+        sessions.takenShares.formUnion(items.map(\.id))
+        sessions.startNew()
+        sessions.queuedShare = LedgerAgentSharedDelivery(items: items)
     }
 
     private func attachAutomations(_ repository: LocalLedgerRepository) {
@@ -289,6 +307,9 @@ private struct LedgerAgentChatScreen: View {
         .task { refreshInbox() }
         .onChange(of: sessions.queuedQuestion) { _, _ in sendQueuedQuestion() }
         .onAppear { sendQueuedQuestion() }
+        .onChange(of: sessions.queuedShare) { _, _ in receiveSharedFiles() }
+        .onChange(of: attaching) { _, busy in if !busy { receiveSharedFiles() } }
+        .onAppear { receiveSharedFiles() }
         // Links in replies point into the ledger (a day's transactions, an
         // account, a search) and open the page they name.
         .environment(\.openURL, OpenURLAction { url in
@@ -311,6 +332,27 @@ private struct LedgerAgentChatScreen: View {
             send(question, clearsComposer: false)
         } else {
             draft = question
+        }
+    }
+
+    /// Attaches the files another app shared to 账本助手 and asks what the
+    /// user typed with them; without a request the files wait in the
+    /// composer for one. They leave the share inbox either way, so a file
+    /// that cannot be read is reported once instead of on every launch.
+    private func receiveSharedFiles() {
+        guard let delivery = sessions.queuedShare, !attaching, !conversation.isRunning,
+              session.localRepository != nil else { return }
+        sessions.queuedShare = nil
+        attach(delivery.items.map { .shared($0) }) { _ in
+            Task.detached(priority: .utility) {
+                guard let inbox = try? LedgerSharedImportInbox.appInbox(.agent) else { return }
+                for item in delivery.items { try? inbox.remove(item) }
+            }
+            if let note = delivery.note {
+                sessions.queuedQuestion = note
+            } else {
+                composerFocused = true
+            }
         }
     }
 
@@ -1508,6 +1550,8 @@ private struct LedgerAgentChatScreen: View {
         /// available, with no file on disk to copy.
         case imageData(Data, suggestedName: String)
         case inbox(LedgerSharedImportInbox.Item)
+        /// A file another app shared straight to 账本助手.
+        case shared(LedgerSharedImportInbox.Item)
     }
 
     /// Turns what another app is dragging into attachments. A drop carries
@@ -1593,7 +1637,9 @@ private struct LedgerAgentChatScreen: View {
 
     /// Copies the picked files into the conversation's attachment folder one
     /// by one, so each gets the next id, and reads PDFs and images on the way.
-    private func attach(_ picks: [Pick]) {
+    /// `completion` runs once the copying ends, after `attaching` is false
+    /// again, with whether every file was attached.
+    private func attach(_ picks: [Pick], completion: (@MainActor (Bool) -> Void)? = nil) {
         guard !attaching else { return }
         guard let repository = session.localRepository else {
             attachError = String(localized: "账本还没打开，暂时不能添加附件。")
@@ -1604,6 +1650,10 @@ private struct LedgerAgentChatScreen: View {
         attaching = true
         attachError = nil
         Task { @MainActor in
+            var attachedAll = false
+            // Defers run last first: `attaching` is cleared before the
+            // completion, so a question it sends is not refused as busy.
+            defer { completion?(attachedAll) }
             defer { attaching = false }
             do {
                 let directory = try await workspace.agentAttachmentDirectory(id: conversation.id)
@@ -1630,10 +1680,19 @@ private struct LedgerAgentChatScreen: View {
                         }
                         let data = try LedgerSharedImportInbox.appInbox().read(item)
                         attachment = try await LedgerAgentAttachments.store(data, name: item.name, kind: kind, id: id, into: directory)
+                    case let .shared(item):
+                        guard let kind = LedgerAgentAttachments.kind(of: item.name) else {
+                            throw LedgerAgentAttachmentError.unsupported(item.name)
+                        }
+                        let data = try await Task.detached(priority: .userInitiated) {
+                            try LedgerSharedImportInbox.appInbox(.agent).read(item)
+                        }.value
+                        attachment = try await LedgerAgentAttachments.store(data, name: item.name, kind: kind, id: id, into: directory)
                     }
                     conversation.stage(attachment)
                 }
                 try? await workspace.protectAgentAttachments(id: conversation.id)
+                attachedAll = true
             } catch {
                 attachError = error.localizedDescription
             }

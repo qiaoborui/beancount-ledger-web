@@ -3656,6 +3656,26 @@ final class LedgerSession: ObservableObject {
         }
     }
 
+    /// Bumped each time the app comes to the front with files the share
+    /// sheet sent to 账本助手, so an assistant already on screen takes them.
+    @Published private(set) var sharedAgentRevision = 0
+
+    /// Files shared to 账本助手 from the share sheet open the assistant, which
+    /// takes them into a new conversation. They wait in their inbox until a
+    /// local ledger is open; another link that is already waiting goes first.
+    func receiveSharedAgentFilesIfAny() async {
+        guard isLocal else { return }
+        let waiting = await Task.detached(priority: .userInitiated) {
+            LedgerSharedImportInbox.hasAgentDeliveries()
+        }.value
+        guard waiting else { return }
+        sharedAgentRevision += 1
+        if !agentPresented, pendingExternalRoute == nil {
+            LedgerCrashLog.shared.record("分享给账本助手：打开账本助手")
+            openWidgetURL(URL(string: "ledger://agent")!)
+        }
+    }
+
     @Published private(set) var pendingExternalRoute: LedgerExternalRouteRequest?
     /// The one route whose deferral is already in the crash log, so a view
     /// update that re-applies it does not push older breadcrumbs out.
