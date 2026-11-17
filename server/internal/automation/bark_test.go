@@ -33,11 +33,13 @@ func TestBarkSendsAnEncryptedPush(t *testing.T) {
 		w.Write([]byte(`{"code":200}`))
 	}))
 	defer server.Close()
-	bark := &Bark{Server: server.URL, DeviceKey: "device-key", EncryptionKey: key, Group: "账本"}
+	bark := &Bark{Server: server.URL, DeviceKey: "device-key", EncryptionKey: key, Group: "账本",
+		Icon: "https://example.com/icon.png", Sound: "birdsong"}
 	if err := bark.Notify(context.Background(), Notification{Title: "每日巡检", Body: "发现 1 个问题", URL: "ledger://automation/run?id=x"}); err != nil {
 		t.Fatal(err)
 	}
-	if got["title"] != "每日巡检" || got["body"] != "发现 1 个问题" || got["url"] != "ledger://automation/run?id=x" || got["group"] != "账本" {
+	if got["title"] != "每日巡检" || got["body"] != "发现 1 个问题" || got["url"] != "ledger://automation/run?id=x" || got["group"] != "账本" ||
+		got["icon"] != "https://example.com/icon.png" || got["sound"] != "birdsong" {
 		t.Fatalf("payload = %v", got)
 	}
 }

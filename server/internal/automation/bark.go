@@ -42,7 +42,11 @@ type Bark struct {
 	// bytes, as configured in the Bark App.
 	EncryptionKey string
 	// Group collects the pushes in Notification Center.
-	Group  string
+	Group string
+	// Icon is the URL of the image shown on the push (iOS 15+).
+	Icon string
+	// Sound is one of the Bark App's ringtones, e.g. birdsong.
+	Sound  string
 	Client *http.Client
 }
 
@@ -58,8 +62,10 @@ func (b *Bark) Notify(ctx context.Context, n Notification) error {
 	if n.URL != "" {
 		payload["url"] = n.URL
 	}
-	if b.Group != "" {
-		payload["group"] = b.Group
+	for key, value := range map[string]string{"group": b.Group, "icon": b.Icon, "sound": b.Sound} {
+		if value != "" {
+			payload[key] = value
+		}
 	}
 	form := url.Values{}
 	if b.EncryptionKey != "" {
