@@ -120,11 +120,12 @@ final class LedgerAutomationRunsTests: XCTestCase {
     @MainActor
     func testCloudDraftMergesOverTheLedgerAndWaitsForTheCard() async throws {
         let ledger = root.appendingPathComponent("draft")
-        // The ledger gained a line at the end since the run read it.
-        try write("a\nb\nz\n", to: "main.bean", in: ledger)
+        // The ledger gained a line at the end since the run read it, away
+        // from the line the run changed.
+        try write("a\nb\nc\nd\nz\n", to: "main.bean", in: ledger)
         let cloud = root.appendingPathComponent("cloud")
-        try write("a\nb\n", to: "base/main.bean", in: cloud)
-        try write("a\nB\n", to: "after/main.bean", in: cloud)
+        try write("a\nb\nc\nd\n", to: "base/main.bean", in: cloud)
+        try write("a\nB\nc\nd\n", to: "after/main.bean", in: cloud)
         try write("new\n", to: "after/added.bean", in: cloud)
 
         let fake = DraftLedger(root: ledger)
@@ -135,11 +136,12 @@ final class LedgerAutomationRunsTests: XCTestCase {
                                                    editor: fake.editor))
         await settle(conversation)
 
-        XCTAssertEqual(try String(contentsOf: ledger.appendingPathComponent("main.bean"), encoding: .utf8), "a\nB\nz\n")
+        XCTAssertEqual(try String(contentsOf: ledger.appendingPathComponent("main.bean"), encoding: .utf8), "a\nB\nc\nd\nz\n")
         XCTAssertEqual(try String(contentsOf: ledger.appendingPathComponent("added.bean"), encoding: .utf8), "new\n")
         let pending = try XCTUnwrap(conversation.pending)
         XCTAssertEqual(pending.status, .ready)
         XCTAssertTrue(pending.holdReason?.contains("每日巡检") == true)
+        XCTAssertFalse(pending.holdReason?.contains("main.bean") == true)
         let reviews = await fake.reviews
         XCTAssertEqual(reviews, 1)
     }
