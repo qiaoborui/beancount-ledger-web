@@ -71,7 +71,7 @@ private struct LedgerAgentSettingsRoot: View {
                 NavigationLink {
                     LedgerAgentSyncView()
                 } label: {
-                    LabeledContent("iCloud 云盘同步") {
+                    LabeledContent("iCloud 同步") {
                         AgentSettingsValue(text: sync.isOn ? String(localized: "已开启") : String(localized: "已关闭"))
                     }
                 }

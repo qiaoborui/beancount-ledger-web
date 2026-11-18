@@ -64,6 +64,7 @@ struct LedgerSetupView: View {
     @State private var settingsPresented = false
     @State private var wizardPresented = false
     @State private var folderImportPresented = false
+    @State private var iCloudJoinPresented = false
     @State private var emptyLedgerPresented = false
 
     private var plan: LedgerOnboardingDraft { conversation.state.draft }
@@ -106,6 +107,7 @@ struct LedgerSetupView: View {
         }
         .sheet(isPresented: $wizardPresented) { OnboardingWizardView() }
         .sheet(isPresented: $folderImportPresented) { LocalLedgerSetupView(importing: true) }
+        .sheet(isPresented: $iCloudJoinPresented) { ICloudJoinSheet { importer = .joinFolder } }
         .sheet(isPresented: $emptyLedgerPresented) { LocalLedgerSetupView(importing: false) }
         .sheet(isPresented: $planPresented) { planSheet }
         .fileImporter(isPresented: Binding(get: { importer != nil }, set: { if !$0 { importer = nil } }),
@@ -170,7 +172,7 @@ struct LedgerSetupView: View {
                 Button { emptyLedgerPresented = true } label: { Label("新建空账本", systemImage: "doc.badge.plus") }
                     .accessibilityIdentifier("local-ledger-create")
                 Divider()
-                Button { importer = .joinFolder } label: { Label("从 iCloud 云盘加入账本", systemImage: "icloud") }
+                Button { iCloudJoinPresented = true } label: { Label("从 iCloud 加入账本", systemImage: "icloud") }
                     .accessibilityIdentifier("local-ledger-join-folder")
                 Button { folderImportPresented = true } label: { Label("导入账本文件夹", systemImage: "folder") }
                     .accessibilityIdentifier("local-ledger-import")
@@ -219,7 +221,7 @@ struct LedgerSetupView: View {
             .padding(.top, 24)
 
             HStack(spacing: 6) {
-                chip(String(localized: "iCloud 云盘里的账本")) { importer = .joinFolder }
+                chip(String(localized: "iCloud 里的账本")) { iCloudJoinPresented = true }
                 chip(String(localized: "本机文件夹")) { folderImportPresented = true }
                 chip(String(localized: "从备份恢复")) { importer = .backup }
             }
@@ -478,7 +480,7 @@ struct LedgerSetupView: View {
 
     private var otherCard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            otherRow(String(localized: "iCloud 云盘里的账本"), String(localized: "选择另一台设备已开启同步的文件夹"), "icloud") { importer = .joinFolder }
+            otherRow(String(localized: "iCloud 里的账本"), String(localized: "另一台设备已开启 iCloud 同步的账本"), "icloud") { iCloudJoinPresented = true }
             otherRow(String(localized: "本机文件夹"), String(localized: "已有 .bean 文件，直接接管"), "folder") { folderImportPresented = true }
             otherRow(String(localized: "从备份恢复"), String(localized: "选择 .ledgerbackup 文件"), "clock.arrow.circlepath") { importer = .backup }
             otherRow(String(localized: "手动开账向导"), String(localized: "不聊天，用表单选账户和分类"), "list.bullet.rectangle") { wizardPresented = true }
@@ -699,6 +701,7 @@ struct LedgerSetupView: View {
         let categories = plan.incomeCategories.count + plan.expenseCategories.count
         let start = plan.startDate.isEmpty ? String(localized: "期初为创建当天") : String(localized: "期初 \(plan.startDate)")
         let base = String(localized: "\(plan.accounts.count) 个账户 · \(categories) 个分类 · \(plan.currency) · \(start)")
+        if plan.isICloudStorage { return base + String(localized: " · 存进 iCloud") }
         return plan.isGitStorage ? base + String(localized: " · 同步到 Git") : base
     }
 
@@ -826,7 +829,7 @@ struct LedgerSetupView: View {
         VStack(spacing: 0) {
             settingRow(String(localized: "存放"), plan.isGitStorage
                        ? String(localized: "Git · \(URL(string: plan.remote)?.host ?? plan.remote)")
-                       : String(localized: "这台设备"))
+                       : plan.isICloudStorage ? "iCloud" : String(localized: "这台设备"))
             Divider().overlay(BalancedPalette.rule).padding(.leading, 14)
             settingRow(String(localized: "导入"), plan.importChannels.isEmpty
                        ? String(localized: "还没选，先备好支付宝和微信")
@@ -931,6 +934,21 @@ struct LedgerSetupView: View {
                     }
                 } catch {
                     storageNote = String(localized: "没能连上 \(host)：\(error.localizedDescription)。账本已经存在这台设备上，可以在设置的「存储」里再接 Git。")
+                }
+                session.dismissError()
+            } else if plan.isICloudStorage {
+                // Like Git: the ledger is already here, so a failure only
+                // changes what the greeting says.
+                do {
+                    try await session.configureLocalICloud()
+                    do {
+                        _ = try await session.synchronizeLocalStorage()
+                        storageNote = String(localized: "已经存进 iCloud，之后记的账会自动同步到你的其他设备。")
+                    } catch {
+                        storageNote = String(localized: "已经开启 iCloud 同步，第一次上传还没完成（\(error.localizedDescription)），之后会自动重试。")
+                    }
+                } catch {
+                    storageNote = String(localized: "没能开启 iCloud 同步：\(error.localizedDescription)。账本已经存在这台设备上，可以在设置的「存储」里再开。")
                 }
                 session.dismissError()
             }

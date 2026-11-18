@@ -228,4 +228,70 @@ final class FolderLocalStorageTests: XCTestCase {
         XCTAssertEqual(history.count, FolderSyncLayout.historyLimit)
         XCTAssertEqual(Set(history).count, history.count)
     }
+    // MARK: - iCloud container
+
+    func testFolderConfigurationWithoutContainerStillDecodes() throws {
+        let old = #"{"id":"6F9619FF-8B86-D011-B42D-00CF4FC964FF","bookmark":"","folderName":"账本","deviceName":"phone"}"#
+        let configuration = try JSONDecoder().decode(LocalFolderSyncConfiguration.self, from: Data(old.utf8))
+        XCTAssertNil(configuration.container)
+        XCTAssertFalse(configuration.isICloudContainer)
+
+        let shared = LocalFolderSyncConfiguration(id: UUID(), bookmark: Data(), folderName: "iCloud", deviceName: "pad", container: "abc")
+        let decoded = try JSONDecoder().decode(LocalFolderSyncConfiguration.self, from: JSONEncoder().encode(shared))
+        XCTAssertEqual(decoded, shared)
+        XCTAssertTrue(decoded.isICloudContainer)
+    }
+
+    func testICloudLocationCreatesTheLedgerFolderAndRejectsBadNames() throws {
+        let root = try directory()
+        let folder = try FolderSyncLocation.iCloud("ledger-1", root: { root }).resolve()
+        XCTAssertEqual(folder.lastPathComponent, "ledger-1")
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory) && isDirectory.boolValue)
+        for bad in ["", "..", ".hidden", "a/b"] {
+            XCTAssertThrowsError(try FolderSyncLocation.iCloud(bad, root: { root }).resolve()) { error in
+                XCTAssertEqual(error as? LedgerBackupError, .iCloudUnavailable)
+            }
+        }
+        XCTAssertThrowsError(try FolderSyncLocation.iCloud("ledger-1", root: { nil }).resolve()) { error in
+            XCTAssertEqual(error as? LedgerBackupError, .iCloudUnavailable)
+        }
+    }
+
+    func testHeadsListsEveryPublishedDevice() async throws {
+        let root = try directory(), folder = root.appendingPathComponent("iCloud")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let phone = try await device("phone", sharing: folder, in: root, files: ["main.bean": "; phone\n"])
+        _ = try await phone.storage.synchronize(validator: accept)
+        let pad = try await device("pad", sharing: folder, in: root)
+        _ = try await pad.storage.synchronize(validator: accept)
+        XCTAssertEqual(Set(FolderSyncLayout.heads(in: folder).map(\.deviceName)), ["phone", "pad"])
+    }
+
+    func testCatalogMovesALedgerIntoTheICloudContainer() async throws {
+        let root = try directory()
+        let ledgers = root.appendingPathComponent("Ledgers", isDirectory: true)
+        let container = root.appendingPathComponent("Container", isDirectory: true)
+        let id = UUID()
+        let stored = LocalLedgerDescriptor(id: id, name: "家庭账本", entrypoint: "main.bean", createdAt: Date())
+        let directory = ledgers.appendingPathComponent(id.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(stored).write(to: directory.appendingPathComponent("ledger.json"))
+
+        let offline = LocalLedgerCatalog(rootDirectory: ledgers, iCloudLedgers: { nil }, validator: { _, _ in })
+        do {
+            _ = try await offline.configureICloud(ledgerID: id, deviceName: "phone")
+            XCTFail("expected iCloud to be unavailable")
+        } catch { XCTAssertEqual(error as? LedgerBackupError, .iCloudUnavailable) }
+
+        let catalog = LocalLedgerCatalog(rootDirectory: ledgers, iCloudLedgers: { container }, validator: { _, _ in })
+        let shared = try await catalog.configureICloud(ledgerID: id, deviceName: "phone")
+        XCTAssertEqual(shared.folder?.container, id.uuidString.lowercased())
+        XCTAssertNil(shared.git)
+        let listed = try await catalog.list()
+        XCTAssertEqual(listed.first?.folder, shared.folder)
+        // Asking again keeps the same device identity.
+        let again = try await catalog.configureICloud(ledgerID: id, deviceName: "phone")
+        XCTAssertEqual(again.folder?.id, shared.folder?.id)
+    }
 }

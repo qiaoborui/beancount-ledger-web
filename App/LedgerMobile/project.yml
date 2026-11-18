@@ -26,6 +26,12 @@ settings:
     LEDGER_TEAM_ID: 6YJVKL5GXV
     LEDGER_BUNDLE_ID: com.qiaoborui.ledger
     LEDGER_APP_GROUP: group.com.qiaoborui.ledger
+    # iCloud Documents container (main app only). A fixed ID, not derived
+    # from the team or a command-line bundle ID override: users' iCloud data
+    # lives under it, so it must outlive a team change or an App Store app
+    # transfer. Code asks for the first container in the entitlements and
+    # never names this ID.
+    LEDGER_ICLOUD_CONTAINER: iCloud.com.qiaoborui.ledger
 
 targets:
   LedgerMobile:

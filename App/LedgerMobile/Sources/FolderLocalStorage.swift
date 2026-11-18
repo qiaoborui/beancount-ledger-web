@@ -1,15 +1,26 @@
 import Foundation
 
-/// Multi-device sync through a user-picked folder, normally in iCloud Drive.
-/// Picking a folder with the system picker needs no iCloud entitlement, so
-/// this works with Personal Team and sideloaded builds where CloudKit and an
-/// app ubiquity container are unavailable.
+/// Multi-device sync through a folder. Two kinds:
+/// - iCloud: a folder inside the app's own iCloud Documents container
+///   (`<container>/Documents/Ledgers/<container path>`), which needs the
+///   iCloud entitlement of the paid team build. Nothing to pick: every
+///   device signed in to the same Apple ID sees it.
+/// - Picked: any folder chosen with the system picker, kept as a bookmark.
+///   No entitlement, so SideStore builds use this one; it is also how
+///   ledgers set up before the container existed keep syncing.
+/// Both kinds share the layout and merge below.
 struct LocalFolderSyncConfiguration: Codable, Equatable, Hashable, Sendable {
     /// Identifies this device's head file in the shared folder.
     let id: UUID
+    /// A picked folder's bookmark; empty for an iCloud container folder.
     let bookmark: Data
     let folderName: String
     let deviceName: String
+    /// The folder's name under `Documents/Ledgers` in the iCloud container,
+    /// or nil for a picked folder.
+    var container: String? = nil
+
+    var isICloudContainer: Bool { container != nil }
 }
 
 /// Shared folder layout:
@@ -67,6 +78,17 @@ enum FolderSyncLayout {
         catch { throw LedgerBackupError.corrupt(String(localized: "无法读取同步文件夹信息")) }
         guard marker.formatVersion <= formatVersion else { throw LedgerBackupError.unsupportedVersion(marker.formatVersion) }
         return marker
+    }
+
+    /// Every device's head in `folder`, skipping any that cannot be read.
+    /// For display; the exchange itself validates heads strictly.
+    static func heads(in folder: URL) -> [Head] {
+        let directory = folder.appendingPathComponent(devicesName, isDirectory: true)
+        return ((try? FolderFiles.names(in: directory)) ?? []).compactMap { name in
+            guard name.hasSuffix(".json"), UUID(uuidString: String(name.dropLast(5))) != nil,
+                  let data = try? FolderFiles.read(directory.appendingPathComponent(name)) else { return nil }
+            return try? decoder.decode(Head.self, from: data)
+        }
     }
 
     static func isDigest(_ value: String) -> Bool {
@@ -182,6 +204,26 @@ struct FolderSyncLocation: Sendable {
 
     static func directory(_ url: URL) -> FolderSyncLocation { FolderSyncLocation { url } }
 
+    /// A ledger folder in the app's iCloud container. Resolving blocks while
+    /// iCloud prepares the container, which is fine on the storage actor.
+    /// Tests pass another `root`.
+    static func iCloud(_ path: String,
+                       root: @escaping @Sendable () -> URL? = { LedgerICloud.ledgersDirectory() }) -> FolderSyncLocation {
+        FolderSyncLocation {
+            guard LedgerICloud.isValidFolderName(path), let ledgers = root() else {
+                throw LedgerBackupError.iCloudUnavailable
+            }
+            let folder = ledgers.appendingPathComponent(path, isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            return folder
+        }
+    }
+
+    static func configured(_ configuration: LocalFolderSyncConfiguration) -> FolderSyncLocation {
+        if let path = configuration.container { return .iCloud(path) }
+        return .bookmark(configuration.bookmark)
+    }
+
     /// Call while the picker's security scope is active.
     static func makeBookmark(for url: URL) throws -> Data {
         #if os(macOS)
@@ -230,7 +272,7 @@ actor FolderLocalStorage: LogicalLocalStorage {
         self.workspace = workspace
         self.configuration = configuration
         self.ledger = ledger
-        self.location = location ?? .bookmark(configuration.bookmark)
+        self.location = location ?? .configured(configuration)
         self.now = now
         syncRoot = workspace.rootDirectory.appendingPathComponent("sync", isDirectory: true)
             .appendingPathComponent(configuration.id.uuidString, isDirectory: true)
@@ -287,6 +329,9 @@ actor FolderLocalStorage: LogicalLocalStorage {
         if let marker = try FolderSyncLayout.readMarker(in: folder), marker.entrypoint != ledger.entrypoint {
             throw LocalStorageError.invalidGitConfiguration(String(localized: "该同步文件夹属于入口文件为 \(marker.entrypoint) 的账本"))
         }
+        // Two devices that turned sync on at once both wrote the marker; the
+        // copies differ only in their timestamps.
+        FolderConflictVersions.discard(at: folder.appendingPathComponent(FolderSyncLayout.markerName))
         let peers = try readPeerHeads(in: folder)
         let ownHead = headURL(in: folder, for: configuration.id)
         let unseen = peers.filter { !state.known.contains($0.head) }

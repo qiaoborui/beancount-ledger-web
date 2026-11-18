@@ -16,8 +16,13 @@ struct LocalLedgerStorageView: View {
     @State private var confirmingResolution = false
     @State private var conflictExport: URL?
     @State private var choosingFolder = false
+    /// Whether the app's iCloud container is reachable; nil while checking.
+    @State private var iCloudAvailable: Bool?
+
+    private var usesICloudContainer: Bool { session.localFolderConfiguration?.isICloudContainer == true }
 
     private var providerTitle: String {
+        if usesICloudContainer { return "iCloud" }
         if session.localFolderConfiguration != nil { return String(localized: "iCloud 云盘文件夹") }
         return session.localGitConfiguration == nil ? String(localized: "本机目录") : String(localized: "Git 工作区")
     }
@@ -35,7 +40,7 @@ struct LocalLedgerStorageView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     StorageKeyRow(label: String(localized: "账本"), value: session.localLedgerName)
                     StorageKeyRow(label: String(localized: "存储提供方"), value: providerTitle)
-                    if let folder = session.localFolderConfiguration {
+                    if let folder = session.localFolderConfiguration, !folder.isICloudContainer {
                         StorageKeyRow(label: String(localized: "同步文件夹"), value: folder.folderName)
                     }
                     StorageKeyRow(label: String(localized: "状态"), value: statusTitle, color: statusColor)
@@ -88,20 +93,26 @@ struct LocalLedgerStorageView: View {
             if session.localGitConfiguration == nil {
                 Section {
                     if session.localFolderConfiguration == nil {
+                        if iCloudAvailable == true {
+                            Button("开启 iCloud 同步") { Task { await connectICloud() } }
+                                .buttonStyle(.balanced(.primary))
+                                .accessibilityIdentifier("local-icloud-connect")
+                                .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                        }
                         Button("选择 iCloud 云盘文件夹") { choosingFolder = true }
-                            .buttonStyle(.balanced(.primary))
+                            .buttonStyle(.balanced(iCloudAvailable == true ? .quiet : .primary))
                             .accessibilityIdentifier("local-folder-choose")
                             .listRowBackground(Color.clear).listRowSeparator(.hidden)
                     } else {
-                        Button("关闭 iCloud 云盘同步") { confirmingDisconnect = true }
+                        Button(usesICloudContainer ? "关闭 iCloud 同步" : "关闭 iCloud 云盘同步") { confirmingDisconnect = true }
                             .buttonStyle(.balanced(.quiet))
                             .accessibilityIdentifier("local-folder-disconnect")
                             .listRowBackground(Color.clear).listRowSeparator(.hidden)
                     }
-                } header: { TerminalSectionLabel(text: String(localized: "iCloud 云盘同步")).listRowBackground(BalancedPalette.page)
+                } header: { TerminalSectionLabel(text: String(localized: "iCloud 同步")).listRowBackground(BalancedPalette.page)
                         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
                 footer: {
-                    Text("在“文件”中新建或选择一个 iCloud 云盘文件夹，每个账本单独使用一个。其他设备在账本库中选择“从 iCloud 云盘加入账本”并选同一个文件夹即可多设备同步。两台设备改了同一个文件时，会在这里让你选择保留哪一边。")
+                    Text(iCloudFooter)
                         .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                         .listRowBackground(BalancedPalette.page)
                         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
@@ -211,6 +222,7 @@ struct LocalLedgerStorageView: View {
                 branch = config.branch
             }
             await reloadStatus()
+            iCloudAvailable = await LedgerICloud.available()
         }
         .refreshable { await reloadStatus() }
         .onChange(of: session.localSyncStatus) { _, value in
@@ -219,7 +231,7 @@ struct LocalLedgerStorageView: View {
         .confirmationDialog("同步这个 Git 工作区？", isPresented: $confirmingSync, titleVisibility: .visible) {
             Button("拉取、校验并推送") { Task { await synchronize() } }
         } message: { Text("\(repositoryURL)\n分支：\(branch)\n本地和远端已保存的变更将交换并校验。") }
-        .confirmationDialog(session.localFolderConfiguration != nil ? Text("关闭 iCloud 云盘同步？") : Text("改用本机存储？"),
+        .confirmationDialog(session.localFolderConfiguration != nil ? Text("关闭 iCloud 同步？") : Text("改用本机存储？"),
                             isPresented: $confirmingDisconnect, titleVisibility: .visible) {
             if session.localFolderConfiguration != nil {
                 Button("保留本地账本并停止同步") { Task { await disconnect() } }
@@ -228,7 +240,7 @@ struct LocalLedgerStorageView: View {
             }
         } message: {
             if session.localFolderConfiguration != nil {
-                Text("账本文件和本地历史会保留。iCloud 云盘文件夹保持原状，其他设备仍可继续使用它同步。")
+                Text("账本文件和本地历史会保留。iCloud 里的那份保持原状，其他设备仍可继续用它同步。")
             } else {
                 Text("账本文件和本地历史会保留。远端仓库保持原状。")
             }
@@ -274,6 +286,29 @@ struct LocalLedgerStorageView: View {
 
     private var canSynchronize: Bool {
         session.localFolderConfiguration != nil || matchesConfiguration
+    }
+
+    private var iCloudFooter: String {
+        if usesICloudContainer {
+            return String(localized: "账本存在你的 iCloud 里，登录同一个 Apple 账户的设备在账本库选“从 iCloud 加入账本”即可共用。每次保存后自动上传，另一台设备改了会在几秒内拉下来；两台设备改了同一笔时，会在这里让你选择保留哪一边。")
+        }
+        if session.localFolderConfiguration != nil {
+            return String(localized: "账本通过你选的 iCloud 云盘文件夹同步。其他设备在账本库中选“从 iCloud 加入账本”，再选同一个文件夹即可。")
+        }
+        if iCloudAvailable == true {
+            return String(localized: "开启后账本存进你的 iCloud，不用选文件夹；其他设备在账本库选“从 iCloud 加入账本”。用旧版本在 iCloud 云盘选过同步文件夹的，可以继续选那个文件夹。")
+        }
+        return String(localized: "在“文件”中新建或选择一个 iCloud 云盘文件夹，每个账本单独使用一个。其他设备在账本库中选“从 iCloud 加入账本”并选同一个文件夹即可多设备同步。两台设备改了同一个文件时，会在这里让你选择保留哪一边。")
+    }
+
+    private func connectICloud() async {
+        busy = true
+        defer { busy = false }
+        do {
+            try await session.configureLocalICloud()
+            error = nil
+            await reloadStatus()
+        } catch { self.error = error.localizedDescription }
     }
 
     private func connectFolder(_ url: URL) async {

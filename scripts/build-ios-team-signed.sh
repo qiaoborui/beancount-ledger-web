@@ -173,13 +173,14 @@ fi
 
 # Every bundle must carry the team's IDs, one version, and the App Group in both
 # the provisioning profile and the signature.
-python3 - "$app" "$bundle_id" "$app_group" "$build_number" "$marketing_version" <<'PY'
+icloud_container="$(sed -n 's/^ *LEDGER_ICLOUD_CONTAINER: *\([A-Za-z0-9.]*\) *$/\1/p' "${project_dir}/project.yml" | head -n 1)"
+python3 - "$app" "$bundle_id" "$app_group" "$build_number" "$marketing_version" "$icloud_container" <<'PY'
 import pathlib
 import plistlib
 import subprocess
 import sys
 
-app, bundle_id, group, build, version = sys.argv[1:]
+app, bundle_id, group, build, version, container = sys.argv[1:]
 app = pathlib.Path(app)
 expected = {
     app: bundle_id,
@@ -199,7 +200,12 @@ for bundle, identifier in expected.items():
         ["security", "cms", "-D", "-i", str(bundle / "embedded.mobileprovision")],
         check=True, capture_output=True,
     ).stdout
-    groups = plistlib.loads(profile)["Entitlements"].get("com.apple.security.application-groups") or []
+    profile_entitlements = plistlib.loads(profile)["Entitlements"]
+    if bundle == app and container not in (profile_entitlements.get("com.apple.developer.icloud-container-identifiers") or []):
+        sys.exit(f"{bundle.name}: profile does not entitle iCloud container {container}. "
+                 "Enable iCloud (CloudKit/iCloud Documents) for the App ID and assign that container "
+                 "in the Apple Developer portal, then build again.")
+    groups = profile_entitlements.get("com.apple.security.application-groups") or []
     if group not in groups:
         sys.exit(f"{bundle.name}: profile does not entitle {group}: {groups}")
     signed = subprocess.run(

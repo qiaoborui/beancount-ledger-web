@@ -4,14 +4,13 @@ import Foundation
 import UIKit
 #endif
 
-/// 账本助手 data kept in a user-picked folder, normally in iCloud Drive, so
-/// the history and memory.md survive deleting the app and follow the user to
-/// their other devices.
+/// 账本助手 data kept in iCloud, so the history and memory.md survive
+/// deleting the app and follow the user to their other devices.
 ///
-/// Sideloaded builds (SideStore, Personal Team) cannot carry the iCloud
-/// entitlement, so CloudKit, the app's own ubiquity container and
-/// `NSUbiquitousKeyValueStore` are all out of reach. A folder picked with the
-/// system picker needs no entitlement, the same way ledger folder sync works.
+/// The folder is `Documents/Assistant` in the app's own iCloud container on
+/// paid-team builds (`LedgerICloud`). Sideloaded builds cannot carry the
+/// iCloud entitlement and use a folder the user picks in iCloud Drive
+/// instead; a picked folder, once chosen, keeps precedence.
 ///
 /// Folder layout:
 ///
@@ -63,12 +62,16 @@ enum LedgerAgentSyncLayout {
         var id: String { key }
     }
 
-    /// The folder name of a ledger: its Git remote and branch when it has
-    /// one, so a reinstall that clones it again finds the same data, else
-    /// its name.
+    /// The folder name of a ledger: its iCloud container folder, or its Git
+    /// remote and branch, so a reinstall that joins or clones it again finds
+    /// the same data; else its name.
     static func key(for descriptor: LocalLedgerDescriptor) -> String {
         let identity: String
-        if let git = descriptor.git {
+        if let container = descriptor.folder?.container {
+            // Every device that joined the iCloud ledger names the same folder,
+            // whatever the ledger is called locally.
+            identity = "icloud:" + container
+        } else if let git = descriptor.git {
             var url = git.repositoryURL.absoluteString.lowercased()
             while url.hasSuffix("/") { url.removeLast() }
             if url.hasSuffix(".git") { url.removeLast(4) }
@@ -223,6 +226,7 @@ struct LedgerAgentSyncEngine: Sendable {
     func run(apply: @Sendable ([LedgerAgentSyncLocalChange]) async throws -> Set<String>) async throws -> LedgerAgentSyncReport {
         var state = loadState()
         if state.identity != identity { state = State(identity: identity) }
+        resolveRemoteConflicts(memoryBase: state.memoryBase ?? "")
         let localStamps = scanLocal()
         let remoteStamps = try scanRemote()
         var report = LedgerAgentSyncReport()
@@ -392,6 +396,23 @@ struct LedgerAgentSyncEngine: Sendable {
 
     // MARK: - Files
 
+    /// Two devices that wrote memory.md or the same conversation at once
+    /// leave iCloud conflict versions behind; fold them in by the same rules
+    /// as a merge, before reading the remote side.
+    private func resolveRemoteConflicts(memoryBase: String) {
+        let memory = remote.appendingPathComponent(LedgerAgentSyncLayout.memoryPath)
+        _ = try? FolderConflictVersions.resolve(at: memory) { current, other in
+            Data(LedgerAgentSyncLayout.mergeMemory(base: memoryBase, local: String(decoding: current, as: UTF8.self),
+                                                   remote: String(decoding: other, as: UTF8.self)).utf8)
+        }
+        let history = remote.appendingPathComponent(LedgerAgentSyncLayout.historyDirectory, isDirectory: true)
+        for name in (try? FolderFiles.names(in: history)) ?? [] where name.hasSuffix(".json") {
+            _ = try? FolderConflictVersions.resolve(at: history.appendingPathComponent(name)) { current, other in
+                Self.updatedAt(other) > Self.updatedAt(current) ? other : current
+            }
+        }
+    }
+
     private func stage(_ data: Data) throws -> URL {
         try FileManager.default.createDirectory(at: incoming, withIntermediateDirectories: true)
         let url = incoming.appendingPathComponent(UUID().uuidString)
@@ -541,12 +562,28 @@ enum LedgerAgentSyncPreferences {
 struct LedgerAgentSyncFolder: Sendable {
     nonisolated(unsafe) static var defaults: UserDefaults = .standard
     static let bookmarkKey = "ledger.agent.sync.folderBookmark"
+    /// On: the app's iCloud container, used when no folder was picked.
+    static let iCloudKey = "ledger.agent.sync.icloud"
     static let attachmentsKey = "ledger.agent.sync.attachments"
     static let restoredPreferencesKey = "ledger.agent.sync.preferences-restored"
     static let linkPrefix = "ledger.agent.sync.link."
     static let lastSyncPrefix = "ledger.agent.sync.last."
 
     let url: URL
+    var isICloudContainer = false
+
+    /// The folder to sync with. The container resolves off the main thread.
+    static func resolve() async -> LedgerAgentSyncFolder? {
+        if let picked = current { return picked }
+        guard defaults.bool(forKey: iCloudKey) else { return nil }
+        return await Task.detached(priority: .utility) { () -> LedgerAgentSyncFolder? in
+            guard let url = LedgerICloud.assistantDirectory() else { return nil }
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            return LedgerAgentSyncFolder(url: url, isICloudContainer: true)
+        }.value
+    }
+
+    static var usesICloud: Bool { defaults.data(forKey: bookmarkKey) == nil && defaults.bool(forKey: iCloudKey) }
 
     static var current: LedgerAgentSyncFolder? {
         guard let data = defaults.data(forKey: bookmarkKey) else { return nil }
@@ -557,17 +594,26 @@ struct LedgerAgentSyncFolder: Sendable {
         return LedgerAgentSyncFolder(url: url)
     }
 
-    static var isOn: Bool { defaults.data(forKey: bookmarkKey) != nil }
+    static var isOn: Bool { defaults.data(forKey: bookmarkKey) != nil || defaults.bool(forKey: iCloudKey) }
 
     /// Persists a folder returned by the system folder picker.
     static func select(_ url: URL) throws -> LedgerAgentSyncFolder {
         let granted = url.startAccessingSecurityScopedResource()
         defer { if granted { url.stopAccessingSecurityScopedResource() } }
         defaults.set(try FolderSyncLocation.makeBookmark(for: url), forKey: bookmarkKey)
+        defaults.removeObject(forKey: iCloudKey)
         return LedgerAgentSyncFolder(url: url)
     }
 
-    static func clear() { defaults.removeObject(forKey: bookmarkKey) }
+    static func selectICloud() {
+        defaults.removeObject(forKey: bookmarkKey)
+        defaults.set(true, forKey: iCloudKey)
+    }
+
+    static func clear() {
+        defaults.removeObject(forKey: bookmarkKey)
+        defaults.removeObject(forKey: iCloudKey)
+    }
 
     static var includesAttachments: Bool {
         get { defaults.object(forKey: attachmentsKey) as? Bool ?? true }
@@ -591,7 +637,7 @@ struct LedgerAgentSyncFolder: Sendable {
         defaults.set(date, forKey: lastSyncPrefix + ledgerID.uuidString)
     }
 
-    var displayName: String { FileManager.default.displayName(atPath: url.path) }
+    var displayName: String { isICloudContainer ? "iCloud" : FileManager.default.displayName(atPath: url.path) }
 
     @MainActor
     func withAccess<Value: Sendable>(_ body: (URL) async throws -> Value) async throws -> Value {
@@ -633,7 +679,8 @@ final class LedgerAgentCloudSync: ObservableObject {
     static let debounce: Duration = .seconds(4)
 
     @Published private(set) var isOn = LedgerAgentSyncFolder.isOn
-    @Published private(set) var folderName: String? = LedgerAgentSyncFolder.current?.displayName
+    @Published private(set) var folderName: String? = LedgerAgentSyncFolder.usesICloud ? "iCloud" : LedgerAgentSyncFolder.current?.displayName
+    @Published private(set) var usesICloud = LedgerAgentSyncFolder.usesICloud
     @Published private(set) var running = false
     @Published private(set) var lastSynced: Date?
     @Published private(set) var lastReport: LedgerAgentSyncReport?
@@ -676,6 +723,7 @@ final class LedgerAgentCloudSync: ObservableObject {
         do {
             let folder = try LedgerAgentSyncFolder.select(url)
             isOn = true
+            usesICloud = false
             folderName = folder.displayName
             error = nil
             schedule(after: .zero)
@@ -684,11 +732,36 @@ final class LedgerAgentCloudSync: ObservableObject {
         }
     }
 
+    /// Syncs through the app's iCloud container.
+    func useICloud() async {
+        guard await LedgerICloud.available() else {
+            error = LedgerBackupError.iCloudUnavailable.localizedDescription
+            return
+        }
+        LedgerAgentSyncFolder.selectICloud()
+        isOn = true
+        usesICloud = true
+        folderName = "iCloud"
+        error = nil
+        schedule(after: .zero)
+    }
+
+    /// Turns iCloud sync on when nothing is set up yet, for a ledger that
+    /// just started syncing through iCloud. A picked folder is left alone.
+    func turnOnICloudIfAvailable() {
+        guard !isOn else { return }
+        Task { await useICloud() }
+    }
+
+    /// Another device changed a file in the assistant's iCloud folder.
+    func remoteChanged() { schedule(after: Self.debounce) }
+
     /// Stops syncing. The folder and this device's data both stay.
     func turnOff() {
         pending?.cancel()
         LedgerAgentSyncFolder.clear()
         isOn = false
+        usesICloud = false
         folderName = nil
         otherLedgers = []
         error = nil
@@ -720,8 +793,14 @@ final class LedgerAgentCloudSync: ObservableObject {
     }
 
     private func run() async {
-        guard isOn, !running, let repository, let folder = LedgerAgentSyncFolder.current else { return }
+        guard isOn, !running, let repository else { return }
         running = true
+        guard let folder = await LedgerAgentSyncFolder.resolve() else {
+            running = false
+            error = LedgerAgentSyncFolder.usesICloud ? LedgerBackupError.iCloudUnavailable.localizedDescription
+                : LedgerBackupError.folderUnavailable.localizedDescription
+            return
+        }
         defer {
             running = false
             if again { again = false; schedule(after: Self.debounce) }

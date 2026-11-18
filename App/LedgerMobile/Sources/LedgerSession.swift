@@ -153,6 +153,7 @@ final class LedgerSession: ObservableObject {
     private let automaticLocalSyncServicesEnabled: Bool
     private var localSyncCoordinator: LocalLedgerAutoSyncCoordinator?
     private var localSaveObserver: AnyCancellable?
+    private var iCloudObserver: UUID?
     private var localNetworkAvailable = true
     private var backgroundLocalSyncTask: Task<Bool, Never>?
     private static let backgroundGitAuthorizationKey = "ledger.mobile.background-git-authorization"
@@ -1344,14 +1345,53 @@ final class LedgerSession: ObservableObject {
         } catch is CancellationError { } catch { errorMessage = error.localizedDescription }
     }
 
+    /// Adds a ledger that another device keeps in the app's iCloud container.
+    func importICloudLedger(folder: String) async {
+        guard !isLocalOperationBusy, !isAuthenticationBusy, let localCatalog else { return }
+        isLocalOperationBusy = true
+        errorMessage = nil
+        let epoch = sessionEpoch
+        let expectedLocation = location
+        defer { isLocalOperationBusy = false }
+        do {
+            try await authenticateLocalLedger(epoch: epoch, location: expectedLocation)
+            let descriptor = try await localCatalog.importICloud(folder: folder, deviceName: Self.localDeviceName)
+            try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
+            await refreshLocalLedgers()
+            try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
+            try await activateLocalLedger(descriptor)
+            // The assistant's history follows the ledger to this device.
+            LedgerAgentCloudSync.shared.turnOnICloudIfAvailable()
+        } catch is CancellationError { } catch { errorMessage = error.localizedDescription }
+    }
+
+    /// The iCloud container folders of ledgers already in the library.
+    var localICloudFolders: Set<String> { Set(localLedgers.compactMap { $0.folder?.container }) }
+
+    /// Syncs the open ledger through the app's iCloud container.
+    func configureLocalICloud() async throws {
+        try await configureLocalFolderSync { catalog, id in
+            try await catalog.configureICloud(ledgerID: id, deviceName: Self.localDeviceName)
+        }
+        LedgerAgentCloudSync.shared.turnOnICloudIfAvailable()
+    }
+
     func configureLocalFolder(_ url: URL) async throws {
+        try await configureLocalFolderSync { catalog, id in
+            try await catalog.configureFolder(ledgerID: id, folder: url, deviceName: Self.localDeviceName)
+        }
+    }
+
+    private func configureLocalFolderSync(
+        _ configure: (LocalLedgerCatalog, UUID) async throws -> LocalLedgerDescriptor
+    ) async throws {
         guard phase == .ready, applicationActive, !isStorageSyncBusy, case let .local(id) = location, let localCatalog else {
             throw LocalLedgerError.operationFailed(String(localized: "请先解锁本地账本，等待当前同步结束。"))
         }
         isStorageSyncBusy = true
         defer { isStorageSyncBusy = false }
         let epoch = sessionEpoch
-        let descriptor = try await localCatalog.configureFolder(ledgerID: id, folder: url, deviceName: Self.localDeviceName)
+        let descriptor = try await configure(localCatalog, id)
         try requireCurrentLocalOperation(epoch: epoch, location: .local(id))
         repositories[.local(id)] = localCatalog.repository(for: descriptor)
         await refreshLocalLedgers()
@@ -1527,6 +1567,23 @@ final class LedgerSession: ObservableObject {
                     self.localSyncCoordinator?.localChangesSaved()
                 }
             }
+        // Another device's new head in the open ledger's iCloud folder syncs
+        // right away instead of at the next periodic sync.
+        iCloudObserver = LedgerICloudMonitor.shared.observe { [weak self] paths in
+            // Assistant files only, never the ledger.json each sync rewrites,
+            // so this device's own sync does not wake itself in a loop.
+            let assistant = "/" + LedgerICloud.assistantName + "/" + LedgerAgentSyncLayout.ledgersName + "/"
+            if LedgerAgentCloudSync.shared.usesICloud,
+               paths.contains(where: { $0.contains(assistant) && $0.contains("/" + LedgerAgentSyncLayout.filesName + "/") }) {
+                LedgerAgentCloudSync.shared.remoteChanged()
+            }
+            guard let self, let folder = self.localFolderConfiguration, let container = folder.container else { return }
+            let devices = "/" + LedgerICloud.ledgersName + "/" + container + "/" + FolderSyncLayout.devicesName + "/"
+            let own = folder.id.uuidString + ".json"
+            if paths.contains(where: { $0.contains(devices) && !$0.hasSuffix(own) }) {
+                self.localSyncCoordinator?.requestSync()
+            }
+        }
         updateLocalSyncEligibility()
     }
 

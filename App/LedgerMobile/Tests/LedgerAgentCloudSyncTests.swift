@@ -186,6 +186,18 @@ final class LedgerAgentCloudSyncTests: XCTestCase {
         XCTAssertNotEqual(LedgerAgentSyncLayout.key(for: first), LedgerAgentSyncLayout.key(for: local))
     }
 
+    func testLedgerKeyFollowsTheICloudFolderWhateverTheLocalName() {
+        func joined(_ name: String, device: String) -> LocalLedgerDescriptor {
+            LocalLedgerDescriptor(id: UUID(), name: name, entrypoint: "main.bean", createdAt: Date(),
+                folder: LocalFolderSyncConfiguration(id: UUID(), bookmark: Data(), folderName: "iCloud",
+                                                     deviceName: device, container: "shared-ledger"))
+        }
+        let phone = joined("家庭账本", device: "phone"), pad = joined("家庭账本（iCloud）", device: "pad")
+        XCTAssertEqual(LedgerAgentSyncLayout.key(for: phone), LedgerAgentSyncLayout.key(for: pad))
+        let local = LocalLedgerDescriptor(id: UUID(), name: "家庭账本", entrypoint: "main.bean", createdAt: Date())
+        XCTAssertNotEqual(LedgerAgentSyncLayout.key(for: phone), LedgerAgentSyncLayout.key(for: local))
+    }
+
     func testPreferencesLeaveOutKeysAndTokenURLs() throws {
         let suite = "LedgerAgentCloudSyncTests-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

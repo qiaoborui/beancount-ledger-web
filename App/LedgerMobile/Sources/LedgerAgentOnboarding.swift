@@ -37,8 +37,8 @@ struct LedgerOnboardingDraft: Codable, Equatable, Sendable {
     var accounts: [Account] = []
     var incomeCategories: [Category] = []
     var expenseCategories: [Category] = []
-    /// Where the ledger lives: `device` or `git`; empty until asked, which
-    /// is the device.
+    /// Where the ledger lives: `device`, `icloud` or `git`; empty until
+    /// asked, which is the device.
     var storage = ""
     /// The empty repository a Git ledger is pushed to. Never credentials:
     /// the token stays in the card and goes to the keychain.
@@ -71,6 +71,7 @@ struct LedgerOnboardingDraft: Codable, Equatable, Sendable {
     }
 
     var isGitStorage: Bool { storage == "git" && !remote.isEmpty }
+    var isICloudStorage: Bool { storage == "icloud" }
 
     /// The currencies the cards offer.
     static let currencies = AccountPresets.commonCurrencies
@@ -265,7 +266,7 @@ enum LedgerOnboardingCardAnswer: Equatable, Sendable {
     case balances([String: String], startDate: String, currencies: [String: String] = [:])
     /// The draft categories kept, by account path, and the suggestions added.
     case categories(kept: Set<String>, added: [LedgerOnboardingCard.Suggestion])
-    /// `device`, or `git` with the repository address.
+    /// `device`, `icloud`, or `git` with the repository address.
     case storage(String, remote: String)
     case imports([String])
 
@@ -348,9 +349,11 @@ enum LedgerOnboardingCardAnswer: Equatable, Sendable {
         case let .storage(storage, remote):
             next.storage = storage
             next.remote = storage == "git" ? remote : ""
-            return (next, storage == "git"
-                ? String(localized: "存到 Git 仓库 \(remote)，令牌已经存进钥匙串。")
-                : String(localized: "账本先只存在这台设备上。"))
+            switch storage {
+            case "git": return (next, String(localized: "存到 Git 仓库 \(remote)，令牌已经存进钥匙串。"))
+            case "icloud": return (next, String(localized: "存进 iCloud，同一个 Apple 账户的设备自动同步，助手的聊天记录和记忆也一起同步。"))
+            default: return (next, String(localized: "账本先只存在这台设备上。"))
+            }
         case let .imports(channels):
             let ordered = LedgerOnboardingDraft.channels.filter(channels.contains)
             next.importChannels = ordered

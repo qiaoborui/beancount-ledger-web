@@ -10,5 +10,20 @@
     <array>
         <string>$(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared</string>
     </array>
+    <!-- iCloud Documents: the app's own ubiquity container syncs ledgers and
+         账本助手 data between the user's devices (FolderLocalStorage,
+         LedgerAgentCloudSync). SideStore builds strip these keys. -->
+    <key>com.apple.developer.icloud-container-identifiers</key>
+    <array>
+        <string>$(LEDGER_ICLOUD_CONTAINER)</string>
+    </array>
+    <key>com.apple.developer.ubiquity-container-identifiers</key>
+    <array>
+        <string>$(LEDGER_ICLOUD_CONTAINER)</string>
+    </array>
+    <key>com.apple.developer.icloud-services</key>
+    <array>
+        <string>CloudDocuments</string>
+    </array>
 </dict>
 </plist>
