@@ -407,14 +407,29 @@ Apple ID signature, provisioning profiles and Keychain groups. Keep both
 extensions when SideStore asks, and renew with the same Apple ID. Local ledger
 access uses Face ID, Touch ID, or the device passcode.
 
-To install directly with a paid Apple Developer team instead of SideStore, run
-`bash scripts/build-ios-team-signed.sh --team <TEAMID> [--device <UDID>]`. It
-builds the same sources as `com.qiaoborui.ledger.mobile.<TEAMID>{,.widgets,.share}`
-with `group.com.qiaoborui.ledger.mobile.<TEAMID>`, the bundle ID shape described
-below, so a Personal Team build keeps its own identifiers. The team needs at
-least one registered device before a development profile can be generated;
-connect the phone and pass `--device` on the first run to register it. The
-resulting profiles last one year and cover only the team's registered devices.
+### Paid team signing and TestFlight
+
+`project.yml` signs every target with the paid Apple Developer team through
+three build settings: `LEDGER_TEAM_ID` (`6YJVKL5GXV`), `LEDGER_BUNDLE_ID`
+(`com.qiaoborui.ledger.mobile.<TEAMID>`, extensions add `.widgets` and `.share`)
+and `LEDGER_APP_GROUP` (`group.com.qiaoborui.ledger.mobile.<TEAMID>`). The
+entitlements files read the group from the same setting. Running from Xcode
+therefore needs that team signed in; the SideStore package above overrides the
+settings with the unsuffixed IDs, because SideStore rewrites them per Apple ID.
+
+`bash scripts/build-ios-team-signed.sh [--device <UDID>]` archives a
+development-signed build for the team's registered devices (profiles last one
+year); pass `--device` on the first run to register the phone. `--team` builds
+for another team through the same settings.
+
+`bash scripts/build-ios-team-signed.sh --testflight` archives the tagged
+release with the same version and build as the SideStore package, exports it
+for App Store Connect (internal testing only) and uploads it. It authenticates
+with an App Store Connect API key from `ASC_KEY_ID`, `ASC_ISSUER_ID` and
+`ASC_KEY_PATH`; the key needs the Admin or App Manager role so Xcode can create
+the distribution certificate. The App Store Connect app record must exist for
+`com.qiaoborui.ledger.mobile.<TEAMID>`. The release workflow runs this as its
+`testflight` job once `TESTFLIGHT_UPLOAD` is `true`.
 
 ### Shared storage and renewal
 
@@ -443,17 +458,13 @@ remote authentication code and test fixtures remain in the shared source tree
 for compatibility testing. The following deployment notes apply only to a
 separately composed remote client; local ledger access uses device-owner auth.
 
-The checked-in Debug and Release configurations support installation with an
-Apple Personal Team. They use `Supporting/LedgerMobilePersonal.entitlements`
-for the widget App Group and omit Associated Domains, so password login and
-Face ID or Touch ID quick unlock remain available while native passkey login
-stays hidden.
-
-Enabling native passkeys requires a paid Apple Developer team. Remove the
-`PERSONAL_TEAM_BUILD` condition, set `CODE_SIGN_ENTITLEMENTS` to
-`Supporting/LedgerMobile.entitlements`, and use Team ID `H92F889YBH` with bundle
-ID `com.qiaoborui.ledger.mobile`. The production server must then meet all of
-these requirements:
+The app ships without Associated Domains, so native passkey login stays
+hidden (`LedgerSession.nativePasskeyEnabledForCurrentBuild`) while password
+login and Face ID or Touch ID quick unlock remain available. A separately
+composed remote client that wants native passkeys adds
+`webcredentials:beancount.borry.org` to `Supporting/LedgerMobile.entitlements`,
+turns that flag on, and registers the app ID with the server. The production
+server must then meet all of these requirements:
 
 - Serve `/.well-known/apple-app-site-association` over HTTPS with status 200,
   no redirect, and `application/json` content. The Go server exposes this route

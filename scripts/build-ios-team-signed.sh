@@ -1,30 +1,32 @@
 #!/usr/bin/env bash
-# Build a device archive signed with a paid Apple Developer team, using a
-# team-suffixed bundle ID set so a Personal Team build keeps its identifiers.
+# Archive the app signed with the paid Apple Developer team, and optionally
+# upload it to App Store Connect for TestFlight.
 #
-# Usage: bash scripts/build-ios-team-signed.sh --team TEAMID [--device UDID]
-#          [--build-number N] [--archive PATH]
-#        bash scripts/build-ios-team-signed.sh --team TEAMID --generate-only
+# Usage:
+#   bash scripts/build-ios-team-signed.sh [--team TEAMID] [--device UDID]
+#        [--build-number N] [--marketing-version X.Y.Z] [--archive PATH]
+#   bash scripts/build-ios-team-signed.sh --testflight [--team TEAMID]
 #
-# The build number defaults to the commit count, so each commit is a higher
-# build than the last and SideStore offers it as an update.
-#
-# The team needs at least one registered device: a development profile cannot be
-# generated without one. Connect the phone, trust the Mac, and pass --device to
-# register it on the first run.
-#
-# The suite is signed as:
+# project.yml already signs as the paid team (LEDGER_TEAM_ID) with
 #   com.qiaoborui.ledger.mobile.<TEAMID>{,.widgets,.share}
 #   group.com.qiaoborui.ledger.mobile.<TEAMID>
+# --team passes another team through the same build settings; LedgerSharedAccess
+# derives the App Group from that bundle ID shape, so the app and both
+# extensions agree without editing the project.
 #
-# LedgerSharedAccess recognizes that bundle ID shape (the one iLoader writes) and
-# derives the App Group from it, so the app and both extensions agree on the
-# group without changing the committed project or entitlements. The team must be
-# a paid membership: Personal Team profiles expire in 7 days.
+# Development archive (default): the build number defaults to the commit count,
+# so each commit is a higher build than the last. The team needs at least one
+# registered device before a development profile can be generated: connect the
+# phone, trust the Mac and pass --device on the first run.
+#
+# --testflight: HEAD must carry the newest v<X.Y.Z> tag, which sets the version
+# and build exactly as for the SideStore package (scripts/ios-release-version.sh).
+# The archive is exported for App Store Connect and uploaded; it shows up in
+# TestFlight once Apple has processed it. Signing and the upload authenticate
+# with an App Store Connect API key (Admin or App Manager role, so Xcode can
+# create the distribution certificate and profiles), read from:
+#   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH (path to AuthKey_<id>.p8)
 set -euo pipefail
-
-readonly BASE_BUNDLE_ID="com.qiaoborui.ledger.mobile"
-readonly BASE_APP_GROUP="group.com.qiaoborui.ledger.mobile"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
@@ -34,27 +36,63 @@ team=""
 device=""
 archive=""
 build_number=""
-generate_only=0
+marketing_version=""
+testflight=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --team) team="${2:-}"; shift 2 ;;
     --device) device="${2:-}"; shift 2 ;;
     --archive) archive="${2:-}"; shift 2 ;;
     --build-number) build_number="${2:-}"; shift 2 ;;
-    --generate-only) generate_only=1; shift ;;
-    *) echo "Usage: bash scripts/build-ios-team-signed.sh --team TEAMID [--device UDID] [--archive PATH] [--generate-only]" >&2; exit 1 ;;
+    --marketing-version) marketing_version="${2:-}"; shift 2 ;;
+    --testflight) testflight=1; shift ;;
+    *) echo "Usage: bash scripts/build-ios-team-signed.sh [--team TEAMID] [--device UDID] [--build-number N] [--marketing-version X.Y.Z] [--archive PATH] [--testflight]" >&2; exit 1 ;;
   esac
 done
 
+if [[ -z "$team" ]]; then
+  team="$(sed -n 's/^ *LEDGER_TEAM_ID: *\([A-Z0-9]*\) *$/\1/p' "${project_dir}/project.yml" | head -n 1)"
+fi
 if [[ ! "$team" =~ ^[A-Z0-9]{10}$ ]]; then
   echo "--team must be a 10-character Team ID such as ABCDE12345." >&2
   exit 1
 fi
+
+auth_arguments=()
+if [[ "$testflight" == 1 ]]; then
+  if [[ -n "$build_number" || -n "$marketing_version" || -n "$device" ]]; then
+    echo "--testflight takes the version and build from the release tag; drop --build-number, --marketing-version and --device." >&2
+    exit 1
+  fi
+  for variable in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_PATH; do
+    if [[ -z "${!variable:-}" ]]; then
+      echo "--testflight needs ASC_KEY_ID, ASC_ISSUER_ID and ASC_KEY_PATH (App Store Connect API key)." >&2
+      exit 1
+    fi
+  done
+  if [[ ! -f "$ASC_KEY_PATH" ]]; then
+    echo "ASC_KEY_PATH does not point to a file." >&2
+    exit 1
+  fi
+  auth_arguments=(
+    -authenticationKeyPath "$ASC_KEY_PATH"
+    -authenticationKeyID "$ASC_KEY_ID"
+    -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+  )
+  # Resolved before the slow framework builds, so an untagged commit fails fast.
+  read -r marketing_version build_number < <(bash "${script_dir}/ios-release-version.sh" "$repo_root")
+  [[ -n "${build_number:-}" ]] || exit 1
+fi
+
 if [[ -z "$build_number" ]]; then
   build_number="$(git -C "$repo_root" rev-list --count HEAD)"
 fi
 if [[ ! "$build_number" =~ ^[0-9]+$ ]]; then
   echo "--build-number must be an integer." >&2
+  exit 1
+fi
+if [[ -n "$marketing_version" && ! "$marketing_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "--marketing-version must look like 1.4.32." >&2
   exit 1
 fi
 if [[ -n "$archive" && -e "$archive" ]]; then
@@ -67,14 +105,13 @@ elif [[ -z "${DEVELOPER_DIR:-}" && -d "/Applications/Xcode.app/Contents/Develope
   export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
 fi
 
-alt_bundle_id="${BASE_BUNDLE_ID}.${team}"
-alt_app_group="${BASE_APP_GROUP}.${team}"
+bundle_id="com.qiaoborui.ledger.mobile.${team}"
+app_group="group.com.qiaoborui.ledger.mobile.${team}"
 state_dir="${project_dir}/.build/team-${team}"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/ledger-ios-team.XXXXXX")"
 archive="${archive:-${state_dir}/LedgerMobile.xcarchive}"
-managed_archive=0
 if [[ "$archive" == "${state_dir}/LedgerMobile.xcarchive" ]]; then
-  managed_archive=1
+  rm -rf "$archive"
 fi
 destination="generic/platform=iOS"
 if [[ -n "$device" ]]; then
@@ -83,89 +120,43 @@ fi
 finish() { rm -rf "$work_dir"; }
 trap finish EXIT
 
-echo "Signing as ${alt_bundle_id} with team ${team}, build ${build_number}."
+echo "Signing as ${bundle_id} with team ${team}, version ${marketing_version:-(project.yml)}, build ${build_number}."
 
-# Generated inputs the app target links; the same prerequisites as the release
-# build. They are cached under server/.build.
-if [[ "$generate_only" == 0 ]]; then
-  bash "${script_dir}/build-ledgercore-xcframework.sh"
-  bash "${script_dir}/build-beancount-ios.sh"
-  bash "${script_dir}/build-linux-ios.sh"
-fi
-
-rm -rf "${state_dir}/entitlements" "${state_dir}/spec"
-mkdir -p "${state_dir}/entitlements" "${state_dir}/spec"
-entitlement_sources=(
-  "Supporting/LedgerMobilePersonal.entitlements"
-  "WidgetExtension/LedgerWidgets.entitlements"
-  "ShareExtension/LedgerShare.entitlements"
-)
-for relative in "${entitlement_sources[@]}"; do
-  sed "s|${BASE_APP_GROUP}|${alt_app_group}|g" \
-    "${project_dir}/${relative}" > "${state_dir}/entitlements/$(basename "$relative")"
-done
-
-python3 - "${project_dir}/project.yml" "${state_dir}/spec/project.yml" \
-  "${state_dir}/entitlements" "${BASE_BUNDLE_ID}" "${alt_bundle_id}" \
-  "Supporting/LedgerMobilePersonal.entitlements" \
-  "WidgetExtension/LedgerWidgets.entitlements" \
-  "ShareExtension/LedgerShare.entitlements" <<'PY'
-import os
-import re
-import sys
-
-source, target, entitlements_dir, base_id, alt_id, *entitlements = sys.argv[1:]
-rewritten = {}
-for relative in entitlements:
-    rewritten[relative] = os.path.join(entitlements_dir, os.path.basename(relative))
-
-bundle_pattern = re.compile(r"^(\s*PRODUCT_BUNDLE_IDENTIFIER:\s*)(\S+)\s*$")
-entitlement_pattern = re.compile(r"^(\s*CODE_SIGN_ENTITLEMENTS:\s*)(\S+)\s*$")
-replaced = 0
-with open(source, encoding="utf-8") as handle, open(target, "w", encoding="utf-8") as output:
-    for line in handle:
-        bundle = bundle_pattern.match(line)
-        if bundle and (bundle.group(2) == base_id or bundle.group(2).startswith(base_id + ".")):
-            suffix = bundle.group(2)[len(base_id):]
-            line = f"{bundle.group(1)}{alt_id}{suffix}\n"
-            replaced += 1
-        entitlement = entitlement_pattern.match(line)
-        if entitlement and entitlement.group(2) in rewritten:
-            line = f"{entitlement.group(1)}{rewritten[entitlement.group(2)]}\n"
-        output.write(line)
-
-if replaced < 3:
-    sys.exit(f"expected at least three bundle identifiers, rewrote {replaced}")
-PY
+# Generated inputs the app target links; the same prerequisites as the
+# SideStore package. They are cached under server/.build.
+bash "${script_dir}/build-ledgercore-xcframework.sh"
+bash "${script_dir}/build-beancount-ios.sh"
+bash "${script_dir}/build-linux-ios.sh"
 
 cd "$project_dir"
-xcodegen generate --spec "${state_dir}/spec/project.yml" \
-  --project "$project_dir" --project-root "$project_dir" --quiet
-if [[ "$generate_only" == 1 ]]; then
-  echo "Generated ${project_dir}/LedgerMobile.xcodeproj with ${alt_bundle_id}."
-  exit 0
-fi
-if [[ "$managed_archive" == 1 ]]; then
-  rm -rf "$archive"
-fi
+# The Xcode project is generated and git-ignored.
+xcodegen generate --spec project.yml --quiet
 mkdir -p "$(dirname "$archive")"
 
-archive_arguments=(
-  archive
-  -project "${project_dir}/LedgerMobile.xcodeproj"
-  -scheme LedgerMobile
-  -configuration Release
-  -quiet
-  -destination "$destination"
-  -derivedDataPath "${work_dir}/DerivedData"
-  -archivePath "$archive"
-  -allowProvisioningUpdates
-  -allowProvisioningDeviceRegistration
-  "DEVELOPMENT_TEAM=${team}"
+build_settings=(
+  "LEDGER_TEAM_ID=${team}"
   "CURRENT_PROJECT_VERSION=${build_number}"
   CODE_SIGN_STYLE=Automatic
 )
-xcodebuild "${archive_arguments[@]}"
+if [[ -n "$marketing_version" ]]; then
+  build_settings+=("MARKETING_VERSION=${marketing_version}")
+fi
+registration=(-allowProvisioningDeviceRegistration)
+if [[ "$testflight" == 1 ]]; then
+  registration=()
+fi
+xcodebuild archive \
+  -project LedgerMobile.xcodeproj \
+  -scheme LedgerMobile \
+  -configuration Release \
+  -quiet \
+  -destination "$destination" \
+  -derivedDataPath "${work_dir}/DerivedData" \
+  -archivePath "$archive" \
+  -allowProvisioningUpdates \
+  ${registration[@]+"${registration[@]}"} \
+  ${auth_arguments[@]+"${auth_arguments[@]}"} \
+  "${build_settings[@]}"
 
 app="${archive}/Products/Applications/LedgerMobile.app"
 if [[ ! -d "$app" ]]; then
@@ -173,34 +164,68 @@ if [[ ! -d "$app" ]]; then
   exit 1
 fi
 
-python3 - "$app" "$alt_bundle_id" "$alt_app_group" <<'PY'
+# Every bundle must carry the team's IDs, one version, and the App Group in both
+# the provisioning profile and the signature.
+python3 - "$app" "$bundle_id" "$app_group" "$build_number" "$marketing_version" <<'PY'
+import pathlib
 import plistlib
 import subprocess
 import sys
 
-app, expected_id, expected_group = sys.argv[1:]
-with open(f"{app}/Info.plist", "rb") as handle:
-    info = plistlib.load(handle)
-if info.get("CFBundleIdentifier") != expected_id:
-    sys.exit(f"bundle identifier is {info.get('CFBundleIdentifier')}, expected {expected_id}")
-
-profile = subprocess.run(
-    ["security", "cms", "-D", "-i", f"{app}/embedded.mobileprovision"],
-    check=True, capture_output=True,
-).stdout
-entitlements = plistlib.loads(profile)["Entitlements"]
-groups = entitlements.get("com.apple.security.application-groups") or []
-if expected_group not in groups:
-    sys.exit(f"profile does not entitle {expected_group}: {groups}")
-
-signed = subprocess.run(
-    ["codesign", "-d", "--entitlements", ":-", app],
-    check=True, capture_output=True, text=True,
-)
-sandbox = signed.stdout + signed.stderr
-if expected_group not in sandbox:
-    sys.exit(f"signed app does not carry {expected_group}")
-print(f"Signed {expected_id} with {expected_group}.")
+app, bundle_id, group, build, version = sys.argv[1:]
+app = pathlib.Path(app)
+expected = {
+    app: bundle_id,
+    app / "PlugIns/LedgerWidgets.appex": bundle_id + ".widgets",
+    app / "PlugIns/LedgerShare.appex": bundle_id + ".share",
+}
+for bundle, identifier in expected.items():
+    with (bundle / "Info.plist").open("rb") as handle:
+        info = plistlib.load(handle)
+    if info.get("CFBundleIdentifier") != identifier:
+        sys.exit(f"{bundle.name}: bundle identifier is {info.get('CFBundleIdentifier')}, expected {identifier}")
+    if info.get("CFBundleVersion") != build:
+        sys.exit(f"{bundle.name}: build is {info.get('CFBundleVersion')}, expected {build}")
+    if version and info.get("CFBundleShortVersionString") != version:
+        sys.exit(f"{bundle.name}: version is {info.get('CFBundleShortVersionString')}, expected {version}")
+    profile = subprocess.run(
+        ["security", "cms", "-D", "-i", str(bundle / "embedded.mobileprovision")],
+        check=True, capture_output=True,
+    ).stdout
+    groups = plistlib.loads(profile)["Entitlements"].get("com.apple.security.application-groups") or []
+    if group not in groups:
+        sys.exit(f"{bundle.name}: profile does not entitle {group}: {groups}")
+    signed = subprocess.run(
+        ["codesign", "-d", "--entitlements", "-", "--xml", str(bundle)],
+        check=True, capture_output=True,
+    ).stdout
+    if plistlib.loads(signed).get("com.apple.security.application-groups") != [group]:
+        sys.exit(f"{bundle.name}: signature does not carry exactly {group}")
+print(f"Signed {bundle_id} and both extensions with {group}.")
 PY
 
 echo "Archive: $archive"
+[[ "$testflight" == 1 ]] || exit 0
+
+export_options="${work_dir}/ExportOptions.plist"
+python3 - "$export_options" "$team" <<'PY'
+import plistlib
+import sys
+with open(sys.argv[1], "wb") as handle:
+    plistlib.dump({
+        "method": "app-store-connect",
+        "destination": "upload",
+        "teamID": sys.argv[2],
+        "signingStyle": "automatic",
+        "manageAppVersionAndBuildNumber": False,
+        "uploadSymbols": True,
+        "testFlightInternalTestingOnly": True,
+    }, handle)
+PY
+xcodebuild -exportArchive \
+  -archivePath "$archive" \
+  -exportOptionsPlist "$export_options" \
+  -exportPath "${work_dir}/export" \
+  -allowProvisioningUpdates \
+  "${auth_arguments[@]}"
+echo "Uploaded ${marketing_version} (${build_number}) to App Store Connect; it reaches TestFlight after Apple's processing."

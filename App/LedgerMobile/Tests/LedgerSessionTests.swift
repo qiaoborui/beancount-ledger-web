@@ -1457,7 +1457,7 @@ final class LedgerSessionTests: XCTestCase {
     }
 
     func testPasskeyLoginVerifiesAssertionAndLoadsLedger() async throws {
-        try XCTSkipIf(!LedgerSession.nativePasskeyEnabledForCurrentBuild, "个人团队构建未启用关联域名通行密钥")
+        try XCTSkipIf(!LedgerSession.nativePasskeyEnabledForCurrentBuild, "未配置关联域名，原生通行密钥关闭")
         let suiteName = "ledger-mobile-passkey-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.set("https://beancount.borry.org", forKey: "ledger.mobile.server-origin")
@@ -1491,7 +1491,7 @@ final class LedgerSessionTests: XCTestCase {
     }
 
     func testPasskeyCancellationReturnsToPasswordFallback() async throws {
-        try XCTSkipIf(!LedgerSession.nativePasskeyEnabledForCurrentBuild, "个人团队构建未启用关联域名通行密钥")
+        try XCTSkipIf(!LedgerSession.nativePasskeyEnabledForCurrentBuild, "未配置关联域名，原生通行密钥关闭")
         let suiteName = "ledger-mobile-passkey-cancel-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.set("https://beancount.borry.org", forKey: "ledger.mobile.server-origin")

@@ -204,7 +204,10 @@ if [[ "$mode" == ui-tests ]]; then
   # overview sections) in UserDefaults, and the simulator outlives the job: a
   # run that customised the bar leaves every later run starting from a bar the
   # tests do not expect, and the failures cascade. Begin from a clean install.
-  xcrun simctl uninstall "$simulator" com.qiaoborui.ledger.mobile 2>/dev/null || true
+  team="$(sed -n 's/^ *LEDGER_TEAM_ID: *\([A-Z0-9]*\) *$/\1/p' project.yml | head -n 1)"
+  for bundle in com.qiaoborui.ledger.mobile "com.qiaoborui.ledger.mobile.$team"; do
+    xcrun simctl uninstall "$simulator" "$bundle" 2>/dev/null || true
+  done
 fi
 
 if [[ -n "$cache_root" ]]; then

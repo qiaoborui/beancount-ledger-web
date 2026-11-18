@@ -65,6 +65,7 @@ class PlanComponentsTests(unittest.TestCase):
             "scripts/build-ios-ipa.sh": {"release"},
             "scripts/ios-release-version.sh": {"release"},
             "scripts/publish-sidestore-release.py": {"release"},
+            "scripts/build-ios-team-signed.sh": {"release"},
             ".github/workflows/ios-release.yml": {"release"},
         }
         for path, expected in cases.items():

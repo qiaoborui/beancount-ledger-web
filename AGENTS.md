@@ -98,6 +98,12 @@ git push origin v<version>
   the Mac runner, uploads it to the `v<version>` release of the public
   `beancount-ledger-releases` repository, and adds it to `sidestore/source.json`
   there. Pushing a tag publishes; confirm with the maintainer first.
+- When the repository variable `TESTFLIGHT_UPLOAD` is `true`, the same push also
+  runs the `testflight` job: `scripts/build-ios-team-signed.sh --testflight`
+  archives with the paid team (`LEDGER_TEAM_ID` in `project.yml`) and uploads
+  the same version and build to App Store Connect for TestFlight internal
+  testing. It needs the secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and
+  `ASC_PRIVATE_KEY`.
 
 Manual fallback: from a checkout of the tag, run
 `bash scripts/build-ios-ipa.sh --private-local <new-dir>` and then

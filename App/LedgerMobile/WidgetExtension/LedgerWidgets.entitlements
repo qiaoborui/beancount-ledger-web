@@ -4,7 +4,7 @@
 <dict>
     <key>com.apple.security.application-groups</key>
     <array>
-        <string>group.com.qiaoborui.ledger.mobile</string>
+        <string>$(LEDGER_APP_GROUP)</string>
     </array>
     <key>keychain-access-groups</key>
     <array>

@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
     <key>com.apple.security.application-groups</key>
-    <array><string>group.com.qiaoborui.ledger.mobile</string></array>
+    <array><string>$(LEDGER_APP_GROUP)</string></array>
 </dict>
 </plist>
