@@ -35,7 +35,18 @@ struct RootView: View {
                 }
                 switch session.phase {
                 case .configuration:
-                    LedgerLibraryView()
+                    // With no ledger on the device the assistant greets the
+                    // user and sets one up; the library is for choosing
+                    // among ledgers. Until the catalog has been read once
+                    // neither shows, so the library does not flash first.
+                    if !session.localLedgersLoaded {
+                        BalancedPalette.page.ignoresSafeArea()
+                            .task { await session.refreshLocalLedgers() }
+                    } else if session.localLedgers.isEmpty {
+                        LedgerSetupView()
+                    } else {
+                        LedgerLibraryView()
+                    }
                 case .checking:
                     // A search deep link can arrive before authentication finishes. Keep native
                     // search controllers unmounted until the ready shell has a stable lifetime.

@@ -9,7 +9,7 @@ final class LocalSyncToolbarUITests: XCTestCase {
         app.launchArguments = ["--local-ui-testing", "--local-sync-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap()
         XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForExistence(timeout: 5))
         app.buttons["local-ledger-confirm-create"].tap()

@@ -187,7 +187,7 @@ struct LedgerLibraryView: View {
             .disabled(session.isLocalOperationBusy)
             .task { await session.refreshLocalLedgers() }
             .sheet(isPresented: $showingWizard) { OnboardingWizardView() }
-            .sheet(isPresented: $showingAIOnboarding) { LedgerOnboardingAgentView() }
+            .fullScreenCover(isPresented: $showingAIOnboarding) { LedgerSetupView(onClose: { showingAIOnboarding = false }) }
             .sheet(isPresented: $creating) { LocalLedgerSetupView(importing: false) }
             .sheet(isPresented: $importing) { LocalLedgerSetupView(importing: true) }
             .sheet(isPresented: $addingGit) { GitLedgerSetupView() }
@@ -219,7 +219,7 @@ struct LedgerLibraryView: View {
     }
 }
 
-private struct LocalLedgerSetupView: View {
+struct LocalLedgerSetupView: View {
     @EnvironmentObject private var session: LedgerSession
     @Environment(\.dismiss) private var dismiss
     let importing: Bool
@@ -319,7 +319,7 @@ private struct LocalLedgerSetupView: View {
             .sheet(isPresented: $showingWizard) {
                 OnboardingWizardView()
             }
-            .sheet(isPresented: $showingAIOnboarding) { LedgerOnboardingAgentView() }
+            .fullScreenCover(isPresented: $showingAIOnboarding) { LedgerSetupView(onClose: { showingAIOnboarding = false }) }
             .onChange(of: session.phase) { _, newPhase in
                 if newPhase == .ready { dismiss() }
             }

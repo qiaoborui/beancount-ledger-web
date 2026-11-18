@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>对话式开账</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;450;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="batch1/styles.css">
+<style>
+/* Liquid Glass layer, same as agent.html / glass.html. */
+:root { --gal-ink: #14100c; --gal-ink-3: #6f675a; --gal-line: rgba(20, 16, 12, 0.14); }
+body { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) body { background: #e8e5df; } }
+:root[data-theme="dark"] body { background: #e8e5df; }
+.invwrap { overflow-x: auto; margin-top: 22px; }
+.inv { border-collapse: collapse; width: 100%; max-width: 1080px; font-size: 13.5px; }
+.inv th { text-align: left; font-weight: 500; font-size: 12px; color: var(--gal-ink-3); padding: 8px 16px 8px 0; border-bottom: 1px solid var(--gal-line); }
+.inv td { padding: 9px 16px 9px 0; border-bottom: 1px solid var(--gal-line); vertical-align: top; line-height: 1.55; }
+.inv td:first-child { white-space: nowrap; font-weight: 500; }
+.ask-me { max-width: 1080px; margin: 18px 0 0; padding: 14px 18px; border-radius: 18px; background: rgba(20, 16, 12, 0.06); font-size: 13.5px; line-height: 1.6; }
+.ask-me b { display: block; margin-bottom: 4px; }
+
+.phone.glass {
+  --glass-fill: color-mix(in srgb, var(--bg) 60%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.78);
+  --glass-hi: rgba(255, 255, 255, 0.85);
+  --glass-shadow: 0 8px 24px -10px rgba(20, 16, 12, 0.3), 0 1px 2px rgba(20, 16, 12, 0.08);
+  --glass-sel: rgba(20, 16, 12, 0.08);
+  --serif: 'Source Serif 4', 'PingFang SC', 'Noto Serif CJK SC', serif;
+}
+.phone.glass[data-theme='dark'] {
+  --glass-fill: color-mix(in srgb, #2b2825 55%, transparent);
+  --glass-edge: rgba(255, 255, 255, 0.16);
+  --glass-hi: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.7);
+  --glass-sel: rgba(246, 243, 238, 0.12);
+}
+.phone.glass .g {
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: blur(16px) saturate(1.7);
+  backdrop-filter: blur(16px) saturate(1.7);
+  border: 0.5px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--glass-shadow);
+}
+.phone.glass > .scroll { position: absolute; inset: 0; padding-top: 112px; padding-bottom: 130px; }
+.phone.glass.has-strip > .scroll { padding-top: 160px; }
+.gtop { position: absolute; top: 0; left: 0; right: 0; z-index: 4; background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 85%, transparent) 60%, transparent 100%); }
+.phone.glass .appbar { gap: 8px; }
+.phone.glass .gcap { display: inline-flex; align-items: center; height: 44px; border-radius: 22px; padding: 0 2px; flex: none; }
+.phone.glass .gcap .iconbtn { width: 40px; }
+.phone.glass .appbar .back.gcircle { width: 44px; height: 44px; border-radius: 50%; margin-left: 0; }
+.phone.glass > .homebar { position: absolute; left: 0; right: 0; bottom: 0; background: transparent; z-index: 5; }
+.phone .title small { font-size: 12px; font-weight: 400; color: var(--ink-3); }
+
+/* ---------- shared conversation pieces ---------- */
+.reply { padding: 4px 20px 2px; font-family: var(--serif); font-size: 16px; line-height: 1.62; color: var(--ink); }
+.reply p { margin: 8px 0; }
+.reply b { font-weight: 500; }
+.meta { font-size: 12px; color: var(--ink-3); }
+.mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3); }
+.v-out { color: var(--out); } .v-in { color: var(--in); }
+
+/* NEW: the question is a soft bubble, 20pt continuous corners */
+.q { margin: 14px 20px 6px auto; max-width: 76%; width: fit-content; background: var(--sunken); padding: 10px 15px; border-radius: 20px; font-size: 15px; line-height: 1.5; color: var(--ink); }
+/* OLD: the sunken well with 3pt corners */
+.q.old { border-radius: 3px; padding: 10px 14px; }
+
+/* NEW: a card in the conversation, 22pt corners, paper on sunken */
+.card { margin: 10px 16px 6px; border-radius: 22px; background: var(--sunken); padding: 14px 14px 12px; }
+.card.old { border-radius: 0; margin: 10px 0 6px; padding: 0; }
+.card-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 0 4px 8px; }
+.card-h b { font-size: 15px; font-weight: 500; }
+.card-foot { font-size: 12px; color: var(--ink-3); padding: 8px 4px 0; line-height: 1.5; }
+.card .row2 { display: flex; gap: 8px; padding-top: 10px; }
+
+/* options: capsules on paper (new) vs ruled list (old) */
+.opts { display: flex; flex-direction: column; gap: 6px; }
+.opt { font: inherit; display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 16px; border: 0; border-radius: 22px; background: var(--bg); color: var(--ink); font-size: 15px; text-align: left; cursor: pointer; box-shadow: 0 0 0 0.5px var(--rule); }
+.opt .sub { display: block; font-size: 12px; color: var(--ink-3); margin-top: 1px; }
+.opt .lbl { flex: 1; padding: 9px 0; }
+.opt .tick { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--edge); flex: none; display: grid; place-items: center; }
+.opt[aria-pressed='true'] .tick { background: var(--ink); border-color: var(--ink); }
+.opt[aria-pressed='true'] .tick::after { content: ''; width: 5px; height: 9px; border: solid var(--bg); border-width: 0 1.8px 1.8px 0; transform: translateY(-1px) rotate(45deg); }
+.opt .arrow { color: var(--edge); }
+.opts.old { gap: 0; background: var(--sunken); }
+.opts.old .opt { border-radius: 0; background: transparent; box-shadow: none; border-bottom: 1px solid var(--rule); padding: 0 14px; }
+.opts.old .opt .tick { border-radius: 2px; }
+.opts-note { display: flex; justify-content: space-between; align-items: center; padding: 8px 4px 0; font-size: 12px; color: var(--ink-3); }
+.opts.old + .opts-note { background: var(--sunken); padding: 10px 14px; margin: 0; }
+
+/* chips */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: inherit; font-size: 14px; min-height: 34px; padding: 0 13px; border-radius: 17px; border: 0; background: var(--bg); color: var(--ink); box-shadow: 0 0 0 0.5px var(--rule-strong); display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.chip[aria-pressed='true'] { background: var(--ink); color: var(--bg); box-shadow: none; }
+.chip.add { color: var(--ink-3); box-shadow: 0 0 0 1px var(--rule-strong) inset; background: transparent; border: 1px dashed transparent; }
+.sec-k { font-size: 12px; color: var(--ink-3); padding: 10px 4px 6px; }
+
+/* capsule buttons (new) and the old 3pt ones */
+.pbtn { font: inherit; flex: 1; min-height: 44px; border-radius: 22px; border: 0; font-size: 15px; font-weight: 500; cursor: pointer; background: var(--bg); color: var(--ink); box-shadow: 0 0 0 0.5px var(--rule-strong); }
+.pbtn.primary { background: var(--ink); color: var(--bg); box-shadow: none; }
+.pbtn.quiet { background: transparent; box-shadow: none; color: var(--ink-2); font-weight: 450; }
+.pbtn.old { border-radius: 3px; box-shadow: 0 0 0 1px var(--edge); background: transparent; }
+.pbtn.old.primary { background: var(--ink); }
+
+/* fields inside a card */
+.fields { background: var(--bg); border-radius: 16px; box-shadow: 0 0 0 0.5px var(--rule); }
+.fld { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 14px; border-bottom: 0.5px solid var(--rule); font-size: 15px; }
+.fld:last-child { border-bottom: 0; }
+.fld .k { width: 64px; flex: none; font-size: 13px; color: var(--ink-3); }
+.fld .v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fld .v.mono { font-size: 13px; color: var(--ink); }
+.fld .amt { margin-left: auto; font-family: var(--font-mono); font-size: 14px; text-align: right; min-width: 92px; padding: 5px 10px; border-radius: 10px; background: var(--sunken); }
+.fld .amt.ph { color: var(--ink-3); }
+.fld .amt.focus { box-shadow: 0 0 0 1.5px var(--ink); background: var(--bg); }
+.fld .kind { font-size: 11.5px; color: var(--ink-3); margin-left: 6px; }
+.lock { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--in); }
+
+/* segmented capsule */
+.segc { display: flex; padding: 3px; gap: 2px; border-radius: 19px; background: var(--bg); box-shadow: 0 0 0 0.5px var(--rule); }
+.segc button { font: inherit; flex: 1; min-height: 32px; border: 0; border-radius: 16px; background: transparent; color: var(--ink-2); font-size: 13.5px; cursor: pointer; }
+.segc button[aria-selected='true'] { background: var(--ink); color: var(--bg); }
+
+/* recorded list */
+.rec { background: var(--bg); border-radius: 16px; box-shadow: 0 0 0 0.5px var(--rule); }
+.rec-r { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; border-bottom: 0.5px solid var(--rule); font-size: 14.5px; }
+.rec-r:last-child { border-bottom: 0; }
+.rec-r .ico { width: 28px; height: 28px; border-radius: 50%; background: var(--sunken); display: grid; place-items: center; flex: none; color: var(--ink-2); }
+.rec-r .ico svg { width: 15px; height: 15px; }
+.rec-r .k2 { margin-left: auto; font-size: 12px; color: var(--ink-3); }
+.rec-r .k2.debt { color: var(--out); }
+
+/* steps */
+.steps2 { background: var(--bg); border-radius: 16px; box-shadow: 0 0 0 0.5px var(--rule); padding: 4px 14px; }
+.st { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; min-height: 42px; border-bottom: 0.5px solid var(--rule); font-size: 14.5px; }
+.st:last-child { border-bottom: 0; }
+.st i { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid var(--edge); box-sizing: border-box; }
+.st[data-s='done'] i { background: var(--ink); border-color: var(--ink); }
+.st[data-s='done'] i::after { content: ''; width: 4px; height: 8px; border: solid var(--bg); border-width: 0 1.6px 1.6px 0; transform: translateY(-1px) rotate(45deg); }
+.st[data-s='now'] i { border: 2px solid var(--rule-strong); border-top-color: var(--ink); animation: spin .9s linear infinite; }
+.st[data-s='todo'] { color: var(--ink-3); }
+.st .meta { text-align: right; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* file tree preview */
+.tree { background: var(--bg); border-radius: 16px; box-shadow: 0 0 0 0.5px var(--rule); overflow: hidden; }
+.tf { display: flex; align-items: baseline; gap: 8px; padding: 10px 14px; border-bottom: 0.5px solid var(--rule); }
+.tf:last-child { border-bottom: 0; }
+.tf .mono { color: var(--ink); font-size: 12.5px; }
+.tf .meta { margin-left: auto; text-align: right; }
+.src { margin: 0 10px 10px; padding: 10px 12px; border-radius: 12px; background: var(--sunken); font-family: var(--font-mono); font-size: 10.5px; line-height: 1.7; color: var(--ink-2); white-space: pre; overflow: hidden; }
+.ok { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--in); padding: 10px 4px 0; }
+.ok svg { flex: none; }
+
+/* tool fold: a capsule chip (new) vs left rule (old) */
+.fold { margin: 12px 20px 0; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-3); padding: 6px 12px; border-radius: 15px; background: var(--sunken); }
+.fold.old { border-radius: 0; background: none; padding: 4px 0 4px 12px; border-left: 1px solid var(--rule-strong); }
+
+/* diff card */
+.files { background: var(--bg); border-radius: 16px; box-shadow: 0 0 0 0.5px var(--rule); }
+.fr { display: flex; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 0.5px solid var(--rule); font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-2); }
+.fr:last-child { border-bottom: 0; }
+.d-add { color: var(--in); } .d-del { color: var(--out); }
+
+/* progress strip under the bar (from-scratch only) */
+.strip { position: absolute; top: 108px; left: 12px; right: 12px; z-index: 4; display: flex; align-items: center; gap: 4px; padding: 5px; border-radius: 22px; overflow: hidden; }
+.strip span { flex: none; font-size: 12px; padding: 5px 9px; border-radius: 14px; color: var(--ink-3); white-space: nowrap; }
+.strip span.done { color: var(--ink); background: var(--glass-sel); }
+.strip span.now { color: var(--bg); background: var(--ink); }
+.strip .more { margin-left: auto; color: var(--ink-3); padding: 0 6px; }
+
+/* ---------- composer ---------- */
+.dock { position: absolute; left: 16px; right: 16px; bottom: 30px; z-index: 4; display: flex; align-items: flex-end; gap: 8px; }
+.dock .plus { flex: none; width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: var(--ink); }
+.dock .field { flex: 1; min-height: 48px; border-radius: 24px; display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 16px; box-sizing: border-box; }
+.dock .field .ph { flex: 1; font-size: 15px; color: var(--ink-3); }
+.dock .field .tx { flex: 1; font-size: 15px; color: var(--ink); }
+.dock .mic { width: 36px; height: 40px; display: grid; place-items: center; color: var(--ink-3); flex: none; }
+.dock .send { flex: none; width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: var(--bg); display: grid; place-items: center; }
+.dock .send.off { opacity: .32; }
+.dock.tall .field { flex-direction: column; align-items: stretch; border-radius: 24px; padding: 10px 6px 6px 16px; }
+.dock.tall .field .r1 { display: flex; align-items: center; min-height: 26px; }
+.dock.tall .field .r2 { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.mchip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 16px; background: var(--glass-sel); font-size: 13px; color: var(--ink); }
+.mchip i { font-style: normal; color: var(--ink-3); }
+/* old composer: one 28pt dock with the hard ink circle */
+.dock.old { left: 16px; right: 16px; padding: 8px; border-radius: 28px; align-items: center; }
+.dock.old .plus { width: 40px; height: 40px; background: none; border: 0; box-shadow: none; }
+.dock.old .field { background: none !important; border: 0 !important; box-shadow: none !important; -webkit-backdrop-filter: none; backdrop-filter: none; min-height: 40px; padding-left: 4px; }
+
+/* ---------- welcome ---------- */
+.hello { padding: 40px 24px 6px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
+.mark { width: 40px; height: 40px; }
+.hello h3 { margin: 6px 0 0; font-family: var(--serif); font-weight: 400; font-size: 28px; color: var(--ink-2); letter-spacing: -0.01em; }
+.hello p { margin: 0; font-size: 14.5px; color: var(--ink-3); line-height: 1.55; max-width: 28ch; }
+.paths { padding: 22px 16px 0; display: flex; flex-direction: column; gap: 10px; }
+.path { display: flex; gap: 14px; align-items: center; padding: 16px; border-radius: 24px; background: var(--sunken); text-align: left; }
+.path .pi { width: 40px; height: 40px; border-radius: 50%; background: var(--bg); display: grid; place-items: center; flex: none; color: var(--ink); box-shadow: 0 0 0 0.5px var(--rule); }
+.path b { display: block; font-size: 16px; font-weight: 500; }
+.path span { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 2px; line-height: 1.45; }
+.path .arrow { margin-left: auto; color: var(--edge); flex: none; }
+.path.main { background: var(--ink); color: var(--bg); }
+.path.main span { color: color-mix(in srgb, var(--bg) 70%, transparent); }
+.path.main .pi { background: color-mix(in srgb, var(--bg) 14%, transparent); color: var(--bg); box-shadow: none; }
+.path.main .arrow { color: color-mix(in srgb, var(--bg) 60%, transparent); }
+.others { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 16px 16px 0; }
+.privacy { text-align: center; font-size: 11.5px; color: var(--ink-3); padding: 18px 32px 0; line-height: 1.5; }
+</style>
+</head>
+<body data-gallery="light">
+
+<header class="gallery-head" style="max-width:1180px;margin:0 auto 10px">
+<h1>结平 · 对话式开账 + 圆润的账本助手</h1>
+<p>两件事一起改：没有账本时，一打开就是账本助手在问你，接入已有 Git 账本或从零新建都在对话里完成；账本助手整页换成圆润的 Liquid Glass 形状。纸面、墨色、进出两种方向色、字体都不动，只改形状和控件层。</p>
+<div class="invwrap"><table class="inv">
+<thead><tr><th>决定</th><th>做法</th><th>理由</th></tr></thead>
+<tbody>
+<tr><td>首次打开</td><td>本机一本账都没有时，不再显示「账本」库页，整屏就是开账对话；已有账本的人照旧看到账本库，库里「新建账本」也进同一个对话</td><td>新用户第一眼是一个会提问的助手，而不是一页按钮</td></tr>
+<tr><td>开场三条路</td><td>助手先问一句，下面三张大卡片：接入已有 Git 账本 / 从零新建 / 其他方式（iCloud 云盘、本机文件夹、备份）</td><td>三条路后面要问的东西完全不同，先分流，后面的问题才问得准</td></tr>
+<tr><td>没配模型时</td><td>开场、选路、Git 接入、其他方式都由 App 自己按脚本问，不需要模型；只有「从零新建」需要模型，到那一步在对话里插一张「接上模型」卡片填 Key</td><td>有 Git 账本的人不该先去找 API Key；Key 和令牌都只进钥匙串</td></tr>
+<tr><td>密码和令牌</td><td>仓库令牌、API Key 只在对话里的原生卡片输入（SecureField），存钥匙串，从不进对话记录、不发给模型</td><td>聊天框里打出来的东西会发给模型</td></tr>
+<tr><td>需要填数的地方</td><td>期初余额、分类、存放位置、导入渠道用对话里的卡片（金额输入、可点的分类、选项），文字仍可随时补充或改</td><td>一串余额靠打字一条条说太累，卡片一屏填完</td></tr>
+<tr><td>从零新建要问到的</td><td>资金账户 → 待还款项 → 币种（有外币才问）→ 收支分类 → 期初余额和日期 → 放在哪（本机 / iCloud / Git）→ 账单从哪来（支付宝、微信、银行、美团…）→ 预览文件并校验 → 创建</td><td>不是固定顺序：用户一句话说了好几件事就一起记；顶部一条进度胶囊显示哪些齐了</td></tr>
+<tr><td>生成的账本</td><td>main.bean（选项 + include）、accounts.bean（open 指令）、opening.bean（期初余额）、按年的流水文件，加上所选渠道的 imports/*-config.yaml；创建前本机跑一次校验，预览卡里能展开看原文</td><td>现在全写在一个 main.bean 里，账本大了不好维护</td></tr>
+<tr><td>选了 Git 托管</td><td>新账本创建后推到用户给的空仓库（同一张 Git 卡片，提示「需要一个空仓库」）</td><td>复用现有「连接 Git」能力，不另做一套</td></tr>
+<tr><td>助手页形状</td><td>问题气泡 20pt 圆角；选项卡、改动卡、记录卡 22pt 圆角卡片，选项是胶囊；按钮都改胶囊；工具调用折叠成胶囊；输入框拆成「+」玻璃圆 + 玻璃胶囊输入条，发送键在胶囊里</td><td>现在 3pt 小圆角、发丝线分隔和直角按钮跟玻璃的大圆角打架</td></tr>
+<tr><td>不变的</td><td>回答仍直接排在纸面上（不加气泡），Source Serif 阅读字体、金额方向色、iOS 17–25 的平面样式</td><td>只做液态玻璃化的圆润处理，不换设计语言</td></tr>
+</tbody></table></div>
+<div class="ask-me"><b>要你定的一件事</b>没配模型时怎么开场：我建议开场、选路、Git 接入都由 App 按脚本问（不需要模型），到「从零新建」时再在对话里填 Key。另一种是一打开先要求填模型 Key，之后全部交给模型问。</div>
+</header>
+
+<div class="toolbar" style="max-width:1180px;margin:0 auto">
+<button aria-pressed="false" id="full-length" type="button">全长</button>
+<span class="spacer"></span>
+<span class="hint">结平 + Liquid Glass · iOS 26 · 状态栏 09:41</span>
+</div>
+
+<!-- ============ A. 助手页 ============ -->
+<section class="section">
+<h2>一、账本助手：从小圆角到圆润玻璃</h2>
+<p>同一段对话放在一起比：左边是现在的样子，中间和右边是改后的浅色、深色。内容和层级不变，只换形状。</p>
+<div class="grid">
+
+<figure class="screen"><figcaption>现在 <span>浅色 · 3pt 圆角 + 发丝线</span></figcaption>
+<div class="phone glass" data-theme="light" data-bar="agent">
+<div class="scroll">
+<div class="q old">十月吃饭比九月多吗？顺便把巷口小馆那几笔改成聚餐</div>
+<div class="fold old">读取了账本 3 次 ›</div>
+<div class="reply"><p>十月餐饮 <b class="v-out">¥2,486.40</b>，比九月多 <b>¥454.70</b>。巷口小馆有 3 笔，要改哪几笔？</p></div>
+<div style="margin:6px 20px 0">
+<div class="opts old">
+<button class="opt" type="button"><span class="lbl">3 笔都改成聚餐</span><span class="arrow">↑</span></button>
+<button class="opt" type="button"><span class="lbl">只改 10-12 那笔</span><span class="arrow">↑</span></button>
+<button class="opt" type="button"><span class="lbl">先不改</span><span class="arrow">↑</span></button>
+</div>
+<div class="opts-note">也可以直接在下面输入</div>
+</div>
+<div class="card old" style="margin:16px 20px 0;background:var(--sunken)">
+<div class="card-h" style="padding:14px 16px 8px"><b>改动 1 个文件</b><span class="mono"><span class="d-add">+3</span> <span class="d-del">−3</span></span></div>
+<div style="margin:0 16px;border-top:1px solid var(--rule)"><div class="fr" style="padding:9px 0;border-bottom:1px solid var(--rule)"><span>transactions/2026-10.bean</span><span><span class="d-add">+3</span> <span class="d-del">−3</span></span></div></div>
+<div class="card-foot" style="padding:10px 16px">校验通过。写入时会再校验一次，并生成一个可撤回的提交。</div>
+<div class="row2" style="padding:0 16px 14px"><button class="pbtn old" type="button">放弃改动</button><button class="pbtn old primary" type="button">写入账本</button></div>
+</div>
+</div>
+<div class="dock old g"><span class="plus"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></svg></span><span class="field"><span class="ph">还要怎么改…</span><span class="mic">🎙︎</span></span><span class="send off"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span></div>
+</div></figure>
+
+<figure class="screen"><figcaption>改后 <span>浅色 · 同一段对话</span></figcaption>
+<div class="phone glass" data-theme="light" data-bar="agent">
+<div class="scroll">
+<div class="q">十月吃饭比九月多吗？顺便把巷口小馆那几笔改成聚餐</div>
+<div class="fold">读取了账本 3 次 <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m2 3 2 2 2-2"/></svg></div>
+<div class="reply"><p>十月餐饮 <b class="v-out">¥2,486.40</b>，比九月多 <b>¥454.70</b>。巷口小馆有 3 笔，要改哪几笔？</p></div>
+<div class="card">
+<div class="opts">
+<button class="opt" type="button"><span class="lbl">3 笔都改成聚餐</span><span class="arrow">↑</span></button>
+<button class="opt" type="button"><span class="lbl">只改 10-12 那笔</span><span class="arrow">↑</span></button>
+<button class="opt" type="button"><span class="lbl">先不改</span><span class="arrow">↑</span></button>
+</div>
+<div class="opts-note">也可以直接在下面输入</div>
+</div>
+<div class="card" style="margin-top:14px">
+<div class="card-h"><b>改动 1 个文件</b><span class="mono"><span class="d-add">+3</span> <span class="d-del">−3</span></span></div>
+<div class="files"><div class="fr"><span>transactions/2026-10.bean</span><span><span class="d-add">+3</span> <span class="d-del">−3</span></span></div></div>
+<div class="card-foot">校验通过。写入时会再校验一次，并生成一个可撤回的提交。</div>
+<div class="row2"><button class="pbtn" type="button">放弃改动</button><button class="pbtn primary" type="button">写入账本</button></div>
+</div>
+</div>
+<div class="dock"><span class="plus g"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></svg></span><span class="field g"><span class="ph">还要怎么改…</span><span class="mic"><svg width="16" height="18" viewBox="0 0 16 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="5" y="1.5" width="6" height="10" rx="3"/><path d="M2.5 8.5a5.5 5.5 0 0 0 11 0M8 14v2.5"/></svg></span><span class="send off"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span></span></div>
+</div></figure>
+
+<figure class="screen"><figcaption>改后 <span>深色 · 正在输入，第二行展开</span></figcaption>
+<div class="phone glass" data-theme="dark" data-bar="agent">
+<div class="scroll">
+<div class="q">这个月信用卡要还多少？</div>
+<div class="fold">读取了账本 2 次 <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m2 3 2 2 2-2"/></svg></div>
+<div class="reply"><p>11 月要还 <b class="v-out">¥6,312.18</b>，两张卡：</p></div>
+<div class="card">
+<div class="rec">
+<div class="rec-r"><span class="ico"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="3.5" width="13" height="9" rx="2"/><path d="M1.5 6.5h13"/></svg></span>招行信用卡<span class="k2 debt num">¥4,980.00 · 11-25</span></div>
+<div class="rec-r"><span class="ico"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="3.5" width="13" height="9" rx="2"/><path d="M1.5 6.5h13"/></svg></span>汇丰 Pulse<span class="k2 debt num">HK$1,452.40 · 12-02</span></div>
+</div>
+</div>
+<div class="reply"><p>汇丰那张按今天的汇率约合 ¥1,332.18。要我在 11-24 提醒你还招行吗？</p></div>
+</div>
+<div class="dock tall"><span class="plus g"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></svg></span><span class="field g"><span class="r1"><span class="tx">好，11-24 早上提醒我</span></span><span class="r2"><span class="mchip">Claude Sonnet <i>· 中</i></span><span style="flex:1"></span><span class="send"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span></span></span></div>
+</div></figure>
+</div>
+</section>
+
+<!-- ============ B. 首次打开 ============ -->
+<section class="section">
+<h2>二、没有账本时：一打开就是助手</h2>
+<p>不再先看到「账本」库页。助手先打招呼并分流；右上角「…」里留着手动开账向导、从 iCloud 云盘加入、从备份恢复，给不想聊的人。选「从零新建」而还没接模型时，对话里插一张卡片把模型接上，不跳去设置页。</p>
+<div class="grid">
+
+<figure class="screen"><figcaption>欢迎 <span>浅色 · 首次打开</span></figcaption>
+<div class="phone glass" data-theme="light" data-bar="welcome">
+<div class="scroll">
+<div class="hello">
+<svg class="mark" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M8 14h24M8 20h24M8 30h24"/><path d="M8 26h14" opacity=".35"/></svg>
+<h3>你好，我是账本助手</h3>
+<p>先帮你把账本准备好。你现在是哪种情况？</p>
+</div>
+<div class="paths">
+<div class="path main"><span class="pi"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M9 3v12M3 9h12"/></svg></span><div><b>从零新建一本</b><span>聊几句，按你用的卡、钱包和习惯搭好</span></div><span class="arrow">›</span></div>
+<div class="path"><span class="pi"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="4.5" r="2"/><circle cx="5" cy="13.5" r="2"/><circle cx="13" cy="6.5" r="2"/><path d="M5 6.5v5M13 8.5c0 3-8 2-8 3"/></svg></span><div><b>接入已有的 Git 账本</b><span>GitHub、Gitea 等仓库里的 Beancount 账本</span></div><span class="arrow">›</span></div>
+</div>
+<div class="others">
+<button class="chip" type="button">iCloud 云盘里的账本</button>
+<button class="chip" type="button">本机文件夹</button>
+<button class="chip" type="button">从备份恢复</button>
+</div>
+<div class="privacy">账本只存放在这台设备上。确认之前，不会创建或写入任何文件。</div>
+</div>
+<div class="dock"><span class="field g"><span class="ph">也可以直接说你的情况</span><span class="mic"><svg width="16" height="18" viewBox="0 0 16 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="5" y="1.5" width="6" height="10" rx="3"/><path d="M2.5 8.5a5.5 5.5 0 0 0 11 0M8 14v2.5"/></svg></span><span class="send off"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span></span></div>
+</div></figure>
+
+<figure class="screen"><figcaption>接上模型 <span>浅色 · 选了从零新建，还没有 Key</span></figcaption>
+<div class="phone glass" data-theme="light" data-bar="onboard">
+<div class="scroll">
+<div class="q">从零新建一本</div>
+<div class="reply"><p>好。从零建账我会和你聊几句，这需要先接上一个模型服务，用你自己的 API Key。</p></div>
+<div class="card">
+<div class="card-h"><b>接上模型</b><span class="lock">🔒 只存钥匙串</span></div>
+<div class="segc" style="margin-bottom:8px"><button aria-selected="true" type="button">Anthropic</button><button type="button">OpenAI</button><button type="button">DeepSeek</button><button type="button">自定义</button></div>
+<div class="fields">
+<div class="fld"><span class="k">模型</span><span class="v">Claude Sonnet</span><span class="meta">›</span></div>
+<div class="fld"><span class="k">API Key</span><span class="v mono">sk-ant-••••••••••••••••</span></div>
+</div>
+<div class="card-foot">对话只发给你选的服务。Key 不会出现在对话里，也不随账本同步。</div>
+<div class="row2"><button class="pbtn primary" type="button">保存并继续</button></div>
+</div>
+<div style="text-align:center;padding:4px 0 0"><button class="pbtn quiet" style="flex:none;padding:0 16px" type="button">不用 AI，用表单向导</button></div>
+</div>
+<div class="dock"><span class="field g"><span class="ph">有问题可以先问我</span><span class="send off"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span></span></div>
+</div></figure>
+</div>
+</section>
+
+<!-- ============ C. 接入 Git ============ -->
+<section class="section">
+<h2>三、接入已有的 Git 账本</h2>
+<p>不需要模型。用户可以直接贴仓库链接，App 认出地址后把它填进 Git 卡片；令牌只在卡片里输入。连上后在对话里逐步显示：下载、找入口文件（有多个候选就让用户点选）、本机校验、建索引，最后给一句账本概况和「进入账本」。</p>
+<div class="grid">
+
+<figure class="screen"><figcaption>Git 卡片 <span>浅色 · 私有仓库</span></figcaption>
+<div class="phone glass" data-theme="light" data-bar="onboard">
+<div class="scroll">
+<div class="q">接入已有的 Git 账本</div>
+<div class="reply"><p>好。把仓库地址发给我，或者直接填在下面。</p></div>
+<div class="q">https://github.com/borui/ledger</div>
+<div class="reply"><p>认出来了，是 GitHub 上的仓库。私有仓库还需要一个访问令牌，只要 Contents 读写权限就够。</p></div>
+<div class="card">
+<div class="card-h"><b>连接 Git 仓库</b><span class="lock">🔒 令牌只存钥匙串</span></div>
+<div class="fields">
+<div class="fld"><span class="k">地址</span><span class="v mono">github.com/borui/ledger.git</span></div>
+<div class="fld"><span class="k">分支</span><span class="v mono">main</span><span class="meta">›</span></div>
+<div class="fld"><span class="k">令牌</span><span class="v mono">github_pat_••••••••••</span></div>
+</div>
+<div class="card-foot">令牌不会出现在对话里。<u>怎么在 GitHub 创建令牌</u></div>
+<div class="row2"><button class="pbtn primary" type="button">连接</button></div>
+</div>
+</div>
+<div class="dock"><span class="field g"><span class="ph">回答问题，或说说还有什么要求</span><span class="send off"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span></span></div>
+</div></figure>
+
+<figure class="screen"><figcaption>连接中 → 完成 <span>深色</span></figcaption>
+<div class="phone glass" data-theme="dark" data-bar="onboard">
+<div class="scroll">
+<div class="card" style="margin-top:14px">
+<div class="card-h"><b>github.com/borui/ledger</b><span class="meta">main</span></div>
+<div class="steps2">
+<div class="st" data-s="done"><i></i>下载仓库<span class="meta num">18.2 MB</span></div>
+<div class="st" data-s="done"><i></i>找到入口文件<span class="mono">main.bean</span></div>
+<div class="st" data-s="done"><i></i>本机校验<span class="meta">通过</span></div>
+<div class="st" data-s="done"><i></i>建立索引<span class="meta num">2,318 笔</span></div>
+</div>
+</div>
+<div class="reply"><p>连好了：「<b>生活账本</b>」，用人民币记账，有 14 个账户，最近一笔是 11 月 16 日。</p><p>之后在这台设备上记的账会自动推回这个仓库。要顺便打开 Face ID 保护吗？</p></div>
+<div class="card">
+<div class="opts">
+<button class="opt" type="button"><span class="lbl">打开 Face ID 保护</span><span class="arrow">↑</span></button>
+<button class="opt" type="button"><span class="lbl">先不用，直接进入账本</span><span class="arrow">↑</span></button>
+</div>
+</div>
+</div>
+<div class="dock"><span class="field g"><span class="ph">回答问题，或说说还有什么要求</span><span class="send off"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span></span></div>
+</div></figure>
+</div>
+</section>
+
+<!-- ============ D. 从零新建 ============ -->
+<section class="section">
+<h2>四、从零新建（重点）</h2>
+<p>助手边聊边改一份草案，顶部一条玻璃进度胶囊显示哪几部分齐了，点它看账本结构。先开放式地问钱放在哪，一句话里提到的卡和钱包一次全记下，再只追问缺的。要填数、要挑的地方用卡片：余额一屏填完，分类点掉不要的。最后预览要生成的文件，本机校验通过才能创建。</p>
+<div class="grid">
+
+<figure class="screen"><figcaption>① 了解账户 <span>浅色 · 一句话记下 5 个</span></figcaption>
+<div class="phone glass has-strip" data-theme="light" data-bar="onboard">
+<div class="strip g"><span class="done">账户 3</span><span class="done">待还 2</span><span>分类</span><span>期初</span><span>存放</span><span>导入</span></div>
+<div class="scroll">
+<div class="reply"><p>我会帮你把账本搭好，确认之前不会写入任何文件。先说说：平时钱放在哪些卡和钱包里？有没有信用卡或花呗这类要还的？</p></div>
+<div class="q">工资卡是招行，平时用支付宝微信，有张招行信用卡，还有花呗</div>
+<div class="reply"><p>记下了这 5 个：</p></div>
+<div class="card">
+<div class="rec">
+<div class="rec-r"><span class="ico"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 6.5 8 3l6 3.5M3 7v5M13 7v5M6 7v5M10 7v5M2 13.5h12"/></svg></span>招商银行卡<span class="k2">银行卡</span></div>
+<div class="rec-r"><span class="ico"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="4" width="12" height="9" rx="2"/><path d="M10.5 8.5h1.5"/></svg></span>支付宝余额<span class="k2">电子钱包</span></div>
+<div class="rec-r"><span class="ico"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="4" width="12" height="9" rx="2"/><path d="M10.5 8.5h1.5"/></svg></span>微信零钱<span class="k2">电子钱包</span></div>
+<div class="rec-r"><span class="ico"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="3.5" width="13" height="9" rx="2"/><path d="M1.5 6.5h13"/></svg></span>招行信用卡<span class="k2 debt">待还</span></div>
+<div class="rec-r"><span class="ico"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg></span>花呗<span class="k2 debt">待还</span></div>
+</div>
+</div>
+<div class="reply"><p>余额宝、零钱通这类理财也在用吗？</p></div>
+<div class="card">
+<div class="opts">
+<button class="opt" aria-pressed="true" type="button"><span class="tick"></span><span class="lbl">余额宝</span></button>
+<button class="opt" type="button"><span class="tick"></span><span class="lbl">零钱通</span></button>
+<button class="opt" type="button"><span class="tick"></span><span class="lbl">都没有</span></button>
+</div>
+<div class="opts-note">可多选，也可以直接说<button class="pbtn primary" style="flex:none;min-height:34px;padding:0 16px;font-size:14px" type="button">发送</button></div>
+</div>
+</div>
+<div class="dock"><span class="field g"><span class="ph">回答问题，或补充想调整的地方</span><span class="mic"><svg width="16" height="18" viewBox="0 0 16 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="5" y="1.5" width="6" height="10" rx="3"/><path d="M2.5 8.5a5.5 5.5 0 0 0 11 0M8 14v2.5"/></svg></span><span class="send off"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span></span></div>
+</div></figure>
+
+<figure class="screen"><figcaption>② 期初余额 <span>浅色 · 一张卡片填完</span></figcaption>
+<div class="phone glass has-strip" data-theme="light" data-bar="onboard">
+<div class="strip g"><span class="done">账户 4</span><span class="done">待还 2</span><span class="done">分类 13</span><span class="now">期初</span><span>存放</span><span>导入</span></div>
+<div class="scroll">
+<div class="reply"><p>再对一下各账户现在有多少钱、欠多少。不确定的留空，以后对账时再补。</p></div>
+<div class="card">
+<div class="card-h"><b>期初余额</b><span class="meta">人民币</span></div>
+<div class="segc" style="margin-bottom:8px"><button type="button">今天 11-18</button><button aria-selected="true" type="button">本月 1 日</button><button type="button">自定义</button></div>
+<div class="sec-k">现在有</div>
+<div class="fields">
+<div class="fld">招商银行卡<span class="amt num">18,240.00</span></div>
+<div class="fld">支付宝余额<span class="amt num">326.50</span></div>
+<div class="fld">余额宝<span class="amt num focus">5,000</span></div>
+<div class="fld">微信零钱<span class="amt ph">留空</span></div>
+</div>
+<div class="sec-k">现在欠</div>
+<div class="fields">
+<div class="fld">招行信用卡<span class="amt num v-out">3,912.40</span></div>
+<div class="fld">花呗<span class="amt num v-out">1,204.00</span></div>
+</div>
+<div class="row2"><button class="pbtn primary" type="button">填好了</button></div>
+</div>
+</div>
+<div class="dock"><span class="field g"><span class="ph">回答问题，或补充想调整的地方</span><span class="send off"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span></span></div>
+</div></figure>
+
+<figure class="screen"><figcaption>③ 收支分类 <span>深色 · 按你的情况推荐</span></figcaption>
+<div class="phone glass has-strip" data-theme="dark" data-bar="onboard">
+<div class="strip g"><span class="done">账户 4</span><span class="done">待还 2</span><span class="now">分类</span><span>期初</span><span>存放</span><span>导入</span></div>
+<div class="scroll">
+<div class="q">上班族，一个人租房住，偶尔出去旅行</div>
+<div class="reply"><p>那就按这组来：点掉用不上的，缺的点「＋」加上，或者直接告诉我。</p></div>
+<div class="card">
+<div class="sec-k" style="padding-top:2px">支出</div>
+<div class="chips">
+<button class="chip" aria-pressed="true" type="button">餐饮</button><button class="chip" aria-pressed="true" type="button">交通</button><button class="chip" aria-pressed="true" type="button">房租</button><button class="chip" aria-pressed="true" type="button">水电网</button><button class="chip" aria-pressed="true" type="button">日用</button><button class="chip" aria-pressed="true" type="button">购物</button><button class="chip" aria-pressed="true" type="button">娱乐</button><button class="chip" aria-pressed="true" type="button">旅行</button><button class="chip" aria-pressed="true" type="button">医疗</button><button class="chip" type="button">人情</button><button class="chip" aria-pressed="true" type="button">订阅</button><button class="chip" type="button">宠物</button><button class="chip add" type="button">＋</button>
+</div>
+<div class="sec-k">收入</div>
+<div class="chips">
+<button class="chip" aria-pressed="true" type="button">工资</button><button class="chip" aria-pressed="true" type="button">奖金</button><button class="chip" aria-pressed="true" type="button">理财收益</button><button class="chip" type="button">报销</button><button class="chip" type="button">副业</button><button class="chip add" type="button">＋</button>
+</div>
+<div class="row2"><button class="pbtn primary" type="button">就用这 13 个</button></div>
+</div>
+</div>
+<div class="dock"><span class="field g"><span class="ph">回答问题，或补充想调整的地方</span><span class="send off"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span></span></div>
+</div></figure>
+
+<figure class="screen"><figcaption>④ 存放与导入 <span>浅色</span></figcaption>
+<div class="phone glass has-strip" data-theme="light" data-bar="onboard">
+<div class="strip g"><span class="done">账户 4</span><span class="done">待还 2</span><span class="done">分类 13</span><span class="done">期初</span><span class="now">存放</span><span>导入</span></div>
+<div class="scroll">
+<div class="reply"><p>账本放在哪里？</p></div>
+<div class="card">
+<div class="opts">
+<button class="opt" type="button"><span class="lbl">只在这台设备<span class="sub">最简单，记得开备份</span></span><span class="arrow">↑</span></button>
+<button class="opt" type="button"><span class="lbl">iCloud 云盘<span class="sub">多台苹果设备一起用</span></span><span class="arrow">↑</span></button>
+<button class="opt" type="button" style="box-shadow:0 0 0 1.5px var(--ink)"><span class="lbl">Git 仓库<span class="sub">有版本历史，电脑上也能改</span></span><span class="arrow">↑</span></button>
+</div>
+</div>
+<div class="q">Git，放 GitHub</div>
+<div class="reply"><p>先在 GitHub 建一个<b>空仓库</b>，再填到这里，创建账本后我会推上去。</p></div>
+<div class="card">
+<div class="fields">
+<div class="fld"><span class="k">地址</span><span class="v mono">github.com/borui/money.git</span></div>
+<div class="fld"><span class="k">令牌</span><span class="v mono">github_pat_••••••</span></div>
+</div>
+<div class="card-foot"><span class="lock">✓ 仓库是空的，可以用</span></div>
+</div>
+<div class="reply"><p>账单一般从哪里导入？我会照你的账户配好导入规则。</p></div>
+<div class="card">
+<div class="chips">
+<button class="chip" aria-pressed="true" type="button">支付宝</button><button class="chip" aria-pressed="true" type="button">微信</button><button class="chip" aria-pressed="true" type="button">招商银行</button><button class="chip" type="button">美团</button><button class="chip" type="button">汇丰</button><button class="chip" type="button">只手动记</button>
+</div>
+</div>
+</div>
+<div class="dock"><span class="field g"><span class="ph">回答问题，或补充想调整的地方</span><span class="send off"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span></span></div>
+</div></figure>
+
+<figure class="screen"><figcaption>⑤ 预览并校验 <span>浅色 · 最后一步</span></figcaption>
+<div class="phone glass has-strip" data-theme="light" data-bar="onboard">
+<div class="strip g"><span class="done">账户 4</span><span class="done">待还 2</span><span class="done">分类 13</span><span class="done">期初</span><span class="done">存放</span><span class="done">导入 3</span></div>
+<div class="scroll">
+<div class="reply"><p>都齐了。下面是要生成的账本，本机已经校验过一遍。</p></div>
+<div class="card">
+<div class="card-h"><b>我的账本</b><span class="meta">CNY · 期初 11-01</span></div>
+<div class="tree">
+<div class="tf"><span class="mono">main.bean</span><span class="meta">选项 · include</span></div>
+<div class="tf"><span class="mono">accounts.bean</span><span class="meta">6 个账户 · 13 个分类</span></div>
+<div class="src">2026-11-01 open Assets:Bank:CMB          CNY
+2026-11-01 open Assets:Wallet:Alipay     CNY
+2026-11-01 open Liabilities:CreditCard:CMB
+2026-11-01 open Expenses:Food            CNY
+…</div>
+<div class="tf"><span class="mono">opening.bean</span><span class="meta">期初 5 笔</span></div>
+<div class="tf"><span class="mono">2026.bean</span><span class="meta">今年的流水</span></div>
+<div class="tf"><span class="mono">imports/</span><span class="meta">支付宝 · 微信 · 招行</span></div>
+</div>
+<div class="ok"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="m5.2 8.2 1.9 1.9 3.8-4"/></svg>校验通过 · 净资产 <b class="num">¥18,450.10</b></div>
+<div class="card-foot">创建后推送到 github.com/borui/money</div>
+<div class="row2"><button class="pbtn" type="button">再改改</button><button class="pbtn primary" type="button">创建账本</button></div>
+</div>
+</div>
+<div class="dock"><span class="field g"><span class="ph">还想改哪里，直接说</span><span class="send off"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></span></span></div>
+</div></figure>
+</div>
+</section>
+
+<script>
+(function () {
+  var status = '<div class="statusbar"><span class="num">09:41</span><span class="indicators">'
+    + '<svg fill="currentColor" height="12" viewBox="0 0 18 12" width="18"><rect height="4" rx="1" width="3" x="0" y="8"></rect><rect height="6.5" rx="1" width="3" x="5" y="5.5"></rect><rect height="9" rx="1" width="3" x="10" y="3"></rect><rect height="12" rx="1" width="3" x="15" y="0"></rect></svg>'
+    + '<svg fill="currentColor" height="12" viewBox="0 0 17 12" width="17"><path d="M8.5 11.2 6.3 8.6a3.6 3.6 0 0 1 4.4 0zM4.2 6.3 2.5 4.3a9.4 9.4 0 0 1 12 0l-1.7 2a6.7 6.7 0 0 0-8.6 0z"></path></svg>'
+    + '<svg height="13" viewBox="0 0 26 13" width="26"><rect fill="none" height="12" opacity=".4" rx="3.5" stroke="currentColor" width="21" x="0.5" y="0.5"></rect><rect fill="currentColor" height="9" rx="2" width="16" x="2" y="2"></rect></svg>'
+    + '</span></div>';
+  var back = '<span class="g gcap"><button aria-label="返回" class="iconbtn back g gcircle" type="button"><svg fill="none" height="18" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 11 18" width="11"><path d="M9.5 1.5 2 9l7.5 7.5"></path></svg></button></span>';
+  var history = '<span class="g gcap"><button aria-label="历史" class="iconbtn" type="button"><svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 6h14M3 10h10M3 14h14"/></svg></button></span>';
+  var more = '<span class="g gcap"><button aria-label="更多方式" class="iconbtn" type="button"><svg width="19" height="19" viewBox="0 0 20 20" fill="currentColor"><circle cx="4.5" cy="10" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="15.5" cy="10" r="1.5"/></svg></button></span>';
+  var newchat = '<span class="g gcap"><button aria-label="新对话" class="iconbtn" type="button"><svg fill="none" height="19" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" viewBox="0 0 20 20" width="19"><path d="M9 3.5H4.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V11"></path><path d="m14.5 2.8 2.7 2.7L10 12.7l-3.3.6.6-3.3z"></path></svg></button></span>';
+  var bars = {
+    agent: history + '<h1 class="title" style="justify-content:center">账本助手</h1>' + newchat,
+    welcome: '<h1 class="title"></h1>' + more,
+    onboard: '<span class="g gcap"><button aria-label="重新开始" class="iconbtn" type="button"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 9a6 6 0 1 0 2-4.5M3 3v3h3"/></svg></button></span><h1 class="title" style="justify-content:center">新建账本</h1>' + more
+  };
+  document.querySelectorAll('.phone[data-bar]').forEach(function (p) {
+    var top = document.createElement('div');
+    top.className = 'gtop';
+    top.innerHTML = status + '<div class="appbar">' + bars[p.dataset.bar] + '</div>';
+    p.insertBefore(top, p.firstChild);
+    var hb = document.createElement('div'); hb.className = 'homebar'; p.appendChild(hb);
+  });
+  var full = document.getElementById('full-length');
+  full.addEventListener('click', function () {
+    var on = full.getAttribute('aria-pressed') !== 'true';
+    full.setAttribute('aria-pressed', String(on));
+    document.body.dataset.length = on ? 'full' : 'screen';
+  });
+  document.querySelectorAll('.chip:not(.add), .opts .opt:has(.tick)').forEach(function (b) {
+    b.addEventListener('click', function () { b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')); });
+  });
+  document.querySelectorAll('.segc').forEach(function (s) {
+    s.querySelectorAll('button').forEach(function (b) {
+      b.addEventListener('click', function () { s.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-selected', String(x === b)); }); });
+    });
+  });
+})();
+</script>
+</body>
+</html>

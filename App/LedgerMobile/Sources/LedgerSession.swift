@@ -186,6 +186,9 @@ final class LedgerSession: ObservableObject {
         return localLedgers.first(where: { $0.id == id })
     }
     @Published private(set) var localLedgers: [LocalLedgerDescriptor] = []
+    /// Whether the catalog has been read at least once, so an empty
+    /// `localLedgers` means no ledger rather than not known yet.
+    @Published private(set) var localLedgersLoaded = false
     @Published private(set) var localLedgerName = String(localized: "本地账本")
     @Published private(set) var isLocalOperationBusy = false
     @Published var serverInput: String
@@ -912,9 +915,10 @@ final class LedgerSession: ObservableObject {
     }
 
     func refreshLocalLedgers() async {
-        guard let localCatalog else { return }
+        guard let localCatalog else { localLedgersLoaded = true; return }
         do {
             localLedgers = try await localCatalog.list()
+            localLedgersLoaded = true
             if case let .local(id) = location, let descriptor = localLedgers.first(where: { $0.id == id }) {
                 localLedgerName = descriptor.name
             }
@@ -923,6 +927,9 @@ final class LedgerSession: ObservableObject {
             } ?? true
             updateLocalSyncEligibility()
         } catch {
+            // An unreadable catalog still counts as read: the setup page
+            // can show the error instead of a blank screen.
+            localLedgersLoaded = true
             errorMessage = error.localizedDescription
         }
     }
@@ -936,7 +943,9 @@ final class LedgerSession: ObservableObject {
         currency: String,
         accounts: [OnboardingAccountSelection],
         categories: [OnboardingCategorySelection],
-        openingDate: String? = nil
+        openingDate: String? = nil,
+        layout: LocalLedgerCatalog.CustomLayout = .single,
+        importChannels: [String] = []
     ) async {
         guard !isLocalOperationBusy, !isAuthenticationBusy, let localCatalog else { return }
         isLocalOperationBusy = true
@@ -952,7 +961,9 @@ final class LedgerSession: ObservableObject {
                 currency: currency,
                 accounts: accounts,
                 categories: categories,
-                openingDate: openingDate
+                openingDate: openingDate,
+                layout: layout,
+                importChannels: importChannels
             )
             try requireCurrentLocalOperation(epoch: epoch, location: expectedLocation)
             await refreshLocalLedgers()

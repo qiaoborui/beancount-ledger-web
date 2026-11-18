@@ -35,6 +35,15 @@ struct LedgerOnboardingDraft: Codable, Equatable, Sendable {
     var accounts: [Account] = []
     var incomeCategories: [Category] = []
     var expenseCategories: [Category] = []
+    /// Where the ledger lives: `device` or `git`; empty until asked, which
+    /// is the device.
+    var storage = ""
+    /// The empty repository a Git ledger is pushed to. Never credentials:
+    /// the token stays in the card and goes to the keychain.
+    var remote = ""
+    /// The bills the user means to import, by import provider id; `manual`
+    /// is keeping the books by hand. Empty until asked.
+    var importChannels: [String] = []
 
     init() {}
 
@@ -46,7 +55,20 @@ struct LedgerOnboardingDraft: Codable, Equatable, Sendable {
         accounts = try container.decodeIfPresent([Account].self, forKey: .accounts) ?? []
         incomeCategories = try container.decodeIfPresent([Category].self, forKey: .incomeCategories) ?? []
         expenseCategories = try container.decodeIfPresent([Category].self, forKey: .expenseCategories) ?? []
+        storage = try container.decodeIfPresent(String.self, forKey: .storage) ?? ""
+        remote = try container.decodeIfPresent(String.self, forKey: .remote) ?? ""
+        importChannels = try container.decodeIfPresent([String].self, forKey: .importChannels) ?? []
     }
+
+    /// The import channels the imports card offers, in its order.
+    static let channels = ["alipay", "wechat", "cmb-checking", "cmb", "ccb-credit", "hsbchk-credit", "meituan", "manual"]
+
+    static func channelTitle(_ channel: String) -> String {
+        if channel == "manual" { return String(localized: "手动记账") }
+        return LedgerImportProvider.provider(channel)?.compactLabel ?? channel
+    }
+
+    var isGitStorage: Bool { storage == "git" && !remote.isEmpty }
 
     /// What the ledger needs before it can be created: somewhere money is
     /// kept, and a category on each side.
@@ -90,6 +112,117 @@ struct LedgerOnboardingDraft: Codable, Equatable, Sendable {
 
     var categorySelections: [OnboardingCategorySelection] {
         (incomeCategories + expenseCategories).map { OnboardingCategorySelection(name: $0.name, account: $0.account, currency: currency) }
+    }
+
+    /// The files 创建账本 writes for this draft, in the split layout.
+    func files(today: String) -> [LocalLedgerCatalog.LedgerFile] {
+        LocalLedgerCatalog.customLedgerFiles(
+            title: title, currency: currency, accounts: accountSelections, categories: categorySelections,
+            openingDate: startDate.isEmpty ? today : startDate, layout: .split,
+            importChannels: importChannels)
+    }
+}
+
+/// A native card an onboarding turn ended on: the user fills it in on the
+/// page, the app edits the draft itself and sends a summary as the next
+/// message. `prompt` is the line the model said above it.
+struct LedgerOnboardingCard: Decodable, Equatable, Sendable {
+    enum Kind: String, Decodable, Sendable {
+        case balances, categories, storage, imports
+    }
+
+    struct Suggestion: Decodable, Equatable, Hashable, Sendable, Identifiable {
+        /// `income` or `expense`.
+        let kind: String
+        let name: String
+        let account: String
+        var id: String { account }
+        var isIncome: Bool { kind == "income" }
+    }
+
+    let kind: Kind
+    let prompt: String
+    var suggested: [Suggestion] = []
+
+    private enum CodingKeys: String, CodingKey { case kind, prompt, suggested }
+
+    init(kind: Kind, prompt: String, suggested: [Suggestion] = []) {
+        self.kind = kind
+        self.prompt = prompt
+        self.suggested = suggested
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        prompt = try container.decodeIfPresent(String.self, forKey: .prompt) ?? ""
+        suggested = (try? container.decodeIfPresent([Suggestion].self, forKey: .suggested)) ?? []
+    }
+}
+
+/// What the user filled in on an onboarding card. Applying it edits the
+/// draft; the summary is what goes back to the model as the user's answer.
+enum LedgerOnboardingCardAnswer: Equatable, Sendable {
+    /// Opening amounts by account path (empty for none) and the start date
+    /// (empty for the day the ledger is created).
+    case balances([String: String], startDate: String)
+    /// The draft categories kept, by account path, and the suggestions added.
+    case categories(kept: Set<String>, added: [LedgerOnboardingCard.Suggestion])
+    /// `device`, or `git` with the repository address.
+    case storage(String, remote: String)
+    case imports([String])
+
+    /// A plain non-negative amount with at most two decimals, or empty.
+    static func normalizedAmount(_ raw: String) -> String? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "，", with: "")
+        if text.isEmpty { return "" }
+        guard text.range(of: "^[0-9]{1,12}(\\.[0-9]{1,2})?$", options: .regularExpression) != nil else { return nil }
+        return Decimal(string: text) == 0 ? "" : text
+    }
+
+    func applied(to draft: LedgerOnboardingDraft) -> (draft: LedgerOnboardingDraft, summary: String) {
+        var next = draft
+        let separator = String(localized: "、")
+        switch self {
+        case let .balances(amounts, startDate):
+            var parts: [String] = []
+            for index in next.accounts.indices {
+                let account = next.accounts[index]
+                guard let raw = amounts[account.account], let amount = Self.normalizedAmount(raw) else { continue }
+                next.accounts[index].openingBalance = amount
+                guard !amount.isEmpty else { continue }
+                parts.append(account.isLiability ? String(localized: "\(account.name) 欠 \(amount)") : "\(account.name) \(amount)")
+            }
+            next.startDate = startDate
+            let start = startDate.isEmpty ? String(localized: "期初就是今天") : String(localized: "期初 \(startDate)")
+            let body = parts.isEmpty ? String(localized: "先不填余额") : parts.joined(separator: String(localized: "，"))
+            return (next, String(localized: "余额：\(body)；\(start)。"))
+        case let .categories(kept, added):
+            let before = draft.incomeCategories + draft.expenseCategories
+            next.incomeCategories = draft.incomeCategories.filter { kept.contains($0.account) }
+                + added.filter(\.isIncome).map { .init(name: $0.name, account: $0.account) }
+            next.expenseCategories = draft.expenseCategories.filter { kept.contains($0.account) }
+                + added.filter { !$0.isIncome }.map { .init(name: $0.name, account: $0.account) }
+            let removed = before.filter { !kept.contains($0.account) }.map(\.name)
+            var parts = [String(localized: "分类定了，收入 \(next.incomeCategories.count) 个、支出 \(next.expenseCategories.count) 个")]
+            if !added.isEmpty { parts.append(String(localized: "加上") + added.map(\.name).joined(separator: separator)) }
+            if !removed.isEmpty { parts.append(String(localized: "去掉") + removed.joined(separator: separator)) }
+            return (next, parts.joined(separator: String(localized: "，")) + String(localized: "。"))
+        case let .storage(storage, remote):
+            next.storage = storage
+            next.remote = storage == "git" ? remote : ""
+            return (next, storage == "git"
+                ? String(localized: "存到 Git 仓库 \(remote)，令牌已经存进钥匙串。")
+                : String(localized: "账本先只存在这台设备上。"))
+        case let .imports(channels):
+            let ordered = LedgerOnboardingDraft.channels.filter(channels.contains)
+            next.importChannels = ordered
+            let names = ordered.filter { $0 != "manual" }.map(LedgerOnboardingDraft.channelTitle)
+            if names.isEmpty { return (next, String(localized: "平时都手动记账，不导入账单。")) }
+            let manual = ordered.contains("manual") ? String(localized: "，其余手动记") : ""
+            return (next, String(localized: "平时会导入：") + names.joined(separator: separator) + manual + String(localized: "。"))
+        }
     }
 }
 
@@ -186,10 +319,27 @@ struct LedgerAgentOpening: Identifiable, Equatable, Sendable {
         LedgerAgentAsk(question: String(localized: "接下来想做什么？"), options: steps)
     }
 
-    init(draft: LedgerOnboardingDraft) {
+    init(text: String, steps: [String] = Self.nextSteps) {
+        self.text = text
+        self.steps = steps
+    }
+
+    /// The greeting once first-run setup connected an existing Git ledger:
+    /// the ledger already has its history, so the next steps differ.
+    static func connected(name: String) -> LedgerAgentOpening {
+        LedgerAgentOpening(
+            text: String(localized: "「\(name)」接好了，之后在这台设备上记的账会推回仓库。") + "\n\n"
+                + String(localized: "接下来想做什么？点一个，也可以直接说。"),
+            steps: [String(localized: "这个月花了多少，主要花在哪"), String(localized: "帮我导入一份账单"),
+                    String(localized: "帮我检查一下账本有没有问题"), String(localized: "帮我设置记账提醒")])
+    }
+
+    /// `storageNote` says how pushing to the ledger's Git repository went.
+    init(draft: LedgerOnboardingDraft, storageNote: String? = nil) {
         let accounts = draft.accounts.count
         let categories = draft.incomeCategories.count + draft.expenseCategories.count
         text = String(localized: "「\(draft.title)」建好了：\(accounts) 个账户、\(categories) 个分类，用 \(draft.currency) 记账。")
+            + (storageNote.map { "\n\n" + $0 } ?? "")
             + "\n\n" + String(localized: "接下来想做什么？点一个，也可以直接说。")
         steps = Self.nextSteps
     }
@@ -205,6 +355,7 @@ final class LedgerOnboardingConversation: ObservableObject {
         let role: LedgerAgentMessage.Role
         var text: String
         var ask: LedgerAgentAsk? = nil
+        var card: LedgerOnboardingCard? = nil
     }
 
     struct Credentials: Sendable {
@@ -253,9 +404,36 @@ final class LedgerOnboardingConversation: ObservableObject {
         return last.ask
     }
 
-    func start() {
+    /// The pending onboarding card: the last reply's, while nothing newer
+    /// exists.
+    var pendingCard: LedgerOnboardingCard? {
+        guard !isRunning, let last = messages.last, last.role == .assistant else { return nil }
+        return last.card
+    }
+
+    /// Applies what the user filled in on the pending card to the draft and
+    /// sends its summary as the user's answer. The draft changed, so the
+    /// plan has to be presented again before it can be created.
+    func submit(_ answer: LedgerOnboardingCardAnswer) {
+        guard pendingCard != nil, !isRunning else { return }
+        let (draft, summary) = answer.applied(to: state.draft)
+        state.draft = draft
+        state.ready = false
+        send(summary)
+    }
+
+    /// Starts the conversation. `text` is what the user already said on
+    /// the setup page before a model was connected; it opens the
+    /// conversation as their own first message instead of the hidden one.
+    func start(saying text: String? = nil) {
         guard !hasStarted else { return }
-        run(Self.opening)
+        let said = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if said.isEmpty {
+            run(Self.opening)
+        } else {
+            messages.append(Message(role: .user, text: said))
+            run(Self.opening + "\n" + said)
+        }
     }
 
     func send(_ text: String) {
@@ -330,8 +508,8 @@ final class LedgerOnboardingConversation: ObservableObject {
         if let onboarding = response.onboarding { state = onboarding }
         if let next = response.transcript { transcript = next }
         let reply = (response.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !reply.isEmpty || response.ask != nil {
-            messages.append(Message(role: .assistant, text: reply, ask: response.ask))
+        if !reply.isEmpty || response.ask != nil || response.onboardingCard != nil {
+            messages.append(Message(role: .assistant, text: reply, ask: response.ask, card: response.onboardingCard))
         }
         finish()
     }
@@ -382,5 +560,69 @@ final class LedgerOnboardingConversation: ObservableObject {
         }
         if Task.isCancelled, response.cancelled != true { throw CancellationError() }
         return response
+    }
+}
+
+/// The ways into a first ledger that the setup page offers before any model
+/// is involved: build one from scratch with the assistant, connect a Git
+/// repository, or one of the file based ways.
+enum LedgerSetupPath: String, CaseIterable, Sendable {
+    case scratch, git, other
+}
+
+/// The scripted part of first-run setup. It runs on the device without a
+/// model, so it only recognises what it can recognise for certain: which way
+/// the user means and a repository address. Anything else is left to the
+/// cards, or, from scratch, to the model once it is connected.
+enum LedgerSetupScript {
+    /// The way a free-text answer on the welcome screen points to. Anything
+    /// that is not clearly about a repository or a file is about building a
+    /// ledger, which is what most first answers describe.
+    static func path(for text: String) -> LedgerSetupPath {
+        let lower = text.lowercased()
+        if gitRepository(in: text) != nil { return .git }
+        if ["git", "仓库", "repo", "gitea", "gitlab"].contains(where: lower.contains) { return .git }
+        if ["icloud", "云盘", "备份", "文件夹", ".bean", "恢复"].contains(where: lower.contains) { return .other }
+        return .scratch
+    }
+
+    private static let hosts = ["github.com", "gitlab.com", "codeberg.org", "gitee.com", "bitbucket.org"]
+
+    /// The first repository address in the text, as an HTTPS URL: a full
+    /// `https://` address on any host, or `host/owner/repo` on a host that is
+    /// known to serve Git. SSH addresses are not supported by the app's Git
+    /// transport, so they are not recognised.
+    static func gitRepository(in text: String) -> String? {
+        let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "，。；、“”「」()（）<>"))
+        for raw in text.components(separatedBy: separators) {
+            var token = raw.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?'\"`"))
+            guard !token.isEmpty else { continue }
+            let lower = token.lowercased()
+            if lower.hasPrefix("http://") { continue }
+            if !lower.hasPrefix("https://") {
+                guard hosts.contains(where: { lower.hasPrefix($0 + "/") }) else { continue }
+                token = "https://" + token
+            }
+            guard let url = URL(string: token), let host = url.host, !host.isEmpty else { continue }
+            let parts = url.path.split(separator: "/")
+            guard parts.count >= 2 else { continue }
+            // A browser link into the repository (…/tree/main/x) names the
+            // repository by its first two path parts on the known hosts.
+            if hosts.contains(host.lowercased()), parts.count > 2 {
+                return "https://\(host)/\(parts[0])/\(parts[1])"
+            }
+            return token
+        }
+        return nil
+    }
+
+    /// A name for a ledger connected from a repository: its last path part
+    /// without `.git`, or 我的账本.
+    static func ledgerName(forRepository address: String) -> String {
+        guard let url = URL(string: address) else { return String(localized: "我的账本") }
+        var name = url.lastPathComponent
+        if name.lowercased().hasSuffix(".git") { name = String(name.dropLast(4)) }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || trimmed == "/" ? String(localized: "我的账本") : trimmed
     }
 }

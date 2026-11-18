@@ -9,7 +9,7 @@ final class LocalOnlySurfaceUITests: XCTestCase {
         app.launchArguments = ["--local-ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 40))
@@ -59,7 +59,7 @@ final class LocalOnlySurfaceUITests: XCTestCase {
         app.launchArguments = ["--local-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 40))
@@ -88,9 +88,12 @@ final class LocalOnlySurfaceUITests: XCTestCase {
         app.launchArguments = ["--local-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        // With no ledger the app opens on the setup conversation; Git is one
+        // of its ways in and the file based ways are in its menu.
+        XCTAssertTrue(app.buttons["local-ledger-add-git"].waitForExistence(timeout: 10))
+        app.buttons["ledger-setup-more"].tap()
+        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["local-ledger-import"].exists)
-        XCTAssertTrue(app.buttons["local-ledger-add-git"].exists)
         XCTAssertFalse(app.buttons["ledger-remote-connect"].exists)
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()

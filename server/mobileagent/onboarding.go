@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -45,7 +46,26 @@ type onboardingDraftV1 struct {
 	Accounts          []onboardingAccountV1  `json:"accounts"`
 	IncomeCategories  []onboardingCategoryV1 `json:"incomeCategories"`
 	ExpenseCategories []onboardingCategoryV1 `json:"expenseCategories"`
+	// Storage is where the ledger lives: "device" or "git"; empty is not
+	// decided yet, which creates it on the device.
+	Storage string `json:"storage,omitempty"`
+	// Remote is the empty Git repository a "git" ledger is pushed to. Its
+	// token never travels here; the app keeps it in its card.
+	Remote string `json:"remote,omitempty"`
+	// ImportChannels are where the user's bills come from, by import
+	// provider id; "manual" is keeping the books by hand.
+	ImportChannels []string `json:"importChannels,omitempty"`
 }
+
+// onboardingStorages and onboardingChannels are the values the setup cards
+// offer; the app renders their titles.
+var onboardingStorages = map[string]bool{"device": true, "git": true}
+
+var onboardingChannels = []string{"alipay", "wechat", "cmb-checking", "cmb", "ccb-credit", "hsbchk-credit", "meituan", "manual"}
+
+// onboardingCards are the native cards the model can show in place of a
+// question: the user fills them in the app, which edits the draft itself.
+var onboardingCards = []string{"balances", "categories", "storage", "imports"}
 
 type onboardingAccountV1 struct {
 	Kind    string `json:"kind"`
@@ -116,6 +136,19 @@ func (draft onboardingDraftV1) validate(today time.Time) error {
 		if err := validateOnboardingDate(draft.StartDate, today); err != nil {
 			return err
 		}
+	}
+	if draft.Storage != "" && !onboardingStorages[draft.Storage] {
+		return fmt.Errorf("storage %q must be device or git", draft.Storage)
+	}
+	if draft.Remote != "" && (!strings.HasPrefix(draft.Remote, "https://") || len(draft.Remote) > 300 || hasUnsafeRune(draft.Remote) || strings.ContainsAny(draft.Remote, " @")) {
+		return errors.New("remote must be an https:// repository address without credentials")
+	}
+	seenChannels := map[string]bool{}
+	for _, channel := range draft.ImportChannels {
+		if !slices.Contains(onboardingChannels, channel) || seenChannels[channel] {
+			return fmt.Errorf("unknown or repeated import channel %q", channel)
+		}
+		seenChannels[channel] = true
 	}
 	if len(draft.Accounts) > maxOnboardingAccounts || len(draft.IncomeCategories) > maxOnboardingCategories ||
 		len(draft.ExpenseCategories) > maxOnboardingCategories {
@@ -305,6 +338,31 @@ type onboardingSession struct {
 	mu    sync.Mutex
 	state onboardingStateV1
 	today time.Time
+	// card is the card the turn ended on, with the line said above it.
+	card *onboardingCardV1
+}
+
+// onboardingCardV1 is a native card the turn ends on, like ask_user's
+// choices: the user fills it in the app and the result comes back as the
+// next message, with the draft already edited.
+type onboardingCardV1 struct {
+	Kind   string `json:"kind"`
+	Prompt string `json:"prompt"`
+	// Suggested are extra choices the card offers beyond the draft: for
+	// "categories", common categories not in the draft yet.
+	Suggested []onboardingCategorySuggestionV1 `json:"suggested,omitempty"`
+}
+
+type onboardingCategorySuggestionV1 struct {
+	Kind    string `json:"kind"`
+	Name    string `json:"name"`
+	Account string `json:"account"`
+}
+
+func (s *onboardingSession) shownCard() *onboardingCardV1 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.card
 }
 
 func newOnboardingSession(state *onboardingStateV1, today time.Time) (*onboardingSession, error) {
@@ -328,6 +386,7 @@ func (s *onboardingSession) snapshot() *onboardingStateV1 {
 	state.Draft.Accounts = append([]onboardingAccountV1{}, state.Draft.Accounts...)
 	state.Draft.IncomeCategories = append([]onboardingCategoryV1{}, state.Draft.IncomeCategories...)
 	state.Draft.ExpenseCategories = append([]onboardingCategoryV1{}, state.Draft.ExpenseCategories...)
+	state.Draft.ImportChannels = append([]string(nil), state.Draft.ImportChannels...)
 	return &state
 }
 
@@ -354,6 +413,7 @@ func (s *onboardingSession) change(edit func(*onboardingDraftV1) error) (string,
 	draft.Accounts = append([]onboardingAccountV1{}, draft.Accounts...)
 	draft.IncomeCategories = append([]onboardingCategoryV1{}, draft.IncomeCategories...)
 	draft.ExpenseCategories = append([]onboardingCategoryV1{}, draft.ExpenseCategories...)
+	draft.ImportChannels = append([]string(nil), draft.ImportChannels...)
 	if err := edit(&draft); err != nil {
 		return "", err
 	}
@@ -396,9 +456,15 @@ func (s *onboardingSession) tools() []agent.AgentTool {
 				"title":     map[string]any{"type": "string", "description": "账本名称，如 我的生活账本"},
 				"currency":  map[string]any{"type": "string", "description": "记账本位币代码，如 CNY、USD"},
 				"startDate": map[string]any{"type": "string", "description": "期初余额的日期 YYYY-MM-DD；不传则为创建当天"},
+				"storage":   map[string]any{"type": "string", "enum": []string{"device", "git"}, "description": "账本放在哪：device 只在这台设备，git 推到一个 Git 仓库（地址和令牌由用户在卡片里填）"},
+				"importChannels": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": onboardingChannels},
+					"description": "账单从哪里导入：alipay 支付宝，wechat 微信，cmb-checking 招行储蓄卡，cmb 招行信用卡，ccb-credit 建行信用卡，hsbchk-credit 汇丰香港信用卡，meituan 美团，manual 只手动记"},
 			},
 			run: func(params json.RawMessage) (string, error) {
-				var input struct{ Title, Currency, StartDate *string }
+				var input struct {
+					Title, Currency, StartDate, Storage *string
+					ImportChannels                      *[]string
+				}
 				if err := json.Unmarshal(params, &input); err != nil {
 					return "", err
 				}
@@ -411,6 +477,15 @@ func (s *onboardingSession) tools() []agent.AgentTool {
 					}
 					if input.StartDate != nil {
 						draft.StartDate = strings.TrimSpace(*input.StartDate)
+					}
+					if input.Storage != nil {
+						draft.Storage = strings.TrimSpace(*input.Storage)
+						if draft.Storage != "git" {
+							draft.Remote = ""
+						}
+					}
+					if input.ImportChannels != nil {
+						draft.ImportChannels = append([]string(nil), (*input.ImportChannels)...)
 					}
 					return nil
 				})
@@ -535,6 +610,7 @@ func (s *onboardingSession) tools() []agent.AgentTool {
 					return nil
 				})
 			}},
+		&onboardingCardTool{session: s},
 		onboardingTool{name: "present_onboarding_plan", label: "展示方案",
 			description: "草案至少有一个资金账户、一个收入分类和一个支出分类后调用，让用户可以点「确认创建」。之后草案再有改动，需要再次调用。",
 			properties:  map[string]any{},
@@ -594,6 +670,17 @@ func onboardingSystemPrompt(today time.Time) string {
 - 待还款项：信用卡、花呗、白条、消费贷、房贷、车贷、欠别人的钱，各自现在欠多少。没有就不用记。
 - 收入分类和支出分类：按他的生活来，不是照抄一份通用清单。
 
+- 账本放在哪：只在这台设备，或推到一个 Git 仓库（用户自己建一个空仓库）。
+- 账单从哪里导入：支付宝、微信、银行、美团，或者只手动记。
+
+## 用卡片代替一项项追问
+有四张原生卡片，用 show_onboarding_card 展示，调用后这一轮结束，用户填完后草案已经被 App 改好，结果会作为下一条消息发来：
+- balances：资金账户和待还款项都记下后，用它一次问全部余额和期初日期，不要一个个用文字问金额。
+- categories：先按他的情况用 replace_categories 写入推荐的一组，再用它让用户点掉不要的、点上 suggested 里的。
+- storage：分类和余额都有了以后问账本放在哪。
+- imports：最后问账单从哪里导入；他之前已经说过用哪些渠道的，直接用 set_ledger_profile 记下 importChannels，不必再展示。
+同一种卡片一般只展示一次；用户之后想改，按他说的直接改草案。
+
 ## 完成标准
 草案里有一个资金账户、一个收入分类、一个支出分类，并且你调用过 present_onboarding_plan。其余项目能合理推断的按默认填好并在回复里说明，推断不了的留空并说明还缺什么。余额和欠款永远不臆造。
 
@@ -622,9 +709,96 @@ func onboardingSystemPrompt(today time.Time) string {
 9. 用户说出一组分类时用 replace_categories 一次写入整组；之后单项改动用 upsert_category、remove_category。用户说“按推荐来”时写入你推荐的那组。
 10. account 由你来定：清晰、分层的英文 Beancount 路径，每段以大写字母或数字开头，只含字母、数字和连字符，不用拼音或中文。资金账户和待还款项必须在工具规定的根路径下，如 Assets:Bank:CMB、Assets:Wallet:Alipay、Liabilities:CreditCard:CMB；收入在 Income: 下，支出在 Expenses: 下。
 11. 期初余额是“这个账户现在有多少钱”；待还款项填“现在欠多少”，都是不带符号的正数。
-12. 满足完成标准后调用 present_onboarding_plan，再用简短文字总结（记了什么、哪些是默认值），请用户点「查看结构」检查，没问题就点「确认创建」。之后用户再改动，改完要再次调用 present_onboarding_plan。
+12. 满足完成标准、并且问过存放和导入（或用户说不用管）之后调用 present_onboarding_plan，再用简短文字总结（记了什么、哪些是默认值），请用户点「查看结构」检查，没问题就点「创建账本」。之后用户再改动，改完要再次调用 present_onboarding_plan。
 13. 工具报错时按错误信息改正参数再调用，不要把错误原文转述给用户。
 14. 回复简短口语化，每次不超过三句，不用表格和代码块。
 
 今天是 ` + today.Format(time.DateOnly) + "。"
+}
+
+// onboardingCardTool is show_onboarding_card. Like ask_user it ends the
+// turn: the card is the question, and the user's answer arrives as the next
+// message with the draft already edited by the app.
+type onboardingCardTool struct{ session *onboardingSession }
+
+func (*onboardingCardTool) Name() string  { return "show_onboarding_card" }
+func (*onboardingCardTool) Label() string { return "展示卡片" }
+func (*onboardingCardTool) Schema() ai.ToolSchema {
+	suggestion := objectParameters(map[string]any{
+		"kind":    map[string]any{"type": "string", "enum": []string{"income", "expense"}},
+		"name":    map[string]any{"type": "string", "description": "中文名称，如 宠物"},
+		"account": map[string]any{"type": "string", "description": "英文路径，如 Expenses:Pets"},
+	}, "kind", "name", "account")
+	return ai.ToolSchema{Name: "show_onboarding_card",
+		Description: "在 App 里展示一张原生卡片让用户直接填写，代替用文字一项项问：" +
+			"balances 是期初余额卡（草案里每个账户一个金额框，加期初日期），要先记下账户再用；" +
+			"categories 是分类卡（草案里的分类可以点掉，suggested 里的可以点上），要先用 replace_categories 写入你推荐的那组再用；" +
+			"storage 问账本放在哪（只在这台设备或 Git 仓库）；imports 问账单从哪里导入。" +
+			"调用后这一轮立即结束；用户填完后 App 会直接改好草案，并把结果作为下一条消息发来。每种卡片一般只用一次。",
+		Parameters: objectParameters(map[string]any{
+			"kind":   map[string]any{"type": "string", "enum": onboardingCards},
+			"prompt": map[string]any{"type": "string", "description": "卡片上方的一句话，如 各账户现在有多少钱、欠多少？不确定的留空"},
+			"suggested": map[string]any{"type": "array", "maxItems": 12, "items": suggestion,
+				"description": "只用于 categories：草案之外可以点上的常见分类"},
+		}, "kind", "prompt")}
+}
+func (*onboardingCardTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
+
+func (t *onboardingCardTool) Execute(_ context.Context, _ string, params json.RawMessage, _ agent.ToolUpdateCallback) (agent.AgentToolResult, error) {
+	var card onboardingCardV1
+	if err := json.Unmarshal(params, &card); err != nil {
+		return agent.AgentToolResult{}, errors.New("show_onboarding_card 的参数无效")
+	}
+	card.Prompt = strings.TrimSpace(card.Prompt)
+	if !slices.Contains(onboardingCards, card.Kind) {
+		return agent.AgentToolResult{}, fmt.Errorf("kind 需要是 %s 之一", strings.Join(onboardingCards, "、"))
+	}
+	if card.Prompt == "" || utf8.RuneCountInString(card.Prompt) > maxAskQuestionRunes {
+		return agent.AgentToolResult{}, errors.New("prompt 不能为空，最多 300 字")
+	}
+	s := t.session
+	s.mu.Lock()
+	draft := s.state.Draft
+	s.mu.Unlock()
+	switch card.Kind {
+	case "balances":
+		if len(draft.Accounts) == 0 {
+			return agent.AgentToolResult{}, errors.New("草案里还没有账户，先用 upsert_account 记下账户")
+		}
+	case "categories":
+		if len(draft.IncomeCategories) == 0 && len(draft.ExpenseCategories) == 0 {
+			return agent.AgentToolResult{}, errors.New("先用 replace_categories 写入你推荐的分类，再展示分类卡")
+		}
+		taken := map[string]bool{}
+		for _, item := range append(append([]onboardingCategoryV1{}, draft.IncomeCategories...), draft.ExpenseCategories...) {
+			taken[item.Name], taken[item.Account] = true, true
+		}
+		suggested := card.Suggested[:0]
+		for _, item := range card.Suggested {
+			item.Name, item.Account = strings.TrimSpace(item.Name), strings.TrimSpace(item.Account)
+			root := map[string]string{"income": "Income", "expense": "Expenses"}[item.Kind]
+			if root == "" {
+				return agent.AgentToolResult{}, errors.New("suggested 的 kind 需要是 income 或 expense")
+			}
+			if err := (onboardingCategoryV1{Name: item.Name, Account: item.Account}).validate(root); err != nil {
+				return agent.AgentToolResult{}, err
+			}
+			if taken[item.Name] || taken[item.Account] {
+				continue
+			}
+			taken[item.Name], taken[item.Account] = true, true
+			suggested = append(suggested, item)
+		}
+		card.Suggested = suggested
+	default:
+		card.Suggested = nil
+	}
+	s.mu.Lock()
+	s.card = &card
+	s.mu.Unlock()
+	return agent.AgentToolResult{
+		Content:   []ai.ToolResultMessageContent{ai.TextContent{Text: "卡片已经展示给用户。这一轮到此结束，用户填好后 App 会改好草案，结果作为下一条消息发来。"}},
+		Details:   map[string]any{},
+		Terminate: true,
+	}, nil
 }

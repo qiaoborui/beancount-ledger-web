@@ -118,7 +118,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.launchArguments = ["--local-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
@@ -148,7 +148,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.launchArguments = ["--local-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
@@ -181,7 +181,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.launchArguments = ["--local-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
         app.tabBars.buttons["流水"].tap()
@@ -384,7 +384,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.launchArguments = ["--local-ui-testing", "--pending-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap(); app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
         app.tabBars.buttons["流水"].tap()
@@ -447,7 +447,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.launchArguments = ["--local-ui-testing", "--safe-bookkeeping-parser"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
@@ -486,7 +486,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.launchArguments = ["--local-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
@@ -517,7 +517,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.launchArguments = ["--local-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.revealLedgerSetupMenu())
         XCTAssertFalse(app.textFields["https://ledger.example.com"].exists)
         app.buttons["local-ledger-create"].tap()
         XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForExistence(timeout: 5))
