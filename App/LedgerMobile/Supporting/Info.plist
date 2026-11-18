@@ -63,6 +63,10 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LedgerAppGroupIdentifier</key>
+	<string>$(LEDGER_APP_GROUP)</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>LedgerWidgetKeychainAccessGroup</key>

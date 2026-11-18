@@ -48,7 +48,13 @@ cd "$project_dir"
 
 # Both numbers go to every target as build settings, overriding the local
 # development values in project.yml.
+# SideStore rewrites the identifiers per Apple ID itself. Existing sideloaded
+# installs came from the `.mobile` IDs, so this package keeps them instead of
+# the paid team's com.qiaoborui.ledger from project.yml.
+readonly sidestore_bundle_id=com.qiaoborui.ledger.mobile
+readonly sidestore_app_group=group.com.qiaoborui.ledger.mobile
 build_settings=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
+  "LEDGER_BUNDLE_ID=$sidestore_bundle_id" "LEDGER_APP_GROUP=$sidestore_app_group"
   "CURRENT_PROJECT_VERSION=$build_number" "MARKETING_VERSION=$marketing_version")
 
 # The Xcode project is generated and git-ignored: a clean checkout has none, and
@@ -92,12 +98,17 @@ done
 sign_bundle() {
   local bundle="$1" source_entitlements="$2"
   local entitlements="$build_dir/$(basename "$bundle").entitlements"
-  python3 - "$source_entitlements" "$entitlements" <<'PY'
+  python3 - "$source_entitlements" "$entitlements" "$sidestore_app_group" <<'PY'
 import plistlib
 import sys
 with open(sys.argv[1], "rb") as source:
     entitlements = plistlib.load(source)
 entitlements.pop("keychain-access-groups", None)
+# The committed files name the group through a build setting; an unsigned
+# archive never expands it.
+groups = entitlements.get("com.apple.security.application-groups", [])
+entitlements["com.apple.security.application-groups"] = [
+    sys.argv[3] if group == "$(LEDGER_APP_GROUP)" else group for group in groups]
 with open(sys.argv[2], "wb") as target:
     plistlib.dump(entitlements, target)
 PY
@@ -107,7 +118,7 @@ PY
 
 sign_bundle "$app/PlugIns/LedgerWidgets.appex" "$project_dir/WidgetExtension/LedgerWidgets.entitlements"
 sign_bundle "$app/PlugIns/LedgerShare.appex" "$project_dir/ShareExtension/LedgerShare.entitlements"
-sign_bundle "$app" "$project_dir/Supporting/LedgerMobilePersonal.entitlements"
+sign_bundle "$app" "$project_dir/Supporting/LedgerMobile.entitlements"
 codesign --verify --deep --strict "$app"
 
 # Check device architecture, versions, extensions and the App Group that the

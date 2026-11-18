@@ -24,6 +24,11 @@ name: iOS release
 #
 # Public distribution is still subject to the open issue recorded in
 # App/LedgerMobile/Runtime/THIRD_PARTY.md: pushing a tag publishes the IPA.
+#
+# The same tag also uploads a build signed by the paid team to TestFlight
+# (internal testing only), once the repository variable TESTFLIGHT_UPLOAD is
+# "true" and the App Store Connect API key is stored as the secrets
+# ASC_KEY_ID, ASC_ISSUER_ID and ASC_PRIVATE_KEY (the .p8 file's contents).
 
 on:
   push:
@@ -76,3 +81,31 @@ jobs:
       # Fine-grained token with Contents read/write on
       # qiaoborui/beancount-ledger-releases only.
       release-token: ${{ secrets.LEDGER_RELEASES_TOKEN }}
+
+  testflight:
+    name: Upload to TestFlight
+    if: github.repository == 'qiaoborui/beancount-ledger-web' && vars.TESTFLIGHT_UPLOAD == 'true'
+    runs-on: [self-hosted, macOS, ARM64, ledger-ios]
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # ios-release-version.sh compares every release tag.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Archive with the paid team and upload
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          source .github/scripts/select-xcode.sh
+          export PATH="/opt/homebrew/bin:$PATH"
+          key_dir="$(mktemp -d)"
+          trap 'rm -rf "$key_dir"' EXIT
+          umask 077
+          printf '%s\n' "$ASC_PRIVATE_KEY" > "$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+          export ASC_KEY_PATH="$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+          bash scripts/build-ios-team-signed.sh --testflight

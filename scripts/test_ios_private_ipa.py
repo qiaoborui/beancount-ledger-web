@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/build-ios-ipa.sh"
 RELEASE_WORKFLOW = ROOT / ".github/workflows/ios-release.yml"
 VERSION_SCRIPT = ROOT / "scripts/ios-release-version.sh"
+TEAM_SCRIPT = ROOT / "scripts/build-ios-team-signed.sh"
+PROJECT = ROOT / "App/LedgerMobile/project.yml"
 
 
 class PrivateIPATests(unittest.TestCase):
@@ -88,6 +90,57 @@ class PrivateIPATests(unittest.TestCase):
         # The packaged app must report exactly the tagged numbers.
         self.assertIn("not the tagged $marketing_version ($build_number)", script)
         self.assertNotIn("GITHUB_RUN_NUMBER", script)
+
+
+class TeamSigningTests(unittest.TestCase):
+    """The paid team signs from project.yml; SideStore keeps the unsuffixed IDs."""
+
+    def test_project_signs_every_target_with_the_team_settings(self):
+        project = PROJECT.read_text()
+        team = re.search(r"^    LEDGER_TEAM_ID: ([A-Z0-9]{10})$", project, re.M)
+        self.assertIsNotNone(team)
+        self.assertNotIn("PERSONAL_TEAM_BUILD", project)
+        self.assertEqual(project.count("DEVELOPMENT_TEAM: $(LEDGER_TEAM_ID)"), 3)
+        for suffix in ("", ".widgets", ".share"):
+            self.assertIn(f"PRODUCT_BUNDLE_IDENTIFIER: $(LEDGER_BUNDLE_ID){suffix}\n", project)
+        for entitlements in ("Supporting/LedgerMobile.entitlements",
+                             "WidgetExtension/LedgerWidgets.entitlements",
+                             "ShareExtension/LedgerShare.entitlements"):
+            text = (ROOT / "App/LedgerMobile" / entitlements).read_text()
+            self.assertIn("<string>$(LEDGER_APP_GROUP)</string>", text, entitlements)
+            self.assertNotIn("associated-domains", text, entitlements)
+
+    def test_project_uses_the_paid_team_identifiers(self):
+        project = PROJECT.read_text()
+        self.assertIn("    LEDGER_BUNDLE_ID: com.qiaoborui.ledger\n", project)
+        self.assertIn("    LEDGER_APP_GROUP: group.com.qiaoborui.ledger\n", project)
+        # The app and both extensions tell LedgerSharedAccess their group.
+        self.assertEqual(project.count("LedgerAppGroupIdentifier: $(LEDGER_APP_GROUP)"), 3)
+        for plist in ("Supporting/Info.plist", "WidgetExtension/Info.plist", "ShareExtension/Info.plist"):
+            text = (ROOT / "App/LedgerMobile" / plist).read_text()
+            self.assertIn("<key>LedgerAppGroupIdentifier</key>\n\t<string>$(LEDGER_APP_GROUP)</string>", text, plist)
+
+    def test_sidestore_package_keeps_the_mobile_identifiers(self):
+        script = SCRIPT.read_text()
+        self.assertIn("readonly sidestore_bundle_id=com.qiaoborui.ledger.mobile", script)
+        self.assertIn("readonly sidestore_app_group=group.com.qiaoborui.ledger.mobile", script)
+        self.assertIn('"LEDGER_BUNDLE_ID=$sidestore_bundle_id" "LEDGER_APP_GROUP=$sidestore_app_group"', script)
+        self.assertIn('"$(LEDGER_APP_GROUP)"', script)
+
+    def test_testflight_needs_the_api_key_before_building(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("ASC_")}
+        result = subprocess.run(["bash", str(TEAM_SCRIPT), "--testflight"],
+                                capture_output=True, text=True, env=env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ASC_KEY_ID", result.stderr)
+
+    def test_testflight_job_is_opt_in_and_read_only(self):
+        workflow = RELEASE_WORKFLOW.read_text()
+        job = workflow[workflow.index("\n  testflight:"):]
+        self.assertIn("vars.TESTFLIGHT_UPLOAD == 'true'", job)
+        self.assertIn("github.repository == 'qiaoborui/beancount-ledger-web'", job)
+        self.assertIn("build-ios-team-signed.sh --testflight", job)
+        self.assertNotIn("write", job)
 
 
 class ReleaseVersionTests(unittest.TestCase):

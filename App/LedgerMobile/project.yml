@@ -17,6 +17,15 @@ settings:
     # Let the compiler extract String(localized:) and SwiftUI keys with their real argument types.
     SWIFT_EMIT_LOC_STRINGS: YES
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    # Signing identity: the paid Apple Developer team. Every target, Info.plist
+    # (LedgerAppGroupIdentifier, read by LedgerSharedAccess) and entitlements
+    # file reads these three settings. com.qiaoborui.ledger.mobile stays with the
+    # old Personal Team, so the SideStore package overrides them back to the
+    # `.mobile` IDs (scripts/build-ios-ipa.sh) and another team is a
+    # command-line override (scripts/build-ios-team-signed.sh).
+    LEDGER_TEAM_ID: 6YJVKL5GXV
+    LEDGER_BUNDLE_ID: com.qiaoborui.ledger
+    LEDGER_APP_GROUP: group.com.qiaoborui.ledger
 
 targets:
   LedgerMobile:
@@ -99,7 +108,11 @@ targets:
         NSMicrophoneUsageDescription: 用语音向账本助手提问或记账，录音只用于转成文字，不会保存。
         NSSpeechRecognitionUsageDescription: 把你说的话转成文字，放进账本助手的输入框。
         NSFaceIDUsageDescription: 使用 Face ID 解锁受保护的账本金额和财务数据。
+        LedgerAppGroupIdentifier: $(LEDGER_APP_GROUP)
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
+        # HTTPS and Apple's own crypto only, which is exempt; saves the export
+        # compliance question on every TestFlight upload.
+        ITSAppUsesNonExemptEncryption: false
         NSSupportsLiveActivities: true
         UIBackgroundModes:
           - audio
@@ -121,12 +134,12 @@ targets:
           - UIInterfaceOrientationLandscapeRight
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.qiaoborui.ledger.mobile
+        PRODUCT_BUNDLE_IDENTIFIER: $(LEDGER_BUNDLE_ID)
         PRODUCT_NAME: LedgerMobile
         PRODUCT_MODULE_NAME: LedgerMobile
-        DEVELOPMENT_TEAM: H92F889YBH
+        DEVELOPMENT_TEAM: $(LEDGER_TEAM_ID)
         CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_ENTITLEMENTS: Supporting/LedgerMobilePersonal.entitlements
+        CODE_SIGN_ENTITLEMENTS: Supporting/LedgerMobile.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
         ENABLE_USER_SCRIPT_SANDBOXING: NO
@@ -134,11 +147,6 @@ targets:
         SUPPORTS_MACCATALYST: YES
         DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
-      configs:
-        Debug:
-          SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) PERSONAL_TEAM_BUILD
-        Release:
-          SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) PERSONAL_TEAM_BUILD
     scheme:
       # Tests assert the Simplified Chinese source strings and zh_CN formatting.
       language: zh-Hans
@@ -181,6 +189,7 @@ targets:
         CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LedgerAppGroupIdentifier: $(LEDGER_APP_GROUP)
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
         UIAppFonts:
           - IBMPlexSans-Regular.ttf
@@ -191,10 +200,10 @@ targets:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.qiaoborui.ledger.mobile.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: $(LEDGER_BUNDLE_ID).widgets
         PRODUCT_NAME: LedgerWidgets
         PRODUCT_MODULE_NAME: LedgerWidgets
-        DEVELOPMENT_TEAM: H92F889YBH
+        DEVELOPMENT_TEAM: $(LEDGER_TEAM_ID)
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: WidgetExtension/LedgerWidgets.entitlements
         APPLICATION_EXTENSION_API_ONLY: YES
@@ -226,6 +235,7 @@ targets:
         CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LedgerAppGroupIdentifier: $(LEDGER_APP_GROUP)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
@@ -235,9 +245,9 @@ targets:
               NSExtensionActivationSupportsImageWithMaxCount: 5
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.qiaoborui.ledger.mobile.share
+        PRODUCT_BUNDLE_IDENTIFIER: $(LEDGER_BUNDLE_ID).share
         PRODUCT_MODULE_NAME: LedgerShare
-        DEVELOPMENT_TEAM: H92F889YBH
+        DEVELOPMENT_TEAM: $(LEDGER_TEAM_ID)
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: ShareExtension/LedgerShare.entitlements
         APPLICATION_EXTENSION_API_ONLY: YES

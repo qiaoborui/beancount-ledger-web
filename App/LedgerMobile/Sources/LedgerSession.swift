@@ -78,13 +78,10 @@ private struct LedgerTransactionMutation {
 @MainActor
 final class LedgerSession: ObservableObject {
     nonisolated static let passkeyRelyingPartyID = "beancount.borry.org"
-    nonisolated static var nativePasskeyEnabledForCurrentBuild: Bool {
-#if PERSONAL_TEAM_BUILD
-        false
-#else
-        true
-#endif
-    }
+    /// Native passkeys need the `webcredentials:` associated domain, which only
+    /// the retired remote server login used. The local-only app ships without
+    /// Associated Domains, so the native ceremony stays off.
+    nonisolated static var nativePasskeyEnabledForCurrentBuild: Bool { false }
 
     enum Phase: Equatable {
         case configuration
