@@ -24,6 +24,25 @@ ALPINE_SHA256="${ALPINE_SHA256-36091efacd083c1cf5a8c837272530bff4fc72db1fbfdef55
 
 mkdir -p "$BUILD/downloads" "$BUILD/upstream"
 
+# The upstream ShellBox repository and its releases went away in November
+# 2026. A build of the same pinned revision that already holds them (the CI
+# cache on the self-hosted runner, or LEDGER_LINUX_SEED) seeds this one; the
+# commit and SHA-256 checks below still decide what is used.
+SEED="${LEDGER_LINUX_SEED:-${RUNNER_WORKSPACE:+$RUNNER_WORKSPACE/ledger-ci-cache/server-build/linux-ios}}"
+if [ -n "$SEED" ] && [ -d "$SEED" ] && [ "$(cd "$SEED" && pwd -P)" != "$(cd "$BUILD" && pwd -P)" ]; then
+    for name in ish-ios-arm64.tar.gz ish-iossim-arm64.tar.gz; do
+        if [ ! -f "$BUILD/downloads/$name" ] && [ -f "$SEED/downloads/$name" ]; then
+            echo "Seeding $name from $SEED"
+            cp "$SEED/downloads/$name" "$BUILD/downloads/$name"
+        fi
+    done
+    if [ ! -d "$BUILD/upstream/ShellBox/.git" ] && [ -d "$SEED/upstream/ShellBox/.git" ] \
+        && [ "$(git -C "$SEED/upstream/ShellBox" rev-parse HEAD)" = "$ENGINE_COMMIT" ]; then
+        echo "Seeding the ShellBox checkout from $SEED"
+        cp -R "$SEED/upstream/ShellBox" "$BUILD/upstream/ShellBox"
+    fi
+fi
+
 fetch() {
     local name="$1" url="$2" hash="$3"
     if [ ! -f "$BUILD/downloads/$name" ]; then
