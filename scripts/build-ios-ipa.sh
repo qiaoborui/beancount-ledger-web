@@ -48,10 +48,13 @@ cd "$project_dir"
 
 # Both numbers go to every target as build settings, overriding the local
 # development values in project.yml.
-# SideStore rewrites the identifiers per Apple ID itself; it starts from the
-# project's own IDs and App Group.
+# SideStore rewrites the identifiers per Apple ID itself. Existing sideloaded
+# installs came from the `.mobile` IDs, so this package keeps them instead of
+# the paid team's com.qiaoborui.ledger from project.yml.
+readonly sidestore_bundle_id=com.qiaoborui.ledger.mobile
 readonly sidestore_app_group=group.com.qiaoborui.ledger.mobile
 build_settings=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM=
+  "LEDGER_BUNDLE_ID=$sidestore_bundle_id" "LEDGER_APP_GROUP=$sidestore_app_group"
   "CURRENT_PROJECT_VERSION=$build_number" "MARKETING_VERSION=$marketing_version")
 
 # The Xcode project is generated and git-ignored: a clean checkout has none, and

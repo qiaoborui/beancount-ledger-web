@@ -12,6 +12,39 @@ final class LedgerSharedAccessTests: XCTestCase {
         XCTAssertEqual(access.widgetKeychainAccessGroup, legacyKeychain)
     }
 
+    func testPaidTeamBuildUsesTheDeclaredAppGroup() {
+        for suffix in ["", ".widgets", ".share"] {
+            let access = LedgerSharedAccess(infoDictionary: [
+                "CFBundleIdentifier": "com.qiaoborui.ledger" + suffix,
+                LedgerSharedAccess.appGroupInfoKey: "group.com.qiaoborui.ledger",
+                LedgerSharedAccess.widgetKeychainInfoKey: legacyKeychain,
+            ])
+            XCTAssertEqual(access.appGroupIdentifier, "group.com.qiaoborui.ledger")
+            XCTAssertEqual(access.widgetKeychainAccessGroup, legacyKeychain)
+        }
+    }
+
+    func testUnexpandedOrInvalidDeclaredGroupFallsBackToTheOriginal() {
+        for raw in ["", "  ", "$(LEDGER_APP_GROUP)", "com.qiaoborui.ledger"] {
+            let access = LedgerSharedAccess(infoDictionary: [LedgerSharedAccess.appGroupInfoKey: raw])
+            XCTAssertEqual(access.appGroupIdentifier, original, raw)
+        }
+    }
+
+    func testResigningMetadataTakesPrecedenceOverTheDeclaredGroup() {
+        let resigned = original + ".NEWTEAM123"
+        let sideStore = LedgerSharedAccess(infoDictionary: [
+            "ALTAppGroups": [resigned],
+            LedgerSharedAccess.appGroupInfoKey: original,
+        ])
+        XCTAssertEqual(sideStore.appGroupIdentifier, resigned)
+        let iLoader = LedgerSharedAccess(infoDictionary: [
+            "CFBundleIdentifier": "com.qiaoborui.ledger.mobile.NEWTEAM123",
+            LedgerSharedAccess.appGroupInfoKey: original,
+        ])
+        XCTAssertEqual(iLoader.appGroupIdentifier, resigned)
+    }
+
     func testILoaderWithoutALTMetadataSharesOneGroupAcrossAllBundles() {
         for suffix in ["", ".widgets", ".share"] {
             let access = LedgerSharedAccess(infoDictionary: [

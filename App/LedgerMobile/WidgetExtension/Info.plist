@@ -25,6 +25,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LedgerAppGroupIdentifier</key>
+	<string>$(LEDGER_APP_GROUP)</string>
 	<key>LedgerWidgetKeychainAccessGroup</key>
 	<string>$(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared</string>
 	<key>NSExtension</key>

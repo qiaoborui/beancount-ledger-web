@@ -110,14 +110,21 @@ class TeamSigningTests(unittest.TestCase):
             self.assertIn("<string>$(LEDGER_APP_GROUP)</string>", text, entitlements)
             self.assertNotIn("associated-domains", text, entitlements)
 
-    def test_project_uses_the_unsuffixed_identifiers(self):
+    def test_project_uses_the_paid_team_identifiers(self):
         project = PROJECT.read_text()
-        self.assertIn("    LEDGER_BUNDLE_ID: com.qiaoborui.ledger.mobile\n", project)
-        self.assertIn("    LEDGER_APP_GROUP: group.com.qiaoborui.ledger.mobile\n", project)
+        self.assertIn("    LEDGER_BUNDLE_ID: com.qiaoborui.ledger\n", project)
+        self.assertIn("    LEDGER_APP_GROUP: group.com.qiaoborui.ledger\n", project)
+        # The app and both extensions tell LedgerSharedAccess their group.
+        self.assertEqual(project.count("LedgerAppGroupIdentifier: $(LEDGER_APP_GROUP)"), 3)
+        for plist in ("Supporting/Info.plist", "WidgetExtension/Info.plist", "ShareExtension/Info.plist"):
+            text = (ROOT / "App/LedgerMobile" / plist).read_text()
+            self.assertIn("<key>LedgerAppGroupIdentifier</key>\n\t<string>$(LEDGER_APP_GROUP)</string>", text, plist)
 
-    def test_sidestore_package_expands_the_app_group(self):
+    def test_sidestore_package_keeps_the_mobile_identifiers(self):
         script = SCRIPT.read_text()
+        self.assertIn("readonly sidestore_bundle_id=com.qiaoborui.ledger.mobile", script)
         self.assertIn("readonly sidestore_app_group=group.com.qiaoborui.ledger.mobile", script)
+        self.assertIn('"LEDGER_BUNDLE_ID=$sidestore_bundle_id" "LEDGER_APP_GROUP=$sidestore_app_group"', script)
         self.assertIn('"$(LEDGER_APP_GROUP)"', script)
 
     def test_testflight_needs_the_api_key_before_building(self):

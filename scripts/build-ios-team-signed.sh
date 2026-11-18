@@ -8,13 +8,13 @@
 #   bash scripts/build-ios-team-signed.sh --testflight [--team TEAMID]
 #
 # project.yml signs as the paid team (LEDGER_TEAM_ID) with
-#   com.qiaoborui.ledger.mobile{,.widgets,.share}
-#   group.com.qiaoborui.ledger.mobile
+#   com.qiaoborui.ledger{,.widgets,.share}
+#   group.com.qiaoborui.ledger
 # Those IDs belong to that team, so --team with another team signs as
-#   com.qiaoborui.ledger.mobile.<TEAMID>{,.widgets,.share}
-#   group.com.qiaoborui.ledger.mobile.<TEAMID>
-# through the same build settings; LedgerSharedAccess derives the App Group
-# from that bundle ID shape, so the app and both extensions agree.
+#   com.qiaoborui.ledger.<TEAMID>{,.widgets,.share}
+#   group.com.qiaoborui.ledger.<TEAMID>
+# through the same build settings. Each bundle's Info.plist carries the group
+# (LedgerAppGroupIdentifier), so the app and both extensions agree.
 #
 # Development archive (default): the build number defaults to the commit count,
 # so each commit is a higher build than the last. The team needs at least one
@@ -106,8 +106,8 @@ elif [[ -z "${DEVELOPER_DIR:-}" && -d "/Applications/Xcode.app/Contents/Develope
   export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
 fi
 
-bundle_id="com.qiaoborui.ledger.mobile"
-app_group="group.com.qiaoborui.ledger.mobile"
+bundle_id="com.qiaoborui.ledger"
+app_group="group.com.qiaoborui.ledger"
 if [[ "$team" != "$project_team" ]]; then
   bundle_id="${bundle_id}.${team}"
   app_group="${app_group}.${team}"
