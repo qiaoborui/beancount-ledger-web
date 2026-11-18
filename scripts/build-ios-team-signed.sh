@@ -7,12 +7,14 @@
 #        [--build-number N] [--marketing-version X.Y.Z] [--archive PATH]
 #   bash scripts/build-ios-team-signed.sh --testflight [--team TEAMID]
 #
-# project.yml already signs as the paid team (LEDGER_TEAM_ID) with
+# project.yml signs as the paid team (LEDGER_TEAM_ID) with
+#   com.qiaoborui.ledger.mobile{,.widgets,.share}
+#   group.com.qiaoborui.ledger.mobile
+# Those IDs belong to that team, so --team with another team signs as
 #   com.qiaoborui.ledger.mobile.<TEAMID>{,.widgets,.share}
 #   group.com.qiaoborui.ledger.mobile.<TEAMID>
-# --team passes another team through the same build settings; LedgerSharedAccess
-# derives the App Group from that bundle ID shape, so the app and both
-# extensions agree without editing the project.
+# through the same build settings; LedgerSharedAccess derives the App Group
+# from that bundle ID shape, so the app and both extensions agree.
 #
 # Development archive (default): the build number defaults to the commit count,
 # so each commit is a higher build than the last. The team needs at least one
@@ -50,9 +52,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$team" ]]; then
-  team="$(sed -n 's/^ *LEDGER_TEAM_ID: *\([A-Z0-9]*\) *$/\1/p' "${project_dir}/project.yml" | head -n 1)"
-fi
+project_team="$(sed -n 's/^ *LEDGER_TEAM_ID: *\([A-Z0-9]*\) *$/\1/p' "${project_dir}/project.yml" | head -n 1)"
+team="${team:-$project_team}"
 if [[ ! "$team" =~ ^[A-Z0-9]{10}$ ]]; then
   echo "--team must be a 10-character Team ID such as ABCDE12345." >&2
   exit 1
@@ -105,8 +106,12 @@ elif [[ -z "${DEVELOPER_DIR:-}" && -d "/Applications/Xcode.app/Contents/Develope
   export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
 fi
 
-bundle_id="com.qiaoborui.ledger.mobile.${team}"
-app_group="group.com.qiaoborui.ledger.mobile.${team}"
+bundle_id="com.qiaoborui.ledger.mobile"
+app_group="group.com.qiaoborui.ledger.mobile"
+if [[ "$team" != "$project_team" ]]; then
+  bundle_id="${bundle_id}.${team}"
+  app_group="${app_group}.${team}"
+fi
 state_dir="${project_dir}/.build/team-${team}"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/ledger-ios-team.XXXXXX")"
 archive="${archive:-${state_dir}/LedgerMobile.xcarchive}"
@@ -135,6 +140,8 @@ mkdir -p "$(dirname "$archive")"
 
 build_settings=(
   "LEDGER_TEAM_ID=${team}"
+  "LEDGER_BUNDLE_ID=${bundle_id}"
+  "LEDGER_APP_GROUP=${app_group}"
   "CURRENT_PROJECT_VERSION=${build_number}"
   CODE_SIGN_STYLE=Automatic
 )

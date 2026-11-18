@@ -17,16 +17,14 @@ settings:
     # Let the compiler extract String(localized:) and SwiftUI keys with their real argument types.
     SWIFT_EMIT_LOC_STRINGS: YES
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
-    # Signing identity: the paid Apple Developer team. The IDs keep the
-    # `.<TEAMID>` suffix the first team-signed builds were installed with, so
-    # those installs update in place; LedgerSharedAccess derives the same App
-    # Group from that bundle ID shape. Every target and entitlements file reads
-    # these three settings. scripts/build-ios-ipa.sh (SideStore) overrides them
-    # with the unsuffixed IDs; scripts/build-ios-team-signed.sh can pass another
-    # team on the command line.
+    # Signing identity: the paid Apple Developer team. Every target and
+    # entitlements file reads these three settings, so another team (whose
+    # build needs other IDs, e.g. `<base>.<TEAMID>`, which LedgerSharedAccess
+    # also understands) is a command-line override, see
+    # scripts/build-ios-team-signed.sh.
     LEDGER_TEAM_ID: 6YJVKL5GXV
-    LEDGER_BUNDLE_ID: com.qiaoborui.ledger.mobile.$(LEDGER_TEAM_ID)
-    LEDGER_APP_GROUP: group.com.qiaoborui.ledger.mobile.$(LEDGER_TEAM_ID)
+    LEDGER_BUNDLE_ID: com.qiaoborui.ledger.mobile
+    LEDGER_APP_GROUP: group.com.qiaoborui.ledger.mobile
 
 targets:
   LedgerMobile:

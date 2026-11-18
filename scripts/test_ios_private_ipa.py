@@ -110,10 +110,14 @@ class TeamSigningTests(unittest.TestCase):
             self.assertIn("<string>$(LEDGER_APP_GROUP)</string>", text, entitlements)
             self.assertNotIn("associated-domains", text, entitlements)
 
-    def test_sidestore_package_overrides_the_team_identifiers(self):
+    def test_project_uses_the_unsuffixed_identifiers(self):
+        project = PROJECT.read_text()
+        self.assertIn("    LEDGER_BUNDLE_ID: com.qiaoborui.ledger.mobile\n", project)
+        self.assertIn("    LEDGER_APP_GROUP: group.com.qiaoborui.ledger.mobile\n", project)
+
+    def test_sidestore_package_expands_the_app_group(self):
         script = SCRIPT.read_text()
-        self.assertIn('"LEDGER_BUNDLE_ID=$sidestore_bundle_id"', script)
-        self.assertIn('"LEDGER_APP_GROUP=$sidestore_app_group"', script)
+        self.assertIn("readonly sidestore_app_group=group.com.qiaoborui.ledger.mobile", script)
         self.assertIn('"$(LEDGER_APP_GROUP)"', script)
 
     def test_testflight_needs_the_api_key_before_building(self):
