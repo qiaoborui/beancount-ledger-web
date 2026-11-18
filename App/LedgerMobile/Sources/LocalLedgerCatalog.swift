@@ -404,12 +404,21 @@ actor LocalLedgerCatalog {
         }
         structure.append("")
 
-        let effectiveCategories = categories.isEmpty ? [
+        var effectiveCategories = categories.isEmpty ? [
             OnboardingCategorySelection(name: String(localized: "工资收入"), account: "Income:Salary", currency: currency),
             OnboardingCategorySelection(name: String(localized: "餐饮美食"), account: "Expenses:Food", currency: currency),
             OnboardingCategorySelection(name: String(localized: "交通出行"), account: "Expenses:Transport", currency: currency),
             OnboardingCategorySelection(name: String(localized: "其他支出"), account: "Expenses:Other", currency: currency)
         ] : categories
+        // The import configurations fall back to these two, so every new
+        // ledger opens them.
+        for (name, account) in [(String(localized: "其他支出"), LedgerImportTemplates.otherExpense),
+                                (String(localized: "其他收入"), LedgerImportTemplates.otherIncome)]
+        where !effectiveCategories.contains(where: { $0.account == account }) {
+            let taken = effectiveCategories.contains { $0.name == name }
+            effectiveCategories.append(OnboardingCategorySelection(name: taken ? name + String(localized: "（默认）") : name,
+                                                                   account: account, currency: currency))
+        }
 
         // A category takes every currency the ledger holds, so spending from
         // a foreign-currency account is not rejected by its open constraint.
@@ -454,21 +463,10 @@ actor LocalLedgerCatalog {
             }
         }
 
-        let alipayWallet = effectiveAccounts.first { $0.account.contains("Alipay") }?.account
-        let wechatWallet = effectiveAccounts.first { $0.account.contains("WeChat") }?.account
-        let bankAcct = effectiveAccounts.first { $0.account.hasPrefix("Assets:Bank") }?.account
-        let creditAcct = effectiveAccounts.first { $0.account.hasPrefix("Liabilities:CreditCard") }?.account
-        let catAccounts = effectiveCategories.map(\.account)
-        let chosen = importChannels.filter { $0 != "manual" }
-        if importChannels.isEmpty || chosen.contains("alipay") {
-            files.append(LedgerFile(path: "imports/alipay-config.yaml", content: LedgerImportTemplates.generateAlipayConfig(
-                currency: currency, walletAccount: alipayWallet, bankAccount: bankAcct,
-                creditAccount: creditAcct, categories: catAccounts)))
-        }
-        if importChannels.isEmpty || chosen.contains("wechat") {
-            files.append(LedgerFile(path: "imports/wechat-config.yaml", content: LedgerImportTemplates.generateWechatConfig(
-                currency: currency, walletAccount: wechatWallet, bankAccount: bankAcct,
-                creditAccount: creditAcct, categories: catAccounts)))
+        let importAccounts = effectiveAccounts.map { LedgerImportTemplates.Account(account: $0.account, currency: $0.currency) }
+        for config in LedgerImportTemplates.configs(channels: importChannels, currency: currency, accounts: importAccounts,
+                                                    categories: effectiveCategories.map(\.account)) {
+            files.append(LedgerFile(path: config.path, content: config.content))
         }
         return files
     }
