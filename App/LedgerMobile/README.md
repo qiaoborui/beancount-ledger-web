@@ -172,16 +172,35 @@ itself uploads the files and makes them visible on the user's other devices.
 Backups in iCloud Drive are not additionally encrypted by the app; with
 Advanced Data Protection enabled Apple encrypts them end to end.
 
-## Multi-device sync (iCloud Drive folder)
+## Multi-device sync (iCloud)
 
-Settings → 存储与同步 → 选择 iCloud 云盘文件夹 turns a ledger into a synced
-ledger, as an alternative to Git storage. Other devices join it from the
-library with "从 iCloud 云盘加入账本" and the same folder. Like backups this
-uses a picked folder and a bookmark, not CloudKit or a ubiquity container, so
-Personal Team and SideStore builds can use it. The cost is that there is no
-push: a device picks up changes when it saves, returns to the foreground, runs
-its periodic or background sync, or the user taps 立即同步, and only after
-iCloud Drive has downloaded the other device's files.
+Settings → 存储与同步 → 开启 iCloud 同步 turns a ledger into a synced ledger,
+as an alternative to Git storage (a ledger uses one or the other). The ledger
+lives in the app's own iCloud Documents container,
+`iCloud.com.qiaoborui.ledger.mobile` (`LEDGER_ICLOUD_CONTAINER` in
+project.yml, main app only), under `Documents/Ledgers/<ledger id>/`. Other
+devices on the same Apple ID join it from the library with "从 iCloud 加入账本",
+which lists the ledgers in the container. AI 开账 offers "存进 iCloud" on its
+storage card. 账本助手 history, memory.md and artifacts sync next to it under
+`Documents/Assistant/` and switch on together with the ledger. See
+`LedgerICloud.swift`.
+
+Why iCloud Documents rather than CloudKit: the ledger is a tree of text files
+that already syncs as immutable snapshots plus one head file per device and
+merges three ways like Git. A container gives that layout a home on every
+device without a picker; CloudKit would need the tree remodelled as records
+and its own merge.
+
+SideStore builds cannot carry the iCloud entitlement (`build-ios-ipa.sh`
+strips it); there the container is missing and the app keeps offering a
+folder the user picks in iCloud Drive (a bookmark, no entitlement), which is
+also how ledgers set up before the container keep syncing. Both kinds share
+the layout and merge below.
+
+A `NSMetadataQuery` on the container wakes a sync within seconds when another
+device's head or assistant file changes; otherwise a device picks up changes
+when it saves, returns to the foreground, runs its periodic or background
+sync, or the user taps 立即同步.
 
 - Layout: `ledger-sync.json` (name and entry file),
   `snapshots/<content digest>.ledgerbackup` (immutable trees in the backup
@@ -196,6 +215,11 @@ iCloud Drive has downloaded the other device's files.
   the other device's version). The merge is symmetric, so devices that merge
   each other at the same time publish the same digest and stop.
 - Snapshots no head's last 16 entries reference are pruned after three days.
+- Files every device writes (the marker, the assistant's memory.md and
+  conversation records) can still collide inside iCloud. iCloud keeps the
+  loser as a conflict version; `FolderConflictVersions` folds it back in
+  (memory.md line-merged, a conversation keeps the later `updatedAt`) and
+  clears it, so no device's write is silently dropped.
 
 ## Generate and build
 

@@ -1,15 +1,17 @@
 #if os(iOS)
 import SwiftUI
 
-/// iCloud 云盘同步 — keeps the assistant's history and memory.md in a folder
-/// the user picks, so deleting the app loses nothing and other devices see
-/// the same conversations. See `LedgerAgentCloudSync`.
+/// iCloud 同步 — keeps the assistant's history and memory.md in the app's
+/// iCloud container (or a folder the user picks on builds without it), so
+/// deleting the app loses nothing and other devices see the same
+/// conversations. See `LedgerAgentCloudSync`.
 struct LedgerAgentSyncView: View {
     @EnvironmentObject private var session: LedgerSession
     @ObservedObject private var sync = LedgerAgentCloudSync.shared
     @State private var choosingFolder = false
     @State private var confirmingStop = false
     @State private var linking: LedgerAgentSyncLayout.LedgerInfo?
+    @State private var iCloudAvailable: Bool?
 
     var body: some View {
         List {
@@ -18,7 +20,7 @@ struct LedgerAgentSyncView: View {
             }
             if sync.isOn {
                 Section {
-                    LabeledContent("文件夹") { AgentSyncValue(text: sync.folderName ?? String(localized: "无法访问")) }
+                    LabeledContent(sync.usesICloud ? "位置" : "文件夹") { AgentSyncValue(text: sync.folderName ?? String(localized: "无法访问")) }
                     LabeledContent("上次同步") { AgentSyncValue(text: lastSyncedText) }
                     Button {
                         Task { await sync.syncNow() }
@@ -33,7 +35,7 @@ struct LedgerAgentSyncView: View {
                     .accessibilityIdentifier("ledger-agent-sync-now")
                     Toggle("同步附件", isOn: $sync.includesAttachments)
                         .accessibilityIdentifier("ledger-agent-sync-attachments")
-                } header: { Text("iCloud 云盘") } footer: {
+                } header: { Text("iCloud") } footer: {
                     Text("回到 App、每段对话保存后都会自动同步。附件是你发给助手的账单和图片，关掉后只同步对话、记忆和产物。")
                 }
                 if !sync.otherLedgers.isEmpty {
@@ -57,11 +59,21 @@ struct LedgerAgentSyncView: View {
                         .accessibilityIdentifier("ledger-agent-sync-stop")
                 }
             } else {
+                if iCloudAvailable == true {
+                    Section {
+                        Button("开启 iCloud 同步") { Task { await sync.useICloud() } }
+                            .accessibilityIdentifier("ledger-agent-sync-icloud")
+                    } footer: {
+                        Text("聊天记录、记忆和产物会自动存一份到你的 iCloud，删掉 App 也不会丢；重装或换设备后登录同一个 Apple 账户，回到这里开启就能找回，几台设备会合并成同一份记录。")
+                    }
+                }
                 Section {
                     Button("选择 iCloud 云盘文件夹") { choosingFolder = true }
                         .accessibilityIdentifier("ledger-agent-sync-choose")
                 } footer: {
-                    Text("在 iCloud 云盘里新建或选一个文件夹，比如「账本助手」。之后聊天记录、记忆和产物会自动存一份到那里，删掉 App 也不会丢；重装后回到这里选同一个文件夹就能找回。别的设备选同一个文件夹，会合并成同一份记录。")
+                    Text(iCloudAvailable == true
+                         ? "用旧版本选过 iCloud 云盘文件夹的，可以继续选同一个文件夹。"
+                         : "在 iCloud 云盘里新建或选一个文件夹，比如「账本助手」。之后聊天记录、记忆和产物会自动存一份到那里，删掉 App 也不会丢；重装后回到这里选同一个文件夹就能找回。别的设备选同一个文件夹，会合并成同一份记录。")
                 }
             }
             Section {
@@ -71,12 +83,13 @@ struct LedgerAgentSyncView: View {
             } header: { Text("同步的内容") }
         }
         .font(.subheadline)
-        .navigationTitle("iCloud 云盘同步")
+        .navigationTitle("iCloud 同步")
         .terminalNativeChrome()
         .navigationBarTitleDisplayMode(.inline)
         .privacySensitive()
         .task {
             if let repository = session.localRepository { sync.attach(repository) }
+            iCloudAvailable = await LedgerICloud.available()
         }
         .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
             if case let .success(url) = result { sync.choose(folder: url) }

@@ -28,6 +28,9 @@ struct LedgerBackupManifest: Codable, Equatable, Sendable {
 enum LedgerBackupError: LocalizedError, Equatable {
     case folderNotConfigured
     case folderUnavailable
+    /// The app's iCloud container is out of reach: not signed in to iCloud,
+    /// iCloud Drive off for this app, or a build without the entitlement.
+    case iCloudUnavailable
     case notABackup
     case unsupportedVersion(Int)
     case corrupt(String)
@@ -37,6 +40,7 @@ enum LedgerBackupError: LocalizedError, Equatable {
         switch self {
         case .folderNotConfigured: String(localized: "请先选择备份文件夹")
         case .folderUnavailable: String(localized: "无法访问备份文件夹，请重新选择。若位于 iCloud 云盘，请确认已登录 iCloud 并开启 iCloud 云盘。")
+        case .iCloudUnavailable: String(localized: "现在用不了 iCloud：请在“设置”里登录 Apple 账户，并允许本 App 使用 iCloud 云盘。")
         case .notABackup: String(localized: "这不是 Ledger 账本备份文件")
         case let .unsupportedVersion(version): String(localized: "备份格式版本 \(version) 需要更新的 App 才能恢复")
         case let .corrupt(detail): String(localized: "备份文件已损坏或不完整：\(detail)")

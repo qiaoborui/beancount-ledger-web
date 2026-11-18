@@ -95,7 +95,7 @@ enum LocalStorageError: LocalizedError, Equatable {
         case .synchronizationInProgress: String(localized: "账本正在同步，请稍候")
         case let .conflicts(paths): String(localized: "这些文件在本机和远端均有修改：\(paths.joined(separator: String(localized: "、")))。两边内容已保留，请处理冲突后再同步。")
         case .emptyRepository: String(localized: "该分支尚无账本，请先新建本地账本再连接仓库")
-        case .emptySyncFolder: String(localized: "这个文件夹里还没有同步的账本。请先在已有账本的设备上开启 iCloud 云盘同步，等待上传完成后再试。")
+        case .emptySyncFolder: String(localized: "这个文件夹里还没有同步的账本。请先在已有账本的设备上开启 iCloud 同步，等待上传完成后再试。")
         case let .unsafeFile(path): String(localized: "同步目录包含不受支持的路径或文件：\(path)")
         case .treeLimitExceeded: String(localized: "同步目录超过文件数量、大小或层级限制")
         case .corruptSyncState: String(localized: "同步记录已损坏，请重新配置仓库连接；本地账本仍然可用")

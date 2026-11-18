@@ -615,6 +615,8 @@ private struct LedgerStorageCard: View {
     @State private var storage = "device"
     @State private var remote = ""
     @State private var seeded = false
+    /// Shown only on builds and devices that can reach the app's iCloud.
+    @State private var iCloudAvailable = false
 
     /// The address as it will be stored: HTTPS, no credentials.
     private var address: String? {
@@ -627,13 +629,17 @@ private struct LedgerStorageCard: View {
         VStack(alignment: .leading, spacing: 10) {
             LedgerCardTitle(title: String(localized: "账本放在哪"))
             option("device", title: String(localized: "只存在这台设备上"),
-                   detail: String(localized: "最简单。之后随时可以在设置里接 Git 或 iCloud 云盘。"), symbol: "iphone")
+                   detail: String(localized: "最简单。之后随时可以在设置里接 Git 或 iCloud。"), symbol: "iphone")
+            if iCloudAvailable {
+                option("icloud", title: String(localized: "存进 iCloud"),
+                       detail: String(localized: "同一个 Apple 账户的 iPhone、iPad 自动同步，不用准备什么。"), symbol: "icloud")
+            }
             option("git", title: String(localized: "同步到 Git 仓库"),
                    detail: String(localized: "准备一个空仓库，建好后自动推上去，电脑上也能用。"), symbol: "arrow.triangle.branch")
             if storage == "git" { gitFields }
             LedgerCardFooter(hint: storage == "git" ? String(localized: "令牌只存钥匙串，不进对话") : "") {
                 Button("好了") {
-                    onSubmit(storage == "git" ? .storage("git", remote: address ?? "") : .storage("device", remote: ""))
+                    onSubmit(storage == "git" ? .storage("git", remote: address ?? "") : .storage(storage, remote: ""))
                 }
                 .buttonStyle(.balanced(.primary))
                 .fixedSize()
@@ -648,7 +654,13 @@ private struct LedgerStorageCard: View {
             if draft.storage == "git" {
                 storage = "git"
                 remote = draft.remote
+            } else if draft.storage == "icloud" {
+                storage = "icloud"
             }
+        }
+        .task {
+            iCloudAvailable = await LedgerICloud.available()
+            if !iCloudAvailable, storage == "icloud" { storage = "device" }
         }
     }
 

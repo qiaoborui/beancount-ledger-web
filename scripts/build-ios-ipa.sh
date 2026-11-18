@@ -101,6 +101,11 @@ import sys
 with open(sys.argv[1], "rb") as source:
     entitlements = plistlib.load(source)
 entitlements.pop("keychain-access-groups", None)
+# SideStore cannot provision iCloud; the app falls back to a picked folder.
+for key in ("com.apple.developer.icloud-container-identifiers",
+            "com.apple.developer.ubiquity-container-identifiers",
+            "com.apple.developer.icloud-services"):
+    entitlements.pop(key, None)
 # The committed files name the group through a build setting; an unsigned
 # archive never expands it.
 groups = entitlements.get("com.apple.security.application-groups", [])

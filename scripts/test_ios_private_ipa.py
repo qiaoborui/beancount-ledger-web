@@ -120,6 +120,24 @@ class TeamSigningTests(unittest.TestCase):
         self.assertIn("readonly sidestore_app_group=group.com.qiaoborui.ledger.mobile", script)
         self.assertIn('"$(LEDGER_APP_GROUP)"', script)
 
+    def test_icloud_container_is_main_app_only_and_team_independent(self):
+        project = PROJECT.read_text()
+        # The container is where users' iCloud data lives: it must not move
+        # with the team suffix or an App Store transfer.
+        self.assertIn("    LEDGER_ICLOUD_CONTAINER: iCloud.com.qiaoborui.ledger.mobile\n", project)
+        app = (ROOT / "App/LedgerMobile/Supporting/LedgerMobile.entitlements").read_text()
+        self.assertEqual(app.count("<string>$(LEDGER_ICLOUD_CONTAINER)</string>"), 2)
+        self.assertIn("<string>CloudDocuments</string>", app)
+        for extension in ("WidgetExtension/LedgerWidgets.entitlements",
+                          "ShareExtension/LedgerShare.entitlements"):
+            self.assertNotIn("icloud", (ROOT / "App/LedgerMobile" / extension).read_text().lower())
+        # SideStore cannot provision iCloud, so its ad-hoc signature drops it.
+        script = SCRIPT.read_text()
+        for key in ("com.apple.developer.icloud-container-identifiers",
+                    "com.apple.developer.ubiquity-container-identifiers",
+                    "com.apple.developer.icloud-services"):
+            self.assertIn(f'"{key}"', script)
+
     def test_testflight_needs_the_api_key_before_building(self):
         env = {k: v for k, v in os.environ.items() if not k.startswith("ASC_")}
         result = subprocess.run(["bash", str(TEAM_SCRIPT), "--testflight"],

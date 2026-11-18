@@ -11,6 +11,7 @@ struct LedgerLibraryView: View {
     @State private var addingGit = false
     @State private var restoringBackup = false
     @State private var joiningFolder = false
+    @State private var joiningICloud = false
     @State private var editingLedger: LocalLedgerDescriptor?
     @State private var deletingLedger: LocalLedgerDescriptor?
     @State private var confirmingDelete = false
@@ -50,7 +51,7 @@ struct LedgerLibraryView: View {
                     LibraryActionRow(title: String(localized: "从 Git 添加账本"), detail: String(localized: "用仓库做版本交换，多设备共用")) { addingGit = true }
                         .accessibilityIdentifier("local-ledger-add-git")
                     // A second importer on the list would replace the backup one, so this row owns it.
-                    LibraryActionRow(title: String(localized: "从 iCloud 云盘加入账本"), detail: String(localized: "选择另一台设备已开启同步的文件夹")) { joiningFolder = true }
+                    LibraryActionRow(title: String(localized: "从 iCloud 加入账本"), detail: String(localized: "另一台设备已开启 iCloud 同步的账本")) { joiningICloud = true }
                         .accessibilityIdentifier("local-ledger-join-folder")
                         .fileImporter(isPresented: $joiningFolder, allowedContentTypes: [.folder]) { result in
                             switch result {
@@ -78,7 +79,8 @@ struct LedgerLibraryView: View {
                                                 .balancedFont(size: 15, weight: .text)
                                                 .foregroundStyle(BalancedPalette.ink)
                                             HStack(spacing: 4) {
-                                                Text(ledger.folder != nil ? "iCloud 云盘同步" : ledger.git != nil ? "Git 同步" : "仅本机")
+                                                Text(ledger.folder?.isICloudContainer == true ? "iCloud 同步"
+                                                     : ledger.folder != nil ? "iCloud 云盘文件夹同步" : ledger.git != nil ? "Git 同步" : "仅本机")
                                                     .balancedFont(size: 12)
                                                 Text("·").balancedFont(size: 12)
                                                 Text(ledger.entrypoint).balancedMono(size: 11.5)
@@ -191,6 +193,9 @@ struct LedgerLibraryView: View {
             .sheet(isPresented: $creating) { LocalLedgerSetupView(importing: false) }
             .sheet(isPresented: $importing) { LocalLedgerSetupView(importing: true) }
             .sheet(isPresented: $addingGit) { GitLedgerSetupView() }
+            .sheet(isPresented: $joiningICloud) {
+                ICloudJoinSheet { joiningFolder = true }
+            }
             .fileImporter(isPresented: $restoringBackup, allowedContentTypes: [.item]) { result in
                 switch result {
                 case let .success(url): Task { await session.restoreLedgerBackupAsNew(fileAt: url) }
@@ -498,7 +503,7 @@ struct EditLedgerSheet: View {
                 }
 
                 Section {
-                    LabeledContent(String(localized: "存储方式"), value: ledger.folder != nil ? String(localized: "iCloud 云盘文件夹同步") : ledger.git == nil ? String(localized: "本机独立存储") : String(localized: "Git 仓库协同"))
+                    LabeledContent(String(localized: "存储方式"), value: ledger.folder?.isICloudContainer == true ? String(localized: "iCloud 同步") : ledger.folder != nil ? String(localized: "iCloud 云盘文件夹同步") : ledger.git == nil ? String(localized: "本机独立存储") : String(localized: "Git 仓库协同"))
                         .balancedFont(size: 14)
                     LabeledContent("创建时间", value: ledger.createdAt.formatted(date: .abbreviated, time: .shortened))
                         .balancedFont(size: 14)
@@ -586,6 +591,108 @@ struct EditLedgerSheet: View {
 /// `.row row--tap` used for a tappable action with a title/detail pair and an
 /// `--edge` chevron — the library's "快速操作" rows (d01) and the setup sheet's
 /// wizard shortcut.
+/// Lists the ledgers other devices keep in the app's iCloud container and
+/// adds the one tapped. Builds without iCloud (SideStore), or a ledger set up
+/// in a picked iCloud Drive folder, go through `pickFolder` instead.
+struct ICloudJoinSheet: View {
+    @EnvironmentObject private var session: LedgerSession
+    @Environment(\.dismiss) private var dismiss
+    /// Opens the folder picker; called after this sheet is gone.
+    let pickFolder: () -> Void
+    @State private var available: Bool?
+    @State private var ledgers: [LedgerICloud.SharedLedger] = []
+    @State private var loading = true
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if available == false {
+                    Section {
+                        Text("这个版本或这台设备现在用不了 App 的 iCloud 空间。请确认已登录 Apple 账户，并在“设置 › Apple 账户 › iCloud”里允许本 App 使用 iCloud 云盘。也可以选择 iCloud 云盘里的同步文件夹。")
+                            .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
+                    }
+                } else if loading {
+                    Section { ProgressView("正在读取 iCloud") }
+                } else if ledgers.isEmpty {
+                    Section {
+                        Text("iCloud 里还没有其他设备的账本。在那台设备的“设置 › 存储与同步”里开启 iCloud 同步，等几秒再回来刷新。")
+                            .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
+                    }
+                } else {
+                    Section {
+                        ForEach(ledgers) { ledger in
+                            Button {
+                                Task {
+                                    await session.importICloudLedger(folder: ledger.folder)
+                                    if session.phase == .ready, session.errorMessage == nil { dismiss() }
+                                }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ledger.name).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                                    Text(detail(ledger)).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                                }
+                                .frame(minHeight: 44, alignment: .leading)
+                            }
+                            .disabled(session.isLocalOperationBusy)
+                        }
+                    } header: { TerminalSectionLabel(text: String(localized: "iCloud 里的账本")) }
+                }
+                if let error = session.errorMessage {
+                    Section { Text(error).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.expense) }
+                }
+                Section {
+                    Button("选择 iCloud 云盘文件夹") {
+                        dismiss()
+                        // The picker cannot open while this sheet is still on screen.
+                        Task { try? await Task.sleep(for: .milliseconds(450)); pickFolder() }
+                    }
+                    .buttonStyle(.balanced(.quiet))
+                } footer: {
+                    Text("用旧版本在 iCloud 云盘里选过同步文件夹的账本，从这里选同一个文件夹加入。")
+                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(BalancedPalette.page)
+            .navigationTitle("从 iCloud 加入")
+            .terminalNativeChrome()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+            }
+            .overlay {
+                if session.isLocalOperationBusy {
+                    ProgressView("正在下载并校验账本")
+                        .tint(BalancedPalette.ink)
+                        .padding(16)
+                        .background(BalancedPalette.page)
+                }
+            }
+            .interactiveDismissDisabled(session.isLocalOperationBusy)
+            .task { await reload() }
+            .refreshable { await reload() }
+        }
+    }
+
+    private func reload() async {
+        loading = true
+        defer { loading = false }
+        let ok = await LedgerICloud.available()
+        available = ok
+        guard ok else { return }
+        let joined = session.localICloudFolders
+        ledgers = await LedgerICloud.sharedLedgersAsync().filter { !joined.contains($0.folder) }
+    }
+
+    private func detail(_ ledger: LedgerICloud.SharedLedger) -> String {
+        var parts: [String] = []
+        if let device = ledger.devices.first, !device.isEmpty { parts.append(device) }
+        if let date = ledger.updatedAt { parts.append(date.formatted(date: .abbreviated, time: .shortened)) }
+        parts.append(ledger.entrypoint)
+        return parts.joined(separator: " · ")
+    }
+}
+
 private struct LibraryActionRow: View {
     let title: String
     let detail: String
