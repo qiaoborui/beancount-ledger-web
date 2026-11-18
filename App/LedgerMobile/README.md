@@ -407,6 +407,15 @@ Apple ID signature, provisioning profiles and Keychain groups. Keep both
 extensions when SideStore asks, and renew with the same Apple ID. Local ledger
 access uses Face ID, Touch ID, or the device passcode.
 
+To install directly with a paid Apple Developer team instead of SideStore, run
+`bash scripts/build-ios-team-signed.sh --team <TEAMID> [--device <UDID>]`. It
+builds the same sources as `com.qiaoborui.ledger.mobile.<TEAMID>{,.widgets,.share}`
+with `group.com.qiaoborui.ledger.mobile.<TEAMID>`, the bundle ID shape described
+below, so a Personal Team build keeps its own identifiers. The team needs at
+least one registered device before a development profile can be generated;
+connect the phone and pass `--device` on the first run to register it. The
+resulting profiles last one year and cover only the team's registered devices.
+
 ### Shared storage and renewal
 
 Keep the Widget and Share extensions when importing the IPA. The app and both
