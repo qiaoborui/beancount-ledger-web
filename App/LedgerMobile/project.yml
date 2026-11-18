@@ -17,19 +17,21 @@ settings:
     # Let the compiler extract String(localized:) and SwiftUI keys with their real argument types.
     SWIFT_EMIT_LOC_STRINGS: YES
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
-    # Signing identity: the paid Apple Developer team. Every target and
-    # entitlements file reads these three settings, so another team (whose
-    # build needs other IDs, e.g. `<base>.<TEAMID>`, which LedgerSharedAccess
-    # also understands) is a command-line override, see
-    # scripts/build-ios-team-signed.sh.
+    # Signing identity: the paid Apple Developer team. Every target, Info.plist
+    # (LedgerAppGroupIdentifier, read by LedgerSharedAccess) and entitlements
+    # file reads these three settings. com.qiaoborui.ledger.mobile stays with the
+    # old Personal Team, so the SideStore package overrides them back to the
+    # `.mobile` IDs (scripts/build-ios-ipa.sh) and another team is a
+    # command-line override (scripts/build-ios-team-signed.sh).
     LEDGER_TEAM_ID: 6YJVKL5GXV
-    LEDGER_BUNDLE_ID: com.qiaoborui.ledger.mobile
-    LEDGER_APP_GROUP: group.com.qiaoborui.ledger.mobile
-    # iCloud Documents container (main app only). A fixed ID, never derived
-    # from the team or the bundle ID: users' iCloud data lives under it, so it
-    # must outlive a team change or an App Store app transfer. Code asks for
-    # the first container in the entitlements and never names this ID.
-    LEDGER_ICLOUD_CONTAINER: iCloud.com.qiaoborui.ledger.mobile
+    LEDGER_BUNDLE_ID: com.qiaoborui.ledger
+    LEDGER_APP_GROUP: group.com.qiaoborui.ledger
+    # iCloud Documents container (main app only). A fixed ID, not derived
+    # from the team or a command-line bundle ID override: users' iCloud data
+    # lives under it, so it must outlive a team change or an App Store app
+    # transfer. Code asks for the first container in the entitlements and
+    # never names this ID.
+    LEDGER_ICLOUD_CONTAINER: iCloud.com.qiaoborui.ledger
 
 targets:
   LedgerMobile:
@@ -112,6 +114,7 @@ targets:
         NSMicrophoneUsageDescription: 用语音向账本助手提问或记账，录音只用于转成文字，不会保存。
         NSSpeechRecognitionUsageDescription: 把你说的话转成文字，放进账本助手的输入框。
         NSFaceIDUsageDescription: 使用 Face ID 解锁受保护的账本金额和财务数据。
+        LedgerAppGroupIdentifier: $(LEDGER_APP_GROUP)
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
         # HTTPS and Apple's own crypto only, which is exempt; saves the export
         # compliance question on every TestFlight upload.
@@ -192,6 +195,7 @@ targets:
         CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LedgerAppGroupIdentifier: $(LEDGER_APP_GROUP)
         LedgerWidgetKeychainAccessGroup: $(AppIdentifierPrefix)com.qiaoborui.ledger.mobile.shared
         UIAppFonts:
           - IBMPlexSans-Regular.ttf
@@ -237,6 +241,7 @@ targets:
         CFBundleLocalizations: [zh-Hans, en]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LedgerAppGroupIdentifier: $(LEDGER_APP_GROUP)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController

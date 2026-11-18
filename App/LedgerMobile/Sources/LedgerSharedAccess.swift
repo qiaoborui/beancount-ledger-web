@@ -4,6 +4,9 @@ import Foundation
 struct LedgerSharedAccess: Equatable, Sendable {
     static let originalAppGroupIdentifier = "group.com.qiaoborui.ledger.mobile"
     static let widgetKeychainInfoKey = "LedgerWidgetKeychainAccessGroup"
+    /// The App Group this build was signed with (`$(LEDGER_APP_GROUP)` in
+    /// project.yml), written into the app's and both extensions' Info.plist.
+    static let appGroupInfoKey = "LedgerAppGroupIdentifier"
     static let current = LedgerSharedAccess(infoDictionary: Bundle.main.infoDictionary ?? [:])
 
     let appGroupIdentifier: String
@@ -38,11 +41,19 @@ struct LedgerSharedAccess: Equatable, Sendable {
             return
         }
 
-        // Preserve credentials of installations signed directly by Xcode.
-        appGroupIdentifier = Self.originalAppGroupIdentifier
+        // Signed directly by Xcode: the build's own App Group, or the original
+        // one for builds from before the group was declared in Info.plist.
+        appGroupIdentifier = Self.declaredAppGroup(infoDictionary) ?? Self.originalAppGroupIdentifier
         let value = (infoDictionary[Self.widgetKeychainInfoKey] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         widgetKeychainAccessGroup = value.flatMap { $0.isEmpty || $0.contains("$(") ? nil : $0 }
+    }
+
+    private static func declaredAppGroup(_ infoDictionary: [String: Any]) -> String? {
+        guard let value = (infoDictionary[appGroupInfoKey] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            value.hasPrefix("group."), !value.contains("$(") else { return nil }
+        return value
     }
 
     private static func iLoaderAppGroup(bundleIdentifier: String) -> String? {

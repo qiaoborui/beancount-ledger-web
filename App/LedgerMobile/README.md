@@ -177,7 +177,7 @@ Advanced Data Protection enabled Apple encrypts them end to end.
 Settings → 存储与同步 → 开启 iCloud 同步 turns a ledger into a synced ledger,
 as an alternative to Git storage (a ledger uses one or the other). The ledger
 lives in the app's own iCloud Documents container,
-`iCloud.com.qiaoborui.ledger.mobile` (`LEDGER_ICLOUD_CONTAINER` in
+`iCloud.com.qiaoborui.ledger` (`LEDGER_ICLOUD_CONTAINER` in
 project.yml, main app only), under `Documents/Ledgers/<ledger id>/`. Other
 devices on the same Apple ID join it from the library with "从 iCloud 加入账本",
 which lists the ledgers in the container. AI 开账 offers "存进 iCloud" on its
@@ -435,19 +435,22 @@ access uses Face ID, Touch ID, or the device passcode.
 
 `project.yml` signs every target with the paid Apple Developer team through
 three build settings: `LEDGER_TEAM_ID` (`6YJVKL5GXV`), `LEDGER_BUNDLE_ID`
-(`com.qiaoborui.ledger.mobile`, extensions add `.widgets` and `.share`) and
-`LEDGER_APP_GROUP` (`group.com.qiaoborui.ledger.mobile`). These identifiers are
-registered to that team and are what a later App Store transfer would move.
-The entitlements files read the group from the same setting. Running from
-Xcode therefore needs that team signed in. The SideStore package starts from
-the same IDs; SideStore rewrites them per Apple ID.
+(`com.qiaoborui.ledger`, extensions add `.widgets` and `.share`) and
+`LEDGER_APP_GROUP` (`group.com.qiaoborui.ledger`). These identifiers are
+registered to that team and are what a later App Store transfer would move;
+`com.qiaoborui.ledger.mobile` stays with the old Personal Team. The
+entitlements files read the group from the same setting, and each bundle's
+Info.plist carries it as `LedgerAppGroupIdentifier` for `LedgerSharedAccess`.
+Running from Xcode therefore needs that team signed in. The SideStore package
+overrides the settings back to the `.mobile` IDs that existing sideloaded
+installs came from; SideStore rewrites them per Apple ID.
 
 `bash scripts/build-ios-team-signed.sh [--device <UDID>]` archives a
 development-signed build for the team's registered devices (profiles last one
 year); pass `--device` on the first run to register the phone. `--team` with
-another team signs as `com.qiaoborui.ledger.mobile.<TEAMID>` and
-`group.com.qiaoborui.ledger.mobile.<TEAMID>`, since the plain IDs belong to the
-paid team.
+another team signs as `com.qiaoborui.ledger.<TEAMID>` and
+`group.com.qiaoborui.ledger.<TEAMID>`, since the plain IDs belong to the paid
+team.
 
 `bash scripts/build-ios-team-signed.sh --testflight` archives the tagged
 release with the same version and build as the SideStore package, exports it
@@ -455,7 +458,7 @@ for App Store Connect (internal testing only) and uploads it. It authenticates
 with an App Store Connect API key from `ASC_KEY_ID`, `ASC_ISSUER_ID` and
 `ASC_KEY_PATH`; the key needs the Admin or App Manager role so Xcode can create
 the distribution certificate. The App Store Connect app record must exist for
-`com.qiaoborui.ledger.mobile`. The release workflow runs this as its
+`com.qiaoborui.ledger`. The release workflow runs this as its
 `testflight` job once `TESTFLIGHT_UPLOAD` is `true`.
 
 ### Shared storage and renewal
