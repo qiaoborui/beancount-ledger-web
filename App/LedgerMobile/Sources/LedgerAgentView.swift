@@ -1079,12 +1079,13 @@ private struct LedgerAgentChatScreen: View {
     }
 
     /// The floating dock, 16pt in from either edge. At rest it is one row:
-    /// the attach circle, the field and the solid send circle. With
-    /// something to send it grows a second row under the field with the model and thinking chip
-    /// and the context meter, and the field takes the row's whole width. The
-    /// send circle is one view pinned to the bottom trailing corner in both
-    /// states, so it never moves or changes identity; each row leaves room
-    /// for it in turn. The hints and attachment chips above stay outside the
+    /// the attach button, the field and the solid send circle, all inside the
+    /// one glass capsule. With something to send it grows a second row under
+    /// the field with the model and thinking chip and the context meter, and
+    /// the field takes the row's whole width. The attach button and the send
+    /// circle are pinned to the bottom corners in both states, so they never
+    /// move or change identity and always sit on the dock's last row; each
+    /// row leaves room for them in turn. The hints and attachment chips above stay outside the
     /// dock, and the whole stack rides the keyboard through `safeAreaInset`.
     private var composer: some View {
         VStack(spacing: 8) {
@@ -1098,7 +1099,6 @@ private struct LedgerAgentChatScreen: View {
             if !conversation.staged.isEmpty || attaching || attachError != nil { stagedFiles }
             if let failure = voice.failure { voiceFailureNotice(failure) }
             HStack(alignment: .bottom, spacing: 8) {
-                attachMenu
                 VStack(spacing: 4) {
                     HStack(alignment: .bottom, spacing: 4) {
                         composerField
@@ -1117,6 +1117,7 @@ private struct LedgerAgentChatScreen: View {
                         }
                         if !voiceDocked, !conversation.isRunning { voiceButton }
                     }
+                    .padding(.leading, composerExpanded ? 9 : Self.sendReserve)
                     .padding(.trailing, composerExpanded ? 0 : Self.sendReserve)
                     if composerExpanded {
                         // Not in the hierarchy at rest, so nothing empty is left
@@ -1124,19 +1125,21 @@ private struct LedgerAgentChatScreen: View {
                         if voiceDocked {
                             LedgerVoiceBar(recorder: voice, onCancel: cancelVoice, onConfirm: { Task { await commitVoice() } })
                                 .frame(minHeight: 40)
+                                .padding(.leading, Self.sendReserve)
                                 .transition(.opacity)
                         } else {
                             LedgerAgentQuickSwitch(usage: conversation.usage) { settingsPresented = true }
                                 .frame(minHeight: 40)
-                                .padding(.leading, 4)
+                                .padding(.leading, Self.sendReserve)
                                 .padding(.trailing, Self.sendReserve)
                                 .transition(.opacity)
                                 .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in rowPinned = true })
                         }
                     }
                 }
+                .overlay(alignment: .bottomLeading) { attachMenu }
                 .overlay(alignment: .bottomTrailing) { sendButton }
-                .padding(EdgeInsets(top: 5, leading: 14, bottom: 5, trailing: 5))
+                .padding(EdgeInsets(top: 5, leading: 5, bottom: 5, trailing: 5))
                 .modifier(LedgerAgentDock())
                 .overlay(alignment: .top) {
                     // Over the dock rather than in the stack, so it does not move
@@ -1176,10 +1179,10 @@ private struct LedgerAgentChatScreen: View {
         .onDisappear { if voice.isActive { cancelVoice() } }
     }
 
-    /// The send circle's 40pt and the row's 4pt gap before it.
+    /// A corner button's 40pt (send or attach) and the row's 4pt gap beside it.
     private static let sendReserve: CGFloat = 44
-    /// One row of the dock: the 42pt field and 5pt above and below it. The
-    /// attach circle beside the dock is as tall, so the two read as a pair.
+    /// One row of the dock: the 42pt field and 5pt above and below it; the
+    /// dock's corner radius is half of it.
     static let dockHeight: CGFloat = 52
 
     private var composerField: some View {
@@ -1484,12 +1487,11 @@ private struct LedgerAgentChatScreen: View {
                 }
             }
         } label: {
+            // Inside the dock, at its bottom leading corner, so it stays on
+            // the same row as the send circle however tall the dock grows.
             Image(systemName: "plus").font(.system(size: 19, weight: .medium))
                 .foregroundStyle(BalancedPalette.ink)
-                .frame(width: Self.dockHeight, height: Self.dockHeight)
-                // Its own glass circle beside the field's capsule, as the
-                // system composers draw it; a sunken disc before iOS 26.
-                .modifier(LedgerAgentAttachCircle())
+                .frame(width: 40, height: 40)
                 .contentShape(Circle())
         }
         .disabled(!conversation.canAttach || attaching || conversation.isRunning)
@@ -2655,20 +2657,6 @@ private struct LedgerAgentCircleGlass: ViewModifier {
 
     @ViewBuilder func body(content: Content) -> some View {
         if draws { content.ledgerGlassControl() } else { content }
-    }
-}
-
-/// The attach button's own circle beside the dock: interactive glass on
-/// iOS 26, the sunken disc with a hairline before it.
-private struct LedgerAgentAttachCircle: ViewModifier {
-    @ViewBuilder func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: Circle())
-        } else {
-            content
-                .background(Circle().fill(BalancedPalette.sunken))
-                .overlay(Circle().stroke(BalancedPalette.rule, lineWidth: 1))
-        }
     }
 }
 
