@@ -141,6 +141,10 @@ public enum AccountPresets {
         AccountPresetItem(id: "bank_hsbc", name: String(localized: "汇丰银行(HSBC)"), category: .bank, group: .crossBorder, code: "HSBC", icon: "building.columns", suggestedCurrency: "HKD"),
         AccountPresetItem(id: "bank_scb", name: String(localized: "渣打银行(Standard Chartered)"), category: .bank, group: .crossBorder, code: "SCB", icon: "building.columns", suggestedCurrency: "HKD"),
         AccountPresetItem(id: "bank_bochk", name: String(localized: "中银香港(BOCHK)"), category: .bank, group: .crossBorder, code: "BOCHK", icon: "building.columns", suggestedCurrency: "HKD"),
+        AccountPresetItem(id: "bank_dbs", name: String(localized: "星展银行(DBS/POSB)"), category: .bank, group: .crossBorder, code: "DBS", icon: "building.columns", suggestedCurrency: "SGD"),
+        AccountPresetItem(id: "bank_ocbc", name: String(localized: "华侨银行(OCBC)"), category: .bank, group: .crossBorder, code: "OCBC", icon: "building.columns", suggestedCurrency: "SGD"),
+        AccountPresetItem(id: "bank_uob", name: String(localized: "大华银行(UOB)"), category: .bank, group: .crossBorder, code: "UOB", icon: "building.columns", suggestedCurrency: "SGD"),
+        AccountPresetItem(id: "bank_wise", name: "Wise", category: .bank, group: .crossBorder, code: "Wise", icon: "globe", suggestedCurrency: "USD"),
 
         // ── 移动支付与电子钱包 ──
         AccountPresetItem(id: "wallet_wechat", name: String(localized: "微信零钱"), category: .wallet, group: .digital, code: "WeChat:LingQian", icon: "message.fill"),
@@ -150,6 +154,7 @@ public enum AccountPresets {
         AccountPresetItem(id: "wallet_unionpay", name: String(localized: "云闪付"), category: .wallet, group: .digital, code: "UnionPay", icon: "creditcard"),
         AccountPresetItem(id: "wallet_apple_cash", name: "Apple Cash", category: .wallet, group: .digital, code: "AppleCash", icon: "applelogo", suggestedCurrency: "USD"),
         AccountPresetItem(id: "wallet_paypal", name: "PayPal", category: .wallet, group: .digital, code: "PayPal", icon: "globe", suggestedCurrency: "USD"),
+        AccountPresetItem(id: "wallet_grabpay", name: "GrabPay", category: .wallet, group: .digital, code: "GrabPay", icon: "car.fill", suggestedCurrency: "SGD"),
         AccountPresetItem(id: "wallet_octopus", name: String(localized: "八达通(Octopus)"), category: .wallet, group: .digital, code: "Octopus", icon: "wave.3.forward", suggestedCurrency: "HKD"),
 
         // ── 信用卡与消费分期 ──
@@ -513,67 +518,154 @@ public struct LedgerAccountInput: Codable, Equatable, Sendable {
     }
 }
 
-/// 账单导入配置模板生成器
+/// The import configurations a new ledger starts with. Every account they
+/// name is one the ledger opens: a rule whose account the ledger lacks is
+/// left out, and a category it lacks falls back to 其他支出.
 public enum LedgerImportTemplates {
+    /// The catch-all categories every configuration falls back to; a new
+    /// ledger opens both.
+    public static let otherExpense = "Expenses:Other"
+    public static let otherIncome = "Income:Other"
+
+    public struct Account: Equatable, Sendable {
+        public let account: String
+        public let currency: String
+        public init(account: String, currency: String) {
+            self.account = account
+            self.currency = currency
+        }
+    }
+
+    /// The configuration files for the chosen channels (`manual` has none).
+    /// No channel chosen means Alipay and WeChat, the two most bills come
+    /// from.
+    public static func configs(channels: [String], currency: String, accounts: [Account],
+                               categories: [String]) -> [(path: String, content: String)] {
+        let chosen = channels.isEmpty ? ["alipay", "wechat"] : channels.filter { $0 != "manual" }
+        let paths = accounts.map(\.account)
+        func first(_ prefix: String, containing marks: [String] = []) -> Account? {
+            let candidates = accounts.filter { $0.account.hasPrefix(prefix) }
+            for mark in marks {
+                if let hit = candidates.first(where: { $0.account.localizedCaseInsensitiveContains(mark) }) { return hit }
+            }
+            return marks.isEmpty ? candidates.first : nil
+        }
+        let bank = first("Assets:Bank")
+        let credit = first("Liabilities:CreditCard")
+        var files: [(path: String, content: String)] = []
+        for channel in chosen {
+            switch channel {
+            case "alipay":
+                files.append(("imports/alipay-config.yaml", generateAlipayConfig(
+                    currency: currency, walletAccount: first("Assets:Wallet", containing: ["Alipay:Balance", "Alipay"])?.account,
+                    bankAccount: bank?.account, creditAccount: credit?.account, categories: categories,
+                    yuebaoAccount: paths.first { $0.contains("YuEBao") },
+                    huabeiAccount: paths.first { $0.hasPrefix("Liabilities:") && $0.contains("Huabei") })))
+            case "wechat":
+                files.append(("imports/wechat-config.yaml", generateWechatConfig(
+                    currency: currency, walletAccount: first("Assets:Wallet", containing: ["WeChat:LingQian", "WeChat"])?.account,
+                    bankAccount: bank?.account, creditAccount: credit?.account, categories: categories,
+                    lingqiantongAccount: paths.first { $0.contains("LingQianTong") })))
+            case "cmb-checking":
+                let account = first("Assets:Bank", containing: ["CMB"]) ?? bank
+                files.append(("imports/cmb-checking-config.yaml", statementConfig(
+                    title: "招商银行储蓄卡账单导入配置", currency: account?.currency ?? currency,
+                    cash: account?.account, minus: otherExpense, plus: otherIncome)))
+            case "cmb", "ccb-credit", "hsbchk-credit":
+                let (file, mark, title) = [
+                    "cmb": ("cmb-credit-card-config.yaml", "CMB", "招商银行信用卡账单导入配置"),
+                    "ccb-credit": ("ccb-credit-card-config.yaml", "CCB", "建设银行信用卡账单导入配置"),
+                    "hsbchk-credit": ("hsbchk-credit-card-config.yaml", "HSBC", "汇丰香港信用卡账单导入配置"),
+                ][channel]!
+                let account = first("Liabilities:CreditCard", containing: [mark]) ?? credit
+                let fallbackCurrency = channel == "hsbchk-credit" ? "HKD" : currency
+                files.append(("imports/" + file, statementConfig(
+                    title: title, currency: account.map { $0.currency.isEmpty ? currency : $0.currency } ?? fallbackCurrency,
+                    cash: account?.account, minus: otherExpense, plus: otherExpense)))
+            case "meituan":
+                let account = first("Liabilities:", containing: ["Meituan"]) ?? first("Assets:Wallet") ?? bank
+                files.append(("imports/meituan-config.yaml", meituanConfig(
+                    currency: currency, cash: account?.account,
+                    food: pick(categories, ["Expenses:Food:Takeaway", "Expenses:Food"]))))
+            default:
+                continue
+            }
+        }
+        return files
+    }
+
+    /// The first category under any of the prefixes, in the ledger's order.
+    static func pick(_ categories: [String], _ prefixes: [String]) -> String {
+        for prefix in prefixes {
+            if let hit = categories.first(where: { $0 == prefix || $0.hasPrefix(prefix + ":") }) { return hit }
+        }
+        return otherExpense
+    }
+
+    static func statementConfig(title: String, currency: String, cash: String?, minus: String, plus: String) -> String {
+        var lines = [
+            "defaultMinusAccount: \(minus)",
+            "defaultPlusAccount: \(plus)",
+        ]
+        if let cash { lines.append("defaultCashAccount: \(cash)") }
+        lines += ["defaultCurrency: \(currency)", "title: \(title)"]
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    static func meituanConfig(currency: String, cash: String?, food: String) -> String {
+        var lines = [
+            "defaultMinusAccount: \(otherIncome)",
+            "defaultPlusAccount: \(food)",
+        ]
+        if let cash { lines.append("defaultCashAccount: \(cash)") }
+        lines += ["defaultCurrency: \(currency)", "title: 美团账单导入配置", "mt:", "  rules:"]
+        if let cash { lines += ["    - methodAccount: \(cash)"] }
+        // Orders paid with WeChat Pay or Alipay arrive with those bills.
+        lines += ["    - method: 微信支付", "      ignore: true", "    - method: 支付宝", "      ignore: true"]
+        return lines.joined(separator: "\n") + "\n"
+    }
+
     public static func generateAlipayConfig(
         currency: String = "CNY",
         walletAccount: String? = nil,
         bankAccount: String? = nil,
         creditAccount: String? = nil,
-        categories: [String] = []
+        categories: [String] = [],
+        yuebaoAccount: String? = nil,
+        huabeiAccount: String? = nil
     ) -> String {
-        let actualWallet = walletAccount ?? "Assets:Wallet:Alipay:Balance"
-        let actualBank = bankAccount ?? "Assets:Bank:CMB"
-        let actualCredit = creditAccount ?? "Liabilities:CreditCard:CMB"
-
-        let categoryAccounts = Set(categories)
-        let foodAcct = categoryAccounts.first { $0.hasPrefix("Expenses:Food") } ?? "Expenses:Food"
-        let shopAcct = categoryAccounts.first { $0.hasPrefix("Expenses:Shopping") } ?? "Expenses:Shopping"
-        let transAcct = categoryAccounts.first { $0.hasPrefix("Expenses:Transport") } ?? "Expenses:Transport"
-        let funAcct = categoryAccounts.first { $0.hasPrefix("Expenses:Entertainment") } ?? "Expenses:Entertainment"
-        let healthAcct = categoryAccounts.first { $0.hasPrefix("Expenses:Health") } ?? "Expenses:Health"
-        let homeAcct = categoryAccounts.first { $0.hasPrefix("Expenses:Home") } ?? "Expenses:Home"
-
-        return """
-        defaultMinusAccount: Income:Other
-        defaultPlusAccount: Expenses:Other
-        defaultCurrency: \(currency)
-        title: 支付宝账单导入配置
-        alipay:
-          rules:
-            - method: 余额
-              fullMatch: true
-              methodAccount: \(actualWallet)
-            - method: 余额宝
-              fullMatch: true
-              methodAccount: \(actualWallet.contains("YuEBao") ? actualWallet : "Assets:Wallet:Alipay:YuEBao")
-            - method: 信用卡
-              methodAccount: \(actualCredit)
-            - method: 储蓄卡
-              methodAccount: \(actualBank)
-            - category: 餐饮美食
-              targetAccount: \(foodAcct)
-            - category: 日用百货
-              targetAccount: \(shopAcct)
-            - category: 交通出行
-              targetAccount: \(transAcct)
-            - category: 文化休闲
-              targetAccount: \(funAcct)
-            - category: 医疗健康
-              targetAccount: \(healthAcct)
-            - category: 生活服务
-              targetAccount: \(homeAcct)
-            - peer: 外卖,美团,饿了么
-              targetAccount: \(foodAcct)
-            - peer: 咖啡,星巴克,瑞幸
-              targetAccount: \(foodAcct)
-            - peer: 超市,便利店,罗森,全家
-              targetAccount: \(shopAcct)
-            - peer: 滴滴,打车,高德
-              targetAccount: \(transAcct)
-            - peer: 地铁,公交,乘车码
-              targetAccount: \(transAcct)
-        """
+        let food = pick(categories, ["Expenses:Food"])
+        let shop = pick(categories, ["Expenses:Shopping"])
+        let transport = pick(categories, ["Expenses:Transport"])
+        let fun = pick(categories, ["Expenses:Entertainment"])
+        let health = pick(categories, ["Expenses:Health"])
+        let home = pick(categories, ["Expenses:Home"])
+        var lines = [
+            "defaultMinusAccount: \(otherIncome)",
+            "defaultPlusAccount: \(otherExpense)",
+        ]
+        if let cash = walletAccount ?? bankAccount { lines.append("defaultCashAccount: \(cash)") }
+        lines += ["defaultCurrency: \(currency)", "title: 支付宝账单导入配置", "alipay:", "  rules:"]
+        func method(_ name: String, _ account: String?, fullMatch: Bool = false) {
+            guard let account else { return }
+            lines.append("    - method: \(name)")
+            if fullMatch { lines.append("      fullMatch: true") }
+            lines.append("      methodAccount: \(account)")
+        }
+        method("余额", walletAccount, fullMatch: true)
+        method("余额宝", yuebaoAccount, fullMatch: true)
+        method("花呗", huabeiAccount)
+        method("信用卡", creditAccount)
+        method("储蓄卡", bankAccount)
+        for (category, account) in [("餐饮美食", food), ("日用百货", shop), ("交通出行", transport), ("文化休闲", fun),
+                                    ("医疗健康", health), ("生活服务", home)] {
+            lines += ["    - category: \(category)", "      targetAccount: \(account)"]
+        }
+        for (peers, account) in [("外卖,美团,饿了么", food), ("咖啡,星巴克,瑞幸", food), ("超市,便利店,罗森,全家", shop),
+                                 ("滴滴,打车,高德", transport), ("地铁,公交,乘车码", transport)] {
+            lines += ["    - peer: \(peers)", "      targetAccount: \(account)"]
+        }
+        return lines.joined(separator: "\n") + "\n"
     }
 
     public static func generateWechatConfig(
@@ -581,57 +673,37 @@ public enum LedgerImportTemplates {
         walletAccount: String? = nil,
         bankAccount: String? = nil,
         creditAccount: String? = nil,
-        categories: [String] = []
+        categories: [String] = [],
+        lingqiantongAccount: String? = nil
     ) -> String {
-        let actualWallet = walletAccount ?? "Assets:Wallet:WeChat:LingQian"
-        let actualBank = bankAccount ?? "Assets:Bank:CMB"
-        let actualCredit = creditAccount ?? "Liabilities:CreditCard:CMB"
-
-        let categoryAccounts = Set(categories)
-        let foodAcct = categoryAccounts.first { $0.hasPrefix("Expenses:Food") } ?? "Expenses:Food"
-        let shopAcct = categoryAccounts.first { $0.hasPrefix("Expenses:Shopping") } ?? "Expenses:Shopping"
-        let transAcct = categoryAccounts.first { $0.hasPrefix("Expenses:Transport") } ?? "Expenses:Transport"
-        let funAcct = categoryAccounts.first { $0.hasPrefix("Expenses:Entertainment") } ?? "Expenses:Entertainment"
-        let healthAcct = categoryAccounts.first { $0.hasPrefix("Expenses:Health") } ?? "Expenses:Health"
-        let homeAcct = categoryAccounts.first { $0.hasPrefix("Expenses:Home") } ?? "Expenses:Home"
-
-        return """
-        defaultMinusAccount: Income:Other
-        defaultPlusAccount: Expenses:Other
-        defaultCashAccount: \(actualWallet)
-        defaultCurrency: \(currency)
-        title: 微信支付账单导入配置
-        wechat:
-          rules:
-            - method: 零钱
-              fullMatch: true
-              methodAccount: \(actualWallet)
-            - method: 零钱通
-              fullMatch: true
-              methodAccount: \(actualWallet.contains("LingQianTong") ? actualWallet : "Assets:Wallet:WeChat:LingQianTong")
-            - method: 信用卡
-              methodAccount: \(actualCredit)
-            - method: 储蓄卡
-              methodAccount: \(actualBank)
-            - method: /
-              methodAccount: \(actualWallet)
-            - peer: 外卖,美团,饿了么
-              targetAccount: \(foodAcct)
-            - peer: 咖啡,星巴克,瑞幸
-              targetAccount: \(foodAcct)
-            - peer: 超市,便利店,生鲜,水果
-              targetAccount: \(shopAcct)
-            - peer: 滴滴,打车,网约车
-              targetAccount: \(transAcct)
-            - peer: 地铁,公交,乘车码
-              targetAccount: \(transAcct)
-            - peer: 药房,医院,健康
-              targetAccount: \(healthAcct)
-            - peer: 酒店,客栈,民宿
-              targetAccount: \(funAcct)
-            - peer: 水电燃气,物业
-              targetAccount: \(homeAcct)
-        """
+        let food = pick(categories, ["Expenses:Food"])
+        let shop = pick(categories, ["Expenses:Shopping"])
+        let transport = pick(categories, ["Expenses:Transport"])
+        let fun = pick(categories, ["Expenses:Entertainment"])
+        let health = pick(categories, ["Expenses:Health"])
+        let home = pick(categories, ["Expenses:Home"])
+        var lines = [
+            "defaultMinusAccount: \(otherIncome)",
+            "defaultPlusAccount: \(otherExpense)",
+        ]
+        if let cash = walletAccount ?? bankAccount { lines.append("defaultCashAccount: \(cash)") }
+        lines += ["defaultCurrency: \(currency)", "title: 微信支付账单导入配置", "wechat:", "  rules:"]
+        func method(_ name: String, _ account: String?, fullMatch: Bool = false) {
+            guard let account else { return }
+            lines.append("    - method: \(name)")
+            if fullMatch { lines.append("      fullMatch: true") }
+            lines.append("      methodAccount: \(account)")
+        }
+        method("零钱", walletAccount, fullMatch: true)
+        method("零钱通", lingqiantongAccount, fullMatch: true)
+        method("信用卡", creditAccount)
+        method("储蓄卡", bankAccount)
+        method("/", walletAccount)
+        for (peers, account) in [("外卖,美团,饿了么", food), ("咖啡,星巴克,瑞幸", food), ("超市,便利店,生鲜,水果", shop),
+                                 ("滴滴,打车,网约车", transport), ("地铁,公交,乘车码", transport), ("药房,医院,健康", health),
+                                 ("酒店,客栈,民宿", fun), ("水电燃气,物业", home)] {
+            lines += ["    - peer: \(peers)", "      targetAccount: \(account)"]
+        }
+        return lines.joined(separator: "\n") + "\n"
     }
 }
-

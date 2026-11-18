@@ -355,3 +355,18 @@ func TestOnboardingDraftRejectsUnknownStorageChannelsAndCredentials(t *testing.T
 		t.Fatal(err)
 	}
 }
+
+// The setup opens on the accounts card and the categories card needs no
+// categories first: both offer the app's built-in choices.
+func TestOnboardingAccountsAndCategoriesCardsWorkOnAnEmptyDraft(t *testing.T) {
+	for _, kind := range []string{"accounts", "categories"} {
+		useFaux(t,
+			onboardingStep(ai.FauxToolCall("show_onboarding_card", map[string]any{"kind": kind, "prompt": "点选一下"}, nil)),
+		)
+		response := runTurnFor(t, map[string]any{"version": 1, "provider": "faux", "model": "faux-1", "message": "开始",
+			"onboarding": map[string]any{"draft": defaultOnboardingDraft(), "ready": false}})
+		if !response.OK || response.OnboardingCard == nil || response.OnboardingCard.Kind != kind || response.Reply != "点选一下" {
+			t.Fatalf("%s: unexpected response: %+v", kind, response)
+		}
+	}
+}

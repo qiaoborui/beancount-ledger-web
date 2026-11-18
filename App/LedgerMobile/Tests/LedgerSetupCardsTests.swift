@@ -61,6 +61,15 @@ final class LedgerSetupCardsTests: XCTestCase {
 
     func testAmountsAreReadAsPlainDecimals() {
         XCTAssertEqual(LedgerOnboardingCardAnswer.normalizedAmount(" 12,000.5 "), "12000.5")
+        // Whatever the keyboard's region: a decimal comma, dotted thousands,
+        // full-width marks, a currency sign, and a mark typed last.
+        XCTAssertEqual(LedgerOnboardingCardAnswer.normalizedAmount("12,5"), "12.5")
+        XCTAssertEqual(LedgerOnboardingCardAnswer.normalizedAmount("12,50"), "12.50")
+        XCTAssertEqual(LedgerOnboardingCardAnswer.normalizedAmount("12.000,50"), "12000.50")
+        XCTAssertEqual(LedgerOnboardingCardAnswer.normalizedAmount("1，234。56"), "1234.56")
+        XCTAssertEqual(LedgerOnboardingCardAnswer.normalizedAmount("¥88.8"), "88.8")
+        XCTAssertEqual(LedgerOnboardingCardAnswer.normalizedAmount("12."), "12")
+        XCTAssertEqual(LedgerOnboardingCardAnswer.normalizedAmount("0.05"), "0.05")
         XCTAssertEqual(LedgerOnboardingCardAnswer.normalizedAmount(""), "")
         XCTAssertEqual(LedgerOnboardingCardAnswer.normalizedAmount("0"), "")
         XCTAssertNil(LedgerOnboardingCardAnswer.normalizedAmount("-5"))
@@ -74,11 +83,94 @@ final class LedgerSetupCardsTests: XCTestCase {
             .applied(to: try Self.draft())
         XCTAssertEqual(draft.accounts.map(\.openingBalance), ["12000", "800.5"])
         XCTAssertEqual(draft.startDate, "2026-11-01")
-        XCTAssertEqual(summary, "余额：招行卡 12000，花呗 欠 800.5；期初 2026-11-01。")
+        XCTAssertEqual(summary, "余额：招行卡 12000 CNY，花呗 欠 800.5 CNY；期初 2026-11-01。")
 
         let (skipped, none) = LedgerOnboardingCardAnswer.balances([:], startDate: "").applied(to: try Self.draft())
         XCTAssertEqual(skipped.accounts.map(\.openingBalance), ["", ""])
         XCTAssertEqual(none, "余额：先不填余额；期初就是今天。")
+    }
+
+    func testAccountsSetTheCurrencyAndKeepBalances() throws {
+        var start = try Self.draft()
+        start.accounts[0].openingBalance = "50"
+        let dbs = LedgerOnboardingDraft.account(for: AccountPresets.presets.first { $0.id == "bank_dbs" }!, ledgerCurrency: "CNY")!
+        XCTAssertEqual(dbs.currency, "SGD")
+        XCTAssertEqual(dbs.kind, "bank_card")
+        let cash = LedgerOnboardingDraft.account(for: AccountPresets.presets.first { $0.id == "cash_cny" }!, ledgerCurrency: "SGD")!
+        XCTAssertEqual(cash.account, "Assets:Cash:SGD")
+        let (draft, summary) = LedgerOnboardingCardAnswer.accounts(currency: "CNY", [start.accounts[0], dbs])
+            .applied(to: start)
+        XCTAssertEqual(draft.currency, "CNY")
+        XCTAssertEqual(draft.accounts.map(\.account), ["Assets:Bank:CMB", "Assets:Bank:DBS"])
+        XCTAssertEqual(draft.accounts.first?.openingBalance, "50")
+        XCTAssertTrue(summary.contains("星展银行(DBS/POSB)（SGD）"))
+
+        // Switching the ledger to SGD makes the DBS account a plain one.
+        let (sgd, _) = LedgerOnboardingCardAnswer.accounts(currency: "SGD", [dbs]).applied(to: start)
+        XCTAssertEqual(sgd.accounts.first?.currency, "")
+
+        let custom = LedgerOnboardingDraft.customAccount(name: "工资卡", kind: "bank_card", currency: "", taken: ["Assets:Bank:GongZiKa"])
+        XCTAssertNotNil(custom)
+        XCTAssertTrue(custom!.account.hasPrefix("Assets:Bank:"))
+        XCTAssertNotEqual(custom!.account, "Assets:Bank:GongZiKa")
+        XCTAssertNil(LedgerOnboardingDraft.customAccount(name: "  ", kind: "bank_card", currency: "", taken: []))
+    }
+
+    func testBalancesCanChangeAnAccountsCurrency() throws {
+        let (draft, summary) = LedgerOnboardingCardAnswer
+            .balances(["Assets:Bank:CMB": "1,5"], startDate: "", currencies: ["Assets:Bank:CMB": "HKD", "Liabilities:Alipay:Huabei": "CNY"])
+            .applied(to: try Self.draft())
+        XCTAssertEqual(draft.accounts.map(\.currency), ["HKD", ""])
+        XCTAssertEqual(draft.accounts.first?.openingBalance, "1.5")
+        XCTAssertEqual(summary, "余额：招行卡 1.5 HKD；期初就是今天。")
+    }
+
+    func testTheCategoriesCardStartsFromBuiltInCategories() {
+        let defaults = LedgerOnboardingCard.defaultCategories
+        XCTAssertEqual(defaults.count, LedgerOnboardingCard.defaultCategoryIDs.count)
+        XCTAssertTrue(defaults.contains { $0.account == "Expenses:Food:Dining" && !$0.isIncome })
+        XCTAssertTrue(defaults.contains { $0.account == "Income:Career:Salary" && $0.isIncome })
+        // Every built-in path is one the draft accepts, and names are unique per side.
+        for kind in [CategoryKind.income, .expense] {
+            let items = CategoryPresets.sections(for: kind).flatMap { section in
+                section.items.map { (name: $0.name, path: LedgerOnboardingCard.path(section, $0)) }
+            }
+            XCTAssertEqual(Set(items.map(\.name)).count, items.count)
+            XCTAssertEqual(Set(items.map(\.path)).count, items.count)
+            XCTAssertLessThanOrEqual(items.count, 80)
+            for item in items { XCTAssertTrue(BeancountNaming.isValidAccountPath(item.path), item.path) }
+        }
+        XCTAssertEqual(LedgerOnboardingDraft.customCategory(name: "猫粮", income: false, taken: [])?.account.hasPrefix("Expenses:"), true)
+    }
+
+    func testImportConfigsNameOnlyAccountsTheLedgerOpens() {
+        let accounts = [
+            LedgerImportTemplates.Account(account: "Assets:Bank:CMB", currency: "CNY"),
+            LedgerImportTemplates.Account(account: "Assets:Wallet:Alipay:Balance", currency: "CNY"),
+            LedgerImportTemplates.Account(account: "Liabilities:CreditCard:HSBC", currency: "HKD"),
+            LedgerImportTemplates.Account(account: "Liabilities:CreditCard:Huabei", currency: "CNY"),
+        ]
+        let categories = ["Expenses:Food:Dining", "Expenses:Transport:Taxi", "Expenses:Other", "Income:Other"]
+        let configs = LedgerImportTemplates.configs(channels: ["alipay", "wechat", "hsbchk-credit", "cmb-checking", "meituan", "manual"],
+                                                    currency: "CNY", accounts: accounts, categories: categories)
+        XCTAssertEqual(configs.map(\.path), ["imports/alipay-config.yaml", "imports/wechat-config.yaml",
+                                              "imports/hsbchk-credit-card-config.yaml", "imports/cmb-checking-config.yaml",
+                                              "imports/meituan-config.yaml"])
+        let opened = Set(accounts.map(\.account)).union(categories)
+        for config in configs {
+            for line in config.content.split(separator: "\n") {
+                guard let range = line.range(of: #"(Assets|Liabilities|Income|Expenses):[A-Za-z0-9:-]+"#, options: .regularExpression) else { continue }
+                XCTAssertTrue(opened.contains(String(line[range])), "\(config.path) names \(line[range])")
+            }
+        }
+        let alipay = configs[0].content
+        XCTAssertTrue(alipay.contains("methodAccount: Assets:Wallet:Alipay:Balance"))
+        XCTAssertTrue(alipay.contains("methodAccount: Liabilities:CreditCard:Huabei"))
+        XCTAssertFalse(alipay.contains("YuEBao"))
+        XCTAssertTrue(alipay.contains("targetAccount: Expenses:Food:Dining"))
+        XCTAssertTrue(configs[2].content.contains("defaultCashAccount: Liabilities:CreditCard:HSBC"))
+        XCTAssertTrue(configs[2].content.contains("defaultCurrency: HKD"))
+        XCTAssertTrue(configs[3].content.contains("defaultCashAccount: Assets:Bank:CMB"))
     }
 
     func testCategoriesKeepRemoveAndAdd() throws {
@@ -131,12 +223,12 @@ final class LedgerSetupCardsTests: XCTestCase {
         XCTAssertEqual(conversation.state.draft.accounts.first?.openingBalance, "100")
         for _ in 0..<2000 where conversation.isRunning { try await Task.sleep(nanoseconds: 1_000_000) }
         XCTAssertNil(conversation.pendingCard)
-        XCTAssertEqual(conversation.messages.map(\.text), ["现在各有多少？", "余额：招行卡 100；期初就是今天。", "记下了。"])
+        XCTAssertEqual(conversation.messages.map(\.text), ["现在各有多少？", "余额：招行卡 100 CNY；期初就是今天。", "记下了。"])
 
         let sent = await recorder.sent
         XCTAssertEqual(sent.count, 2)
         let request = try XCTUnwrap(JSONSerialization.jsonObject(with: sent[1]) as? [String: Any])
-        XCTAssertEqual(request["message"] as? String, "余额：招行卡 100；期初就是今天。")
+        XCTAssertEqual(request["message"] as? String, "余额：招行卡 100 CNY；期初就是今天。")
         let onboarding = try XCTUnwrap(request["onboarding"] as? [String: Any])
         XCTAssertEqual(onboarding["ready"] as? Bool, false)
         let accounts = try XCTUnwrap((onboarding["draft"] as? [String: Any])?["accounts"] as? [[String: Any]])
@@ -148,7 +240,8 @@ final class LedgerSetupCardsTests: XCTestCase {
         draft.accounts[0].openingBalance = "12000"
         draft.importChannels = ["wechat", "cmb"]
         let files = draft.files(today: "2026-11-18")
-        XCTAssertEqual(files.map(\.path), ["main.bean", "accounts.bean", "opening.bean", "imports/wechat-config.yaml"])
+        XCTAssertEqual(files.map(\.path), ["main.bean", "accounts.bean", "opening.bean", "imports/wechat-config.yaml",
+                                           "imports/cmb-credit-card-config.yaml"])
         let main = files[0].content
         XCTAssertTrue(main.contains("option \"title\" \"日常账本\""))
         XCTAssertTrue(main.contains("include \"accounts.bean\""))

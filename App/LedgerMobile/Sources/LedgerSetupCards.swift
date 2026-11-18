@@ -18,6 +18,7 @@ struct LedgerOnboardingCardView: View {
     var body: some View {
         Group {
             switch card.kind {
+            case .accounts: LedgerAccountsCard(draft: draft, onSubmit: onSubmit)
             case .balances: LedgerBalancesCard(draft: draft, onSubmit: onSubmit)
             case .categories: LedgerCategoriesCard(card: card, draft: draft, onSubmit: onSubmit)
             case .storage: LedgerStorageCard(draft: draft, gitToken: $gitToken, gitUser: $gitUser, onSubmit: onSubmit)
@@ -94,6 +95,218 @@ private struct LedgerCardFooter<Buttons: View>: View {
     }
 }
 
+// MARK: Currency
+
+/// A capsule that shows a currency and opens the common ones.
+private struct LedgerCurrencyMenu: View {
+    let currency: String
+    let onPick: (String) -> Void
+
+    var body: some View {
+        Menu {
+            ForEach(LedgerOnboardingDraft.currencies, id: \.self) { code in
+                Button {
+                    onPick(code)
+                } label: {
+                    if code == currency { Label(code, systemImage: "checkmark") } else { Text(code) }
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(currency).balancedMono(size: 12)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(BalancedPalette.secondary)
+            .padding(.horizontal, 8)
+            .frame(minHeight: 26)
+            .background(Capsule().fill(BalancedPalette.sunken))
+        }
+        .accessibilityLabel(String(localized: "币种 \(currency)"))
+    }
+}
+
+// MARK: Accounts
+
+/// Where the money is: the ledger's currency first, then every built-in
+/// bank, wallet, card and loan as chips, the picked ones with their own
+/// currency, and a row for anything not built in.
+private struct LedgerAccountsCard: View {
+    let draft: LedgerOnboardingDraft
+    let onSubmit: (LedgerOnboardingCardAnswer) -> Void
+
+    private static let sections: [AccountTypeCategory] = [.bank, .wallet, .credit, .cash, .wealth, .loan]
+    private static let collapsedCount = 8
+
+    @State private var currency = "CNY"
+    @State private var picked: [LedgerOnboardingDraft.Account] = []
+    @State private var expanded: Set<AccountTypeCategory> = []
+    @State private var customName = ""
+    @State private var customKind = "bank_card"
+    @State private var seeded = false
+
+    private var pickedPaths: Set<String> { Set(picked.map(\.account)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LedgerCardTitle(title: String(localized: "钱都放在哪"),
+                            detail: String(localized: "点选你在用的，常见的都在这里；没有的在最下面加。信用卡、花呗这类欠款也一起选上。"))
+            VStack(alignment: .leading, spacing: 6) {
+                Text("主要用什么货币记账").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).padding(.horizontal, 4)
+                LedgerSetupFlow(spacing: 6) {
+                    ForEach(LedgerOnboardingDraft.currencies, id: \.self) { code in
+                        LedgerToggleChip(title: code, on: currency == code) { currency = code }
+                    }
+                }
+            }
+            if !picked.isEmpty { pickedList }
+            ForEach(Self.sections, id: \.self) { kind in presetSection(kind) }
+            customRow
+            LedgerCardFooter(hint: picked.contains { !$0.isLiability }
+                             ? String(localized: "已选 \(picked.count) 个")
+                             : String(localized: "至少选一个放钱的地方")) {
+                Button("好了") { onSubmit(.accounts(currency: currency, picked)) }
+                    .buttonStyle(.balanced(.primary))
+                    .fixedSize()
+                    .disabled(!picked.contains { !$0.isLiability })
+                    .accessibilityIdentifier("ai-onboarding-card-done")
+            }
+        }
+        .ledgerCard(padding: 12)
+        .onAppear {
+            guard !seeded else { return }
+            seeded = true
+            currency = draft.currency.isEmpty ? LedgerOnboardingDraft.regionCurrency() : draft.currency
+            picked = draft.accounts
+        }
+    }
+
+    /// The accounts picked so far, each with its currency.
+    private var pickedList: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(picked.enumerated()), id: \.element.id) { index, account in
+                if index > 0 { Divider().overlay(BalancedPalette.rule).padding(.leading, 14) }
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(account.name).balancedFont(size: 14.5).foregroundStyle(BalancedPalette.ink).lineLimit(1)
+                        Text(LedgerOnboardingDraft.kindTitle(account.kind)).balancedFont(size: 11).foregroundStyle(BalancedPalette.meta)
+                    }
+                    Spacer(minLength: 6)
+                    LedgerCurrencyMenu(currency: account.currency.isEmpty ? currency : account.currency) { code in
+                        picked[index].currency = code == currency ? "" : code
+                    }
+                    Button {
+                        picked.removeAll { $0.account == account.account }
+                    } label: {
+                        Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(BalancedPalette.meta)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(String(localized: "去掉 \(account.name)"))
+                }
+                .padding(.leading, 14)
+                .padding(.trailing, 6)
+                .frame(minHeight: 46)
+            }
+        }
+        .ledgerInsetWell()
+    }
+
+    private struct Choice: Identifiable {
+        let preset: AccountPresetItem
+        let account: LedgerOnboardingDraft.Account
+        var id: String { preset.id }
+    }
+
+    /// The presets of one kind, those meant for the ledger's currency first.
+    private func presets(_ section: AccountTypeCategory) -> [Choice] {
+        let rank: (AccountPresetItem) -> Int = { preset in
+            if preset.suggestedCurrency == currency { return 0 }
+            if preset.suggestedCurrency == nil { return currency == "CNY" ? 0 : 1 }
+            return 2
+        }
+        let items = AccountPresets.presets(for: section).enumerated()
+            .sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }
+            .map { $0.element }
+        return items.compactMap { preset in
+            LedgerOnboardingDraft.account(for: preset, ledgerCurrency: currency).map { Choice(preset: preset, account: $0) }
+        }
+    }
+
+    @ViewBuilder
+    private func presetSection(_ section: AccountTypeCategory) -> some View {
+        let all = presets(section)
+        let open = expanded.contains(section) || all.count <= Self.collapsedCount + 1
+        let shown = open ? all : Array(all.prefix(Self.collapsedCount))
+        if !all.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(section.title).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).padding(.horizontal, 4)
+                LedgerSetupFlow(spacing: 6) {
+                    ForEach(shown) { item in
+                        LedgerToggleChip(title: item.account.name, on: pickedPaths.contains(item.account.account)) {
+                            toggle(item.account)
+                        }
+                    }
+                    if !open {
+                        LedgerToggleChip(title: String(localized: "更多 \(all.count - shown.count) 个"), on: false, adds: true) {
+                            withAnimation(.easeOut(duration: 0.18)) { _ = expanded.insert(section) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func toggle(_ account: LedgerOnboardingDraft.Account) {
+        if pickedPaths.contains(account.account) {
+            picked.removeAll { $0.account == account.account }
+        } else if !picked.contains(where: { $0.name == account.name }) {
+            // Two accounts cannot share a name.
+            picked.append(account)
+        }
+    }
+
+    private var customRow: some View {
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(LedgerOnboardingDraft.customKinds, id: \.kind) { item in
+                    Button(LedgerOnboardingDraft.kindTitle(item.kind)) { customKind = item.kind }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(LedgerOnboardingDraft.kindTitle(customKind)).balancedFont(size: 13)
+                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold))
+                }
+                .foregroundStyle(BalancedPalette.ink)
+                .padding(.horizontal, 10)
+                .frame(minHeight: 32)
+                .background(Capsule().fill(BalancedPalette.sunken))
+            }
+            TextField("其他账户，如 工资卡", text: $customName)
+                .balancedFont(size: 14)
+                .submitLabel(.done)
+                .onSubmit(addCustom)
+            Button("添加", action: addCustom)
+                .buttonStyle(.balanced(.quiet))
+                .fixedSize()
+                .disabled(customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .padding(.leading, 6)
+        .padding(.vertical, 4)
+        .padding(.trailing, 4)
+        .ledgerInsetWell()
+    }
+
+    private func addCustom() {
+        guard let account = LedgerOnboardingDraft.customAccount(name: customName, kind: customKind, currency: "",
+                                                                 taken: pickedPaths),
+              !picked.contains(where: { $0.name == account.name }) else { return }
+        picked.append(account)
+        customName = ""
+    }
+}
+
 // MARK: Balances
 
 private struct LedgerBalancesCard: View {
@@ -103,8 +316,10 @@ private struct LedgerBalancesCard: View {
     private enum Start: Hashable { case today, monthStart, custom }
 
     @State private var amounts: [String: String] = [:]
+    @State private var currencies: [String: String] = [:]
     @State private var start: Start = .today
     @State private var date = Date()
+    @State private var seeded = false
     @FocusState private var focused: String?
 
     private var invalid: Set<String> {
@@ -123,7 +338,7 @@ private struct LedgerBalancesCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             LedgerCardTitle(title: String(localized: "现在各有多少"),
-                            detail: String(localized: "填当前余额，信用卡和贷款填欠多少。不确定的先空着，以后对账时再补。"))
+                            detail: String(localized: "填当前余额，可以带小数；信用卡和贷款填欠多少。币种不对点一下就能改。不确定的先空着，以后对账再补。"))
             VStack(spacing: 0) {
                 ForEach(Array(draft.accounts.enumerated()), id: \.element.id) { index, account in
                     if index > 0 { Divider().overlay(BalancedPalette.rule).padding(.leading, 14) }
@@ -145,11 +360,11 @@ private struct LedgerBalancesCard: View {
                         .padding(.horizontal, 4)
                 }
             }
-            LedgerCardFooter(hint: invalid.isEmpty ? String(localized: "金额只填数字") : String(localized: "有金额看不懂")) {
-                Button("先不填") { onSubmit(.balances([:], startDate: startDate)) }
+            LedgerCardFooter(hint: invalid.isEmpty ? String(localized: "最多两位小数") : String(localized: "有金额看不懂，标红的再看看")) {
+                Button("先不填") { onSubmit(.balances([:], startDate: startDate, currencies: currencies)) }
                     .buttonStyle(.balanced(.quiet))
                     .fixedSize()
-                Button("好了") { onSubmit(.balances(amounts, startDate: startDate)) }
+                Button("好了") { onSubmit(.balances(amounts, startDate: startDate, currencies: currencies)) }
                     .buttonStyle(.balanced(.primary))
                     .fixedSize()
                     .disabled(!invalid.isEmpty)
@@ -158,8 +373,9 @@ private struct LedgerBalancesCard: View {
         }
         .ledgerCard(padding: 12)
         .onAppear {
-            guard amounts.isEmpty else { return }
-            amounts = Dictionary(uniqueKeysWithValues: draft.accounts.map { ($0.account, $0.openingBalance) })
+            guard !seeded else { return }
+            seeded = true
+            amounts = Dictionary(draft.accounts.map { ($0.account, $0.openingBalance) }, uniquingKeysWith: { first, _ in first })
             if !draft.startDate.isEmpty, let parsed = Self.parse(draft.startDate) {
                 start = .custom
                 date = parsed
@@ -167,29 +383,34 @@ private struct LedgerBalancesCard: View {
         }
     }
 
+    private func currency(of account: LedgerOnboardingDraft.Account) -> String {
+        if let picked = currencies[account.account] { return picked }
+        return account.currency.isEmpty ? draft.currency : account.currency
+    }
+
     private func row(_ account: LedgerOnboardingDraft.Account) -> some View {
-        let currency = account.currency.isEmpty ? draft.currency : account.currency
-        return HStack(spacing: 10) {
+        HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(account.name).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink).lineLimit(1)
-                Text(LedgerOnboardingDraft.kindTitle(account.kind)).balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                Text(account.isLiability ? String(localized: "\(LedgerOnboardingDraft.kindTitle(account.kind)) · 欠多少")
+                                         : LedgerOnboardingDraft.kindTitle(account.kind))
+                    .balancedFont(size: 11.5)
+                    .foregroundStyle(account.isLiability ? BalancedPalette.expense : BalancedPalette.meta)
             }
-            Spacer(minLength: 8)
-            if account.isLiability {
-                Text("欠").balancedFont(size: 13).foregroundStyle(BalancedPalette.expense)
-            }
-            TextField("0", text: Binding(get: { amounts[account.account] ?? "" }, set: { amounts[account.account] = $0 }))
+            Spacer(minLength: 6)
+            TextField("0.00", text: Binding(get: { amounts[account.account] ?? "" }, set: { amounts[account.account] = $0 }))
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
                 .balancedMono(size: 15)
                 .foregroundStyle(invalid.contains(account.account) ? BalancedPalette.expense : BalancedPalette.ink)
                 .focused($focused, equals: account.account)
-                .frame(maxWidth: 120)
+                .frame(maxWidth: 130)
                 .accessibilityLabel(account.isLiability ? String(localized: "\(account.name) 欠款") : String(localized: "\(account.name) 余额"))
-            Text(currency).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+            LedgerCurrencyMenu(currency: currency(of: account)) { code in currencies[account.account] = code }
         }
-        .padding(.horizontal, 14)
-        .frame(minHeight: 50)
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
+        .frame(minHeight: 52)
         .contentShape(Rectangle())
         .onTapGesture { focused = account.account }
     }
@@ -205,35 +426,40 @@ private struct LedgerBalancesCard: View {
 
 // MARK: Categories
 
+/// Every built-in income and expense category, grouped and folded; the
+/// ones the assistant picked for the user start ticked, and anything not
+/// built in can be typed in.
 private struct LedgerCategoriesCard: View {
     let card: LedgerOnboardingCard
     let draft: LedgerOnboardingDraft
     let onSubmit: (LedgerOnboardingCardAnswer) -> Void
 
-    @State private var kept: Set<String> = []
-    @State private var added: Set<LedgerOnboardingCard.Suggestion> = []
+    typealias Item = LedgerOnboardingCard.Suggestion
+
+    @State private var chosen: [Item] = []
+    @State private var expanded: Set<String> = []
+    @State private var customName = ""
+    @State private var customIncome = false
     @State private var seeded = false
 
-    private var incomeCount: Int {
-        draft.incomeCategories.filter { kept.contains($0.account) }.count + added.filter(\.isIncome).count
-    }
-
-    private var expenseCount: Int {
-        draft.expenseCategories.filter { kept.contains($0.account) }.count + added.filter { !$0.isIncome }.count
-    }
+    private var chosenPaths: Set<String> { Set(chosen.map(\.account)) }
+    private var incomeCount: Int { chosen.filter(\.isIncome).count }
+    private var expenseCount: Int { chosen.count - incomeCount }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            LedgerCardTitle(title: String(localized: "分类"),
-                            detail: String(localized: "点一下去掉不要的，虚线的是可以加上的。想要别的，直接在下面说。"))
-            section(String(localized: "收入"), draft.incomeCategories, card.suggested.filter(\.isIncome))
-            section(String(localized: "支出"), draft.expenseCategories, card.suggested.filter { !$0.isIncome })
+            LedgerCardTitle(title: String(localized: "收支分类"),
+                            detail: String(localized: "已经按你的情况勾了一组。展开分组可以多选，点掉不要的；没有的在最下面加。"))
+            side(income: false)
+            side(income: true)
+            customRow
             LedgerCardFooter(hint: incomeCount == 0 || expenseCount == 0
-                             ? String(localized: "收入和支出各留至少一个")
+                             ? String(localized: "收入和支出各选至少一个")
                              : String(localized: "收入 \(incomeCount) · 支出 \(expenseCount)")) {
                 Button("好了") {
-                    let order = card.suggested.filter(added.contains)
-                    onSubmit(.categories(kept: kept, added: order))
+                    let inDraft = Set((draft.incomeCategories + draft.expenseCategories).map(\.account))
+                    onSubmit(.categories(kept: chosenPaths.intersection(inDraft),
+                                         added: chosen.filter { !inDraft.contains($0.account) }))
                 }
                 .buttonStyle(.balanced(.primary))
                 .fixedSize()
@@ -242,33 +468,139 @@ private struct LedgerCategoriesCard: View {
             }
         }
         .ledgerCard(padding: 12)
-        .onAppear {
-            guard !seeded else { return }
-            seeded = true
-            kept = Set((draft.incomeCategories + draft.expenseCategories).map(\.account))
-        }
+        .onAppear(perform: seed)
+    }
+
+    private func seed() {
+        guard !seeded else { return }
+        seeded = true
+        let fromDraft = draft.expenseCategories.map { Item(kind: "expense", name: $0.name, account: $0.account) }
+            + draft.incomeCategories.map { Item(kind: "income", name: $0.name, account: $0.account) }
+        chosen = fromDraft.isEmpty ? LedgerOnboardingCard.defaultCategories : fromDraft
+        let paths = Set(chosen.map(\.account))
+        expanded = Set(CategoryPresets.sections.filter { section in
+            section.items.contains { paths.contains(LedgerOnboardingCard.path(section, $0)) }
+        }.map(\.id))
     }
 
     @ViewBuilder
-    private func section(_ title: String, _ items: [LedgerOnboardingDraft.Category],
-                         _ suggestions: [LedgerOnboardingCard.Suggestion]) -> some View {
-        if !items.isEmpty || !suggestions.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).padding(.horizontal, 4)
+    private func side(income: Bool) -> some View {
+        let kind: CategoryKind = income ? .income : .expense
+        let presetPaths = Set(CategoryPresets.sections(for: kind).flatMap { section in
+            section.items.map { LedgerOnboardingCard.path(section, $0) }
+        })
+        // Picked or suggested ones that are not built in: the assistant's
+        // own or typed by the user.
+        let own = chosen.filter { $0.isIncome == income && !presetPaths.contains($0.account) }
+        let suggested = card.suggested.filter { $0.isIncome == income && !chosenPaths.contains($0.account) && !presetPaths.contains($0.account) }
+        VStack(alignment: .leading, spacing: 8) {
+            Text(income ? String(localized: "收入 \(incomeCount)") : String(localized: "支出 \(expenseCount)"))
+                .balancedFont(size: 13, weight: .medium).foregroundStyle(BalancedPalette.ink).padding(.horizontal, 4)
+            if !own.isEmpty || !suggested.isEmpty {
                 LedgerSetupFlow(spacing: 6) {
-                    ForEach(items) { item in
-                        LedgerToggleChip(title: item.name, on: kept.contains(item.account)) {
-                            if kept.contains(item.account) { kept.remove(item.account) } else { kept.insert(item.account) }
-                        }
+                    ForEach(own) { item in
+                        LedgerToggleChip(title: item.name, on: true) { toggle(item) }
                     }
-                    ForEach(suggestions) { item in
-                        LedgerToggleChip(title: item.name, on: added.contains(item), adds: true) {
-                            if added.contains(item) { added.remove(item) } else { added.insert(item) }
-                        }
+                    ForEach(suggested) { item in
+                        LedgerToggleChip(title: item.name, on: false, adds: true) { toggle(item) }
                     }
                 }
             }
+            VStack(spacing: 0) {
+                let sections = CategoryPresets.sections(for: kind)
+                ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
+                    if index > 0 { Divider().overlay(BalancedPalette.rule).padding(.leading, 14) }
+                    group(section, income: income)
+                }
+            }
+            .ledgerInsetWell()
         }
+    }
+
+    private func group(_ section: CategorySectionPreset, income: Bool) -> some View {
+        let items = section.items.map { Item(kind: income ? "income" : "expense", name: $0.name,
+                                             account: LedgerOnboardingCard.path(section, $0)) }
+        let count = items.filter { chosenPaths.contains($0.account) }.count
+        let open = expanded.contains(section.id)
+        return VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    if open { expanded.remove(section.id) } else { expanded.insert(section.id) }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: section.icon).font(.system(size: 13)).foregroundStyle(BalancedPalette.secondary)
+                        .frame(width: 20)
+                    Text(section.name).balancedFont(size: 14.5).foregroundStyle(BalancedPalette.ink)
+                    Spacer(minLength: 6)
+                    if count > 0 {
+                        Text("\(count)/\(items.count)").balancedMono(size: 12).foregroundStyle(BalancedPalette.ink)
+                    }
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(BalancedPalette.meta)
+                        .rotationEffect(.degrees(open ? 180 : 0))
+                }
+                .frame(minHeight: 42)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if open {
+                LedgerSetupFlow(spacing: 6) {
+                    ForEach(items) { item in
+                        LedgerToggleChip(title: item.name, on: chosenPaths.contains(item.account)) { toggle(item) }
+                    }
+                }
+                .padding(.bottom, 10)
+            }
+        }
+        .padding(.horizontal, 14)
+    }
+
+    private func toggle(_ item: Item) {
+        if chosenPaths.contains(item.account) {
+            chosen.removeAll { $0.account == item.account }
+        } else if !chosen.contains(where: { $0.isIncome == item.isIncome && $0.name == item.name }) {
+            // Two categories on one side cannot share a name.
+            chosen.append(item)
+        }
+    }
+
+    private var customRow: some View {
+        HStack(spacing: 8) {
+            Menu {
+                Button(String(localized: "支出")) { customIncome = false }
+                Button(String(localized: "收入")) { customIncome = true }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(customIncome ? String(localized: "收入") : String(localized: "支出")).balancedFont(size: 13)
+                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold))
+                }
+                .foregroundStyle(BalancedPalette.ink)
+                .padding(.horizontal, 10)
+                .frame(minHeight: 32)
+                .background(Capsule().fill(BalancedPalette.sunken))
+            }
+            TextField("其他分类，如 猫粮", text: $customName)
+                .balancedFont(size: 14)
+                .submitLabel(.done)
+                .onSubmit(addCustom)
+            Button("添加", action: addCustom)
+                .buttonStyle(.balanced(.quiet))
+                .fixedSize()
+                .disabled(customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .padding(.leading, 6)
+        .padding(.vertical, 4)
+        .padding(.trailing, 4)
+        .ledgerInsetWell()
+    }
+
+    private func addCustom() {
+        let taken = chosenPaths.union((draft.incomeCategories + draft.expenseCategories).map(\.account))
+        guard let category = LedgerOnboardingDraft.customCategory(name: customName, income: customIncome, taken: taken),
+              !chosen.contains(where: { $0.name == category.name }) else { return }
+        chosen.append(Item(kind: customIncome ? "income" : "expense", name: category.name, account: category.account))
+        customName = ""
     }
 }
 

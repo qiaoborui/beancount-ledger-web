@@ -65,7 +65,7 @@ var onboardingChannels = []string{"alipay", "wechat", "cmb-checking", "cmb", "cc
 
 // onboardingCards are the native cards the model can show in place of a
 // question: the user fills them in the app, which edits the draft itself.
-var onboardingCards = []string{"balances", "categories", "storage", "imports"}
+var onboardingCards = []string{"accounts", "balances", "categories", "storage", "imports"}
 
 type onboardingAccountV1 struct {
 	Kind    string `json:"kind"`
@@ -665,7 +665,7 @@ func onboardingSystemPrompt(today time.Time) string {
 你只能通过工具修改一份建账草案。工具不会写任何文件；草案就绪后用户在 App 里点「确认创建」，App 才会在本机生成账本并校验。每条用户消息前附有“当前草案”JSON，那是唯一可信的已知信息。
 
 ## 要收集到什么（是目标，不是顺序）
-- 这本账叫什么、用什么货币记、期初余额算哪一天。三者都有默认值（我的账本、人民币、创建当天），用户不提就不用问。
+- 这本账叫什么、用什么货币记、期初余额算哪一天。三者都有默认值（我的账本、草案里的 currency——App 按设备地区预填、创建当天）。货币要留意：用户提到新加坡、香港、美国、工资发什么币、在哪里生活，就据此判断本位币，用 set_ledger_profile 改；外币账户单独记 currency。
 - 资金账户：钱平时放在哪里，各自现在有多少。
 - 待还款项：信用卡、花呗、白条、消费贷、房贷、车贷、欠别人的钱，各自现在欠多少。没有就不用记。
 - 收入分类和支出分类：按他的生活来，不是照抄一份通用清单。
@@ -673,25 +673,26 @@ func onboardingSystemPrompt(today time.Time) string {
 - 账本放在哪：只在这台设备，或推到一个 Git 仓库（用户自己建一个空仓库）。
 - 账单从哪里导入：支付宝、微信、银行、美团，或者只手动记。
 
-## 用卡片代替一项项追问
-有四张原生卡片，用 show_onboarding_card 展示，调用后这一轮结束，用户填完后草案已经被 App 改好，结果会作为下一条消息发来：
-- balances：资金账户和待还款项都记下后，用它一次问全部余额和期初日期，不要一个个用文字问金额。
-- categories：先按他的情况用 replace_categories 写入推荐的一组，再用它让用户点掉不要的、点上 suggested 里的。
-- storage：分类和余额都有了以后问账本放在哪。
-- imports：最后问账单从哪里导入；他之前已经说过用哪些渠道的，直接用 set_ledger_profile 记下 importChannels，不必再展示。
-同一种卡片一般只展示一次；用户之后想改，按他说的直接改草案。
+## 主动给选项，用卡片代替一项项追问
+新用户不知道该说什么，你要主动把常见选项摆出来让他点，而不是空问。有五张原生卡片，用 show_onboarding_card 展示，调用后这一轮结束，用户填完后草案已经被 App 改好，结果会作为下一条消息发来。一般按这个顺序推进，用户已经说清楚的可以跳过：
+1. accounts：资金账户和欠款。卡片里内置了几十个常见银行、钱包、信用卡、花呗白条、现金、投资和贷款，并能选记账货币、改单个账户币种。用户在话里提到的账户先用 upsert_account 记下（会预先选中），再展示卡片让他补全。
+2. categories：收支分类。卡片内置了全部常见分类；按他的情况先用 replace_categories 写入你推荐的一组（学生、自由职业、有娃、养宠、有房贷等各不相同），内置之外值得一提的放进 suggested。
+3. balances：一次问全部余额（可带小数）和从哪天开始记，不要一个个用文字问金额。
+4. storage：账本放在哪。
+5. imports：账单从哪里导入；他之前已经说过用哪些渠道的，直接用 set_ledger_profile 记下 importChannels，不必再展示。
+卡片上方的 prompt 要具体，带一两个例子，如“你平时用哪些卡和钱包？像招行卡、支付宝、花呗这种，点上就行，没有的可以自己加”。同一种卡片一般只展示一次；用户之后想改，按他说的直接改草案。
 
 ## 完成标准
 草案里有一个资金账户、一个收入分类、一个支出分类，并且你调用过 present_onboarding_plan。其余项目能合理推断的按默认填好并在回复里说明，推断不了的留空并说明还缺什么。余额和欠款永远不臆造。
 
 ## 开场
-第一轮用一句话说明你会帮他搭好账本、确认之前不会写入任何文件，然后开放式地问一句他现在的情况和想怎么记账：平时用哪些卡和钱包、钱主要花在哪、有没有在用别的记账方式。不要一上来就抛出选项清单，也不要宣布会分几步走。
+第一轮用一两句话说明你会帮他搭好账本、确认之前不会写入任何文件，然后直接展示 accounts 卡片让他点选，不要空着问“说说你的情况”。如果他第一句话已经提到了账户、货币或生活情况，先把能记的写进草案（账户用 upsert_account，货币用 set_ledger_profile），再展示卡片。
 
 ## 每一轮怎么做
 1. 先从用户最新的话里尽量多地提取信息，一次把能记的都写进草案：一句话里提到三张卡和工资，就三张卡和工资一起记下。再用一两句话复述记下了什么。绝不能没调工具就说“已记下了”。
 2. 再看草案还缺什么（消息前的草案会写明还缺哪几项），只追问缺的、且影响建账的内容。自己判断下一个最有价值的问题，一次问一到两件事，不要按固定顺序，也不要重问已经答过的。
 3. 能从他说的、从常识或从已有账户合理推断的，直接写进草案并说明“先按…来，可以改”；只有确实需要他决定的事才问。
-4. 有明确选项的问题（用哪些钱包、要不要记欠款、推荐哪组分类）用 ask_user 展示选项卡，最多 6 个选项，可多选时设 multiple；金额、名称、日期这类开放问题直接用文字问。整套对话里选项卡别超过两三次，其余用文字聊。
+4. 账户、分类、余额、存放、导入都用上面的卡片；卡片之外有明确选项的问题（如要不要记房贷）用 ask_user，最多 6 个选项。每次提问都带一两个例子，让他知道可以怎么答。
 5. 用户说“你看着办”“都行”“按推荐来”时，不要再问：直接补齐一份完整方案（常见账户形态、常见收支分类、余额留空），调用 present_onboarding_plan，再用简短文字说明你替他定了什么、哪里可以改。
 6. 用户中途改主意（换币种、删账户、改分类、改期初日期），先按他说的改草案再复述；改完必须重新调用 present_onboarding_plan。
 
@@ -731,15 +732,16 @@ func (*onboardingCardTool) Schema() ai.ToolSchema {
 	}, "kind", "name", "account")
 	return ai.ToolSchema{Name: "show_onboarding_card",
 		Description: "在 App 里展示一张原生卡片让用户直接填写，代替用文字一项项问：" +
-			"balances 是期初余额卡（草案里每个账户一个金额框，加期初日期），要先记下账户再用；" +
-			"categories 是分类卡（草案里的分类可以点掉，suggested 里的可以点上），要先用 replace_categories 写入你推荐的那组再用；" +
+			"accounts 是资金账户卡（先选记账货币，再从内置的常见银行卡、电子钱包、信用卡、现金、投资、贷款里点选，每个账户可改币种，也能自定义添加；草案里已有的账户会预先选中）；" +
+			"balances 是期初余额卡（草案里每个账户一个金额框，可带两位小数，每行可改币种，加期初日期），要先有账户再用；" +
+			"categories 是分类卡（内置全部常见收支分类，按分组折叠，可多选和自定义；草案里的分类预先勾上，草案为空时 App 预先勾一组常用的；suggested 是内置之外你想推荐的）；" +
 			"storage 问账本放在哪（只在这台设备或 Git 仓库）；imports 问账单从哪里导入。" +
 			"调用后这一轮立即结束；用户填完后 App 会直接改好草案，并把结果作为下一条消息发来。每种卡片一般只用一次。",
 		Parameters: objectParameters(map[string]any{
 			"kind":   map[string]any{"type": "string", "enum": onboardingCards},
 			"prompt": map[string]any{"type": "string", "description": "卡片上方的一句话，如 各账户现在有多少钱、欠多少？不确定的留空"},
 			"suggested": map[string]any{"type": "array", "maxItems": 12, "items": suggestion,
-				"description": "只用于 categories：草案之外可以点上的常见分类"},
+				"description": "只用于 categories：内置分类之外、按他的情况值得推荐的分类，如 宠物、育儿、房贷利息"},
 		}, "kind", "prompt")}
 }
 func (*onboardingCardTool) ExecutionMode() agent.ToolExecutionMode { return agent.ToolModeSequential }
@@ -766,9 +768,6 @@ func (t *onboardingCardTool) Execute(_ context.Context, _ string, params json.Ra
 			return agent.AgentToolResult{}, errors.New("草案里还没有账户，先用 upsert_account 记下账户")
 		}
 	case "categories":
-		if len(draft.IncomeCategories) == 0 && len(draft.ExpenseCategories) == 0 {
-			return agent.AgentToolResult{}, errors.New("先用 replace_categories 写入你推荐的分类，再展示分类卡")
-		}
 		taken := map[string]bool{}
 		for _, item := range append(append([]onboardingCategoryV1{}, draft.IncomeCategories...), draft.ExpenseCategories...) {
 			taken[item.Name], taken[item.Account] = true, true

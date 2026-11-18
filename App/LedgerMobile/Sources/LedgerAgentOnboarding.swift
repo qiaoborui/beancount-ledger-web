@@ -29,7 +29,9 @@ struct LedgerOnboardingDraft: Codable, Equatable, Sendable {
     static let kinds = ["cash", "bank_card", "digital_wallet", "savings", "investment", "credit_card", "consumer_loan", "other_debt"]
 
     var title = String(localized: "我的账本")
-    var currency = "CNY"
+    /// The device region's currency when it is a common one, else CNY; the
+    /// accounts card shows it first so it is one tap to change.
+    var currency = LedgerOnboardingDraft.regionCurrency()
     /// Dates the opening balances; empty means the day the ledger is created.
     var startDate = ""
     var accounts: [Account] = []
@@ -69,6 +71,72 @@ struct LedgerOnboardingDraft: Codable, Equatable, Sendable {
     }
 
     var isGitStorage: Bool { storage == "git" && !remote.isEmpty }
+
+    /// The currencies the cards offer.
+    static let currencies = AccountPresets.commonCurrencies
+
+    static func regionCurrency(_ locale: Locale = .current) -> String {
+        guard let code = locale.currency?.identifier.uppercased(), currencies.contains(code) else { return "CNY" }
+        return code
+    }
+
+    /// The draft kind of a built-in account preset; nil for the kinds the
+    /// draft has no root for (amounts owed to the user).
+    static func kind(for category: AccountTypeCategory) -> String? {
+        switch category {
+        case .bank: "bank_card"
+        case .wallet: "digital_wallet"
+        case .credit: "credit_card"
+        case .cash: "cash"
+        case .wealth: "investment"
+        case .loan: "consumer_loan"
+        case .receivable: nil
+        }
+    }
+
+    /// A built-in preset as a draft account. Cash is named and pathed after
+    /// its currency; a preset meant for another currency keeps it.
+    static func account(for preset: AccountPresetItem, ledgerCurrency: String) -> Account? {
+        guard let kind = kind(for: preset.category) else { return nil }
+        if preset.category == .cash, preset.id == "cash_cny" {
+            return Account(kind: kind, name: String(localized: "\(ledgerCurrency) 现金"), account: "Assets:Cash:\(ledgerCurrency)",
+                           currency: "")
+        }
+        let currency = preset.suggestedCurrency.flatMap { $0 == ledgerCurrency ? nil : $0 } ?? ""
+        return Account(kind: kind, name: preset.name, account: preset.defaultAccount, currency: currency)
+    }
+
+    /// The draft kinds the custom-account row offers, with their titles.
+    static let customKinds: [(kind: String, category: AccountTypeCategory)] = [
+        ("bank_card", .bank), ("digital_wallet", .wallet), ("cash", .cash), ("investment", .wealth),
+        ("credit_card", .credit), ("consumer_loan", .loan),
+    ]
+
+    /// A custom account the user typed: a pinyin path under the kind's root,
+    /// numbered when it is taken.
+    static func customAccount(name: String, kind: String, currency: String, taken: Set<String>) -> Account? {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 40, !name.contains("\""),
+              let category = customKinds.first(where: { $0.kind == kind })?.category else { return nil }
+        let base = BeancountNaming.buildAccountPath(category: category, preset: nil, customName: name)
+        return Account(kind: kind, name: name, account: unique(base, taken: taken), currency: currency)
+    }
+
+    /// A custom category the user typed, under Income or Expenses.
+    static func customCategory(name: String, income: Bool, taken: Set<String>) -> Category? {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 40, !name.contains("\"") else { return nil }
+        let segment = BeancountNaming.toPinyinCamelCase(name)
+        let base = (income ? "Income:" : "Expenses:") + (segment.isEmpty ? "Custom" : segment)
+        return Category(name: name, account: unique(base, taken: taken))
+    }
+
+    private static func unique(_ base: String, taken: Set<String>) -> String {
+        guard taken.contains(base) else { return base }
+        var index = 2
+        while taken.contains("\(base)\(index)") { index += 1 }
+        return "\(base)\(index)"
+    }
 
     /// What the ledger needs before it can be created: somewhere money is
     /// kept, and a category on each side.
@@ -128,7 +196,7 @@ struct LedgerOnboardingDraft: Codable, Equatable, Sendable {
 /// message. `prompt` is the line the model said above it.
 struct LedgerOnboardingCard: Decodable, Equatable, Sendable {
     enum Kind: String, Decodable, Sendable {
-        case balances, categories, storage, imports
+        case accounts, balances, categories, storage, imports
     }
 
     struct Suggestion: Decodable, Equatable, Hashable, Sendable, Identifiable {
@@ -143,6 +211,31 @@ struct LedgerOnboardingCard: Decodable, Equatable, Sendable {
     let kind: Kind
     let prompt: String
     var suggested: [Suggestion] = []
+
+    /// The path a built-in category gets: `Expenses:Food:Dining`.
+    static func path(_ section: CategorySectionPreset, _ item: CategoryItemPreset) -> String {
+        BeancountNaming.buildCategoryPath(kind: section.kind, sectionCode: section.code, itemCode: item.code, customName: item.name)
+    }
+
+    /// The built-in categories a card starts with when the draft has none:
+    /// what most people spend on and earn from in their first month.
+    static let defaultCategoryIDs = [
+        "food_dining", "food_takeaway", "food_groceries", "food_coffee", "shop_daily", "trans_public", "trans_taxi",
+        "home_rent", "home_utilities", "home_telecom", "apparel_clothes", "fun_subs", "health_med", "soc_gift",
+        "other_misc", "career_salary", "career_bonus", "invest_interest", "refund_shop",
+    ]
+
+    static var defaultCategories: [Suggestion] {
+        defaultCategoryIDs.compactMap { id in
+            for section in CategoryPresets.sections {
+                if let item = section.items.first(where: { $0.id == id }) {
+                    return Suggestion(kind: section.kind == .income ? "income" : "expense", name: item.name,
+                                      account: path(section, item))
+                }
+            }
+            return nil
+        }
+    }
 
     private enum CodingKeys: String, CodingKey { case kind, prompt, suggested }
 
@@ -163,9 +256,13 @@ struct LedgerOnboardingCard: Decodable, Equatable, Sendable {
 /// What the user filled in on an onboarding card. Applying it edits the
 /// draft; the summary is what goes back to the model as the user's answer.
 enum LedgerOnboardingCardAnswer: Equatable, Sendable {
-    /// Opening amounts by account path (empty for none) and the start date
-    /// (empty for the day the ledger is created).
-    case balances([String: String], startDate: String)
+    /// The ledger's currency and the accounts picked, in order; an account
+    /// already in the draft keeps its opening balance.
+    case accounts(currency: String, [LedgerOnboardingDraft.Account])
+    /// Opening amounts by account path (empty for none), the start date
+    /// (empty for the day the ledger is created), and each account's
+    /// currency where the user changed it (empty for the ledger's).
+    case balances([String: String], startDate: String, currencies: [String: String] = [:])
     /// The draft categories kept, by account path, and the suggestions added.
     case categories(kept: Set<String>, added: [LedgerOnboardingCard.Suggestion])
     /// `device`, or `git` with the repository address.
@@ -173,11 +270,31 @@ enum LedgerOnboardingCardAnswer: Equatable, Sendable {
     case imports([String])
 
     /// A plain non-negative amount with at most two decimals, or empty.
+    /// Reads what a keyboard in any region types: a decimal comma
+    /// (`12,5`), thousands separators (`12,000.50`, `12.000,50`), full-width
+    /// punctuation, currency signs, and a separator typed last.
     static func normalizedAmount(_ raw: String) -> String? {
-        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "，", with: "")
+        var text = raw.filter { !$0.isWhitespace && !"¥￥$€£'_".contains($0) }
+            .replacingOccurrences(of: "，", with: ",")
+            .replacingOccurrences(of: "。", with: ".").replacingOccurrences(of: "．", with: ".")
         if text.isEmpty { return "" }
-        guard text.range(of: "^[0-9]{1,12}(\\.[0-9]{1,2})?$", options: .regularExpression) != nil else { return nil }
+        if let last = text.last, last == "." || last == "," { text.removeLast() }
+        let lastDot = text.lastIndex(of: "."), lastComma = text.lastIndex(of: ",")
+        if let lastDot, let lastComma {
+            // Whichever comes last is the decimal mark; the other groups.
+            let (group, mark) = lastDot > lastComma ? (",", ".") : (".", ",")
+            text = text.replacingOccurrences(of: group, with: "")
+            if mark == "," { text = text.replacingOccurrences(of: ",", with: ".") }
+        } else if lastComma != nil {
+            // One comma with one or two digits after it is a decimal comma;
+            // anything else groups thousands.
+            if text.range(of: "^[0-9]+,[0-9]{1,2}$", options: .regularExpression) != nil {
+                text = text.replacingOccurrences(of: ",", with: ".")
+            } else {
+                text = text.replacingOccurrences(of: ",", with: "")
+            }
+        }
+        guard text.range(of: "^[0-9]{1,13}(\\.[0-9]{1,2})?$", options: .regularExpression) != nil else { return nil }
         return Decimal(string: text) == 0 ? "" : text
     }
 
@@ -185,14 +302,33 @@ enum LedgerOnboardingCardAnswer: Equatable, Sendable {
         var next = draft
         let separator = String(localized: "、")
         switch self {
-        case let .balances(amounts, startDate):
+        case let .accounts(currency, accounts):
+            next.currency = currency
+            let balances = Dictionary(draft.accounts.map { ($0.account, $0.openingBalance) }, uniquingKeysWith: { first, _ in first })
+            var seen = Set<String>()
+            next.accounts = accounts.filter { seen.insert($0.account).inserted }.map { account in
+                var account = account
+                if account.currency == currency { account.currency = "" }
+                if account.openingBalance.isEmpty { account.openingBalance = balances[account.account] ?? "" }
+                return account
+            }
+            let names = next.accounts.map { account in
+                account.currency.isEmpty ? account.name : "\(account.name)（\(account.currency)）"
+            }
+            let body = names.isEmpty ? String(localized: "先不加") : names.joined(separator: separator)
+            return (next, String(localized: "用 \(currency) 记账；账户：\(body)。"))
+        case let .balances(amounts, startDate, currencies):
             var parts: [String] = []
             for index in next.accounts.indices {
                 let account = next.accounts[index]
+                if let currency = currencies[account.account] {
+                    next.accounts[index].currency = currency == next.currency ? "" : currency
+                }
                 guard let raw = amounts[account.account], let amount = Self.normalizedAmount(raw) else { continue }
                 next.accounts[index].openingBalance = amount
                 guard !amount.isEmpty else { continue }
-                parts.append(account.isLiability ? String(localized: "\(account.name) 欠 \(amount)") : "\(account.name) \(amount)")
+                let unit = next.accounts[index].currency.isEmpty ? next.currency : next.accounts[index].currency
+                parts.append(account.isLiability ? String(localized: "\(account.name) 欠 \(amount) \(unit)") : "\(account.name) \(amount) \(unit)")
             }
             next.startDate = startDate
             let start = startDate.isEmpty ? String(localized: "期初就是今天") : String(localized: "期初 \(startDate)")
