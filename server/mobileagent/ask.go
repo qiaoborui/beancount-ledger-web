@@ -103,20 +103,24 @@ func parseAsk(params json.RawMessage) (askV1, error) {
 
 // endsOnAsk reports a run that the ask_user tool ended: its last message is
 // that tool's result, with no assistant reply after it.
-func endsOnAsk(messages []agent.AgentMessage) bool {
+func endsOnAsk(messages []agent.AgentMessage) bool { return endsOnTool(messages, "ask_user") }
+
+// endsOnTool reports a run that a turn-ending tool ended: its last message
+// is that tool's successful result, with no assistant reply after it.
+func endsOnTool(messages []agent.AgentMessage, name string) bool {
 	if len(messages) == 0 {
 		return false
 	}
 	last := messages[len(messages)-1].ToolResult
-	return last != nil && last.ToolName == "ask_user" && !last.IsError
+	return last != nil && last.ToolName == name && !last.IsError
 }
 
 // closeAsk appends the question as the assistant's reply, so the transcript
 // ends on an assistant turn like any answered one and the user's pick
 // follows it as an ordinary question. It copies the model identity of the
 // assistant message that asked, which providers use to replay it.
-func closeAsk(messages []agent.AgentMessage, ask *askV1) []agent.AgentMessage {
-	reply := agent.AssistantMessage{Role: "assistant", Content: []ai.AssistantContentBlock{ai.TextContent{Text: ask.Question}},
+func closeAsk(messages []agent.AgentMessage, question string) []agent.AgentMessage {
+	reply := agent.AssistantMessage{Role: "assistant", Content: []ai.AssistantContentBlock{ai.TextContent{Text: question}},
 		StopReason: ai.StopReasonStop, Timestamp: time.Now().UnixMilli()}
 	for index := len(messages) - 1; index >= 0; index-- {
 		if asked := messages[index].Assistant; asked != nil {

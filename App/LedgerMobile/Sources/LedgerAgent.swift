@@ -824,13 +824,15 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
     /// The onboarding draft as the turn left it; only an onboarding turn that
     /// answered or was stopped has one.
     var onboarding: LedgerOnboardingState? = nil
+    /// The native card an onboarding turn ended on, in place of a question.
+    var onboardingCard: LedgerOnboardingCard? = nil
     /// The App settings a turn changed, with the sections it changed; nil when
     /// it changed none. A failed or stopped turn never carries one.
     var appSettings: LedgerAgentAppSettingsUpdate? = nil
 
     private enum CodingKeys: String, CodingKey {
         case ok, reply, toolCalls, error, cancelled, modelUnavailable, edited, transcript, memoryUpdated, ask
-        case steps, usage, stopReason, compacted, onboarding, appSettings
+        case steps, usage, stopReason, compacted, onboarding, onboardingCard, appSettings
     }
     init(ok: Bool, reply: String? = nil, toolCalls: [LedgerAgentToolCall] = [], error: String? = nil,
          cancelled: Bool? = nil, modelUnavailable: Bool? = nil, edited: Bool = false, transcript: String? = nil,
@@ -863,6 +865,8 @@ struct LedgerAgentTurnResponse: Decodable, Sendable {
         stopReason = try container.decodeIfPresent(String.self, forKey: .stopReason)
         compacted = try container.decodeIfPresent(Bool.self, forKey: .compacted) ?? false
         onboarding = try container.decodeIfPresent(LedgerOnboardingState.self, forKey: .onboarding)
+        // A card this build cannot draw is dropped; its prompt is the reply.
+        onboardingCard = (try? container.decodeIfPresent(LedgerOnboardingCard.self, forKey: .onboardingCard)) ?? nil
         // A change this build cannot read is dropped; the reply still stands.
         appSettings = try? container.decodeIfPresent(LedgerAgentAppSettingsUpdate.self, forKey: .appSettings)
     }

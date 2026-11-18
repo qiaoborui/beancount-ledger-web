@@ -285,3 +285,73 @@ func TestOnboardingAmountsAcceptWhatModelsSend(t *testing.T) {
 		}
 	}
 }
+
+func TestOnboardingCardEndsTheTurnWithItsPrompt(t *testing.T) {
+	useFaux(t,
+		onboardingStep(
+			ai.FauxToolCall("replace_categories", map[string]any{"kind": "expense", "categories": []any{
+				map[string]any{"name": "餐饮", "account": "Expenses:Food"}}}, nil),
+			ai.FauxToolCall("set_ledger_profile", map[string]any{"storage": "git", "importChannels": []any{"alipay", "wechat"}}, nil),
+		),
+		// Like ask_user, the card ends the turn when it is the batch's only call.
+		onboardingStep(
+			ai.FauxToolCall("show_onboarding_card", map[string]any{"kind": "categories", "prompt": "点掉用不上的分类",
+				"suggested": []any{
+					map[string]any{"kind": "expense", "name": "宠物", "account": "Expenses:Pets"},
+					map[string]any{"kind": "expense", "name": "餐饮", "account": "Expenses:Dining"},
+				}}, nil),
+		),
+	)
+	response := runTurnFor(t, map[string]any{"version": 1, "provider": "faux", "model": "faux-1", "message": "上班族",
+		"onboarding": map[string]any{"draft": defaultOnboardingDraft(), "ready": false}})
+	if !response.OK || response.Reply != "点掉用不上的分类" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+	card := response.OnboardingCard
+	if card == nil || card.Kind != "categories" || len(card.Suggested) != 1 || card.Suggested[0].Name != "宠物" {
+		t.Fatalf("card = %+v", card)
+	}
+	draft := response.Onboarding.Draft
+	if draft.Storage != "git" || strings.Join(draft.ImportChannels, ",") != "alipay,wechat" {
+		t.Fatalf("draft = %+v", draft)
+	}
+	if !strings.Contains(response.Transcript, "点掉用不上的分类") {
+		t.Fatalf("the transcript should end on the prompt: %s", response.Transcript)
+	}
+}
+
+func TestOnboardingBalancesCardNeedsAccounts(t *testing.T) {
+	useFaux(t,
+		onboardingStep(ai.FauxToolCall("show_onboarding_card", map[string]any{"kind": "balances", "prompt": "各有多少钱？"}, nil)),
+		onboardingStep(ai.FauxText("先说说你用哪些卡吧。")),
+	)
+	response := runTurnFor(t, map[string]any{"version": 1, "provider": "faux", "model": "faux-1", "message": "开始",
+		"onboarding": map[string]any{"draft": defaultOnboardingDraft(), "ready": false}})
+	if !response.OK || response.OnboardingCard != nil || response.Reply != "先说说你用哪些卡吧。" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+	if len(response.ToolCalls) != 1 || !response.ToolCalls[0].IsError {
+		t.Fatalf("the card should fail without accounts: %+v", response.ToolCalls)
+	}
+}
+
+func TestOnboardingDraftRejectsUnknownStorageChannelsAndCredentials(t *testing.T) {
+	for _, draft := range []onboardingDraftV1{
+		{Storage: "dropbox"},
+		{ImportChannels: []string{"alipay", "alipay"}},
+		{ImportChannels: []string{"paypal"}},
+		{Storage: "git", Remote: "https://user:token@github.com/a/b"},
+		{Storage: "git", Remote: "git@github.com:a/b.git"},
+	} {
+		base := defaultOnboardingDraft()
+		base.Storage, base.Remote, base.ImportChannels = draft.Storage, draft.Remote, draft.ImportChannels
+		if err := base.validate(onboardingToday); err == nil {
+			t.Fatalf("draft %+v should be rejected", draft)
+		}
+	}
+	ok := defaultOnboardingDraft()
+	ok.Storage, ok.Remote, ok.ImportChannels = "git", "https://github.com/a/b.git", []string{"alipay", "manual"}
+	if err := ok.validate(onboardingToday); err != nil {
+		t.Fatal(err)
+	}
+}

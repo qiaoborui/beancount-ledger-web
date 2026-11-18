@@ -54,6 +54,10 @@ struct LedgerSetupView: View {
     @State private var picked: Set<String> = []
     @State private var planPresented = false
     @State private var creating = false
+    /// The token and username for a from-scratch ledger stored in Git: kept
+    /// on the page until 创建账本 puts them in the keychain.
+    @State private var storageToken = ""
+    @State private var storageUser = ""
 
     // Other ways
     @State private var importer: Importer?
@@ -619,6 +623,15 @@ struct LedgerSetupView: View {
                 LedgerAskCard(ask: ask, picked: $picked, identifier: "ai-onboarding-choice", disabled: creating) { send($0) }
                     .padding(.horizontal, 16)
             }
+            if let card = message.card, message.id == conversation.messages.last?.id, conversation.pendingCard != nil {
+                LedgerOnboardingCardView(card: card, draft: plan, gitToken: $storageToken, gitUser: $storageUser,
+                                         disabled: creating) { answer in
+                    composerFocused = false
+                    conversation.submit(answer)
+                }
+                .id(message.id)
+                .padding(.horizontal, 16)
+            }
         }
     }
 
@@ -685,7 +698,8 @@ struct LedgerSetupView: View {
     private var planSummary: String {
         let categories = plan.incomeCategories.count + plan.expenseCategories.count
         let start = plan.startDate.isEmpty ? String(localized: "期初为创建当天") : String(localized: "期初 \(plan.startDate)")
-        return String(localized: "\(plan.accounts.count) 个账户 · \(categories) 个分类 · \(plan.currency) · \(start)")
+        let base = String(localized: "\(plan.accounts.count) 个账户 · \(categories) 个分类 · \(plan.currency) · \(start)")
+        return plan.isGitStorage ? base + String(localized: " · 同步到 Git") : base
     }
 
     /// What the draft already holds and what it still needs, as one glass
@@ -800,9 +814,67 @@ struct LedgerSetupView: View {
             }
             categories(String(localized: "收入分类"), plan.incomeCategories)
             categories(String(localized: "支出分类"), plan.expenseCategories)
+            planSettings
+            planFiles
         }
         .ledgerCard(padding: 14)
         .accessibilityIdentifier("ai-onboarding-plan")
+    }
+
+    /// Where the ledger will live and which bills it is set up to import.
+    private var planSettings: some View {
+        VStack(spacing: 0) {
+            settingRow(String(localized: "存放"), plan.isGitStorage
+                       ? String(localized: "Git · \(URL(string: plan.remote)?.host ?? plan.remote)")
+                       : String(localized: "这台设备"))
+            Divider().overlay(BalancedPalette.rule).padding(.leading, 14)
+            settingRow(String(localized: "导入"), plan.importChannels.isEmpty
+                       ? String(localized: "还没选，先备好支付宝和微信")
+                       : plan.importChannels.map(LedgerOnboardingDraft.channelTitle).joined(separator: String(localized: "、")))
+        }
+        .ledgerInsetWell()
+    }
+
+    private func settingRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(label).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta).frame(width: 40, alignment: .leading)
+            Text(value).balancedFont(size: 14).foregroundStyle(BalancedPalette.ink).lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+
+    /// The files 创建账本 will write, each one a tap away from its text,
+    /// so what is created is what was seen.
+    private var planFiles: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("会写入的文件").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta).padding(.horizontal, 4)
+            VStack(spacing: 0) {
+                let files = plan.files(today: LedgerOnboardingConversation.localDay())
+                ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
+                    if index > 0 { Divider().overlay(BalancedPalette.rule).padding(.leading, 14) }
+                    DisclosureGroup {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            Text(file.content)
+                                .balancedMono(size: 11.5).foregroundStyle(BalancedPalette.secondary)
+                                .textSelection(.enabled)
+                                .fixedSize()
+                                .padding(10)
+                        }
+                        .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .padding(.bottom, 8)
+                    } label: {
+                        Text(file.path).balancedMono(size: 13).foregroundStyle(BalancedPalette.ink)
+                    }
+                    .tint(BalancedPalette.meta)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                }
+            }
+            .ledgerInsetWell()
+        }
+        .accessibilityIdentifier("ai-onboarding-plan-files")
     }
 
     private func balanceText(_ account: LedgerOnboardingDraft.Account) -> String {
@@ -832,17 +904,41 @@ struct LedgerSetupView: View {
 
     private func create() {
         let plan = plan
+        let token = storageToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let user = storageUser.trimmingCharacters(in: .whitespacesAndNewlines)
         creating = true
         composerFocused = false
         Task {
             await session.createCustomLocalLedger(name: plan.title, currency: plan.currency,
                                                   accounts: plan.accountSelections, categories: plan.categorySelections,
-                                                  openingDate: plan.startDate.isEmpty ? nil : plan.startDate)
+                                                  openingDate: plan.startDate.isEmpty ? nil : plan.startDate,
+                                                  layout: .split, importChannels: plan.importChannels)
+            guard session.phase == .ready else { creating = false; return }
+            // A ledger stored in Git is pushed to its empty repository now;
+            // if that fails the ledger is still here, and the greeting says
+            // where to retry.
+            var storageNote: String?
+            if plan.isGitStorage {
+                let host = URL(string: plan.remote)?.host ?? plan.remote
+                do {
+                    try await session.configureLocalGit(repositoryURL: plan.remote, branch: "main",
+                        credential: token.isEmpty ? nil : LocalGitCredential(username: user, token: token))
+                    do {
+                        _ = try await session.synchronizeLocalStorage()
+                        storageNote = String(localized: "已经推到 \(host) 上的仓库，之后记的账会自动同步。")
+                    } catch {
+                        storageNote = String(localized: "已经连上 \(host) 上的仓库，第一次推送还没完成（\(error.localizedDescription)），之后会自动重试，也可以在设置的「存储」里手动同步。")
+                    }
+                } catch {
+                    storageNote = String(localized: "没能连上 \(host)：\(error.localizedDescription)。账本已经存在这台设备上，可以在设置的「存储」里再接 Git。")
+                }
+                session.dismissError()
+            }
+            storageToken = ""
             creating = false
-            guard session.phase == .ready else { return }
             // The assistant takes over from here: it opens with what was just
             // created and a few next steps.
-            session.openAgent(with: LedgerAgentOpening(draft: plan))
+            session.openAgent(with: LedgerAgentOpening(draft: plan, storageNote: storageNote))
             onClose?()
         }
     }
@@ -960,6 +1056,8 @@ struct LedgerSetupView: View {
         draft = ""
         gitFailure = nil
         gitToken = ""
+        storageToken = ""
+        storageUser = ""
         modelKey = ""
         modelFailure = nil
         session.dismissError()

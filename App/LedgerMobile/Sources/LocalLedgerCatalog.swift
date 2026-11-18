@@ -311,7 +311,9 @@ actor LocalLedgerCatalog {
         currency: String = "CNY",
         accounts: [OnboardingAccountSelection] = [],
         categories: [OnboardingCategorySelection] = [],
-        openingDate: String? = nil
+        openingDate: String? = nil,
+        layout: CustomLayout = .single,
+        importChannels: [String] = []
     ) async throws -> LocalLedgerDescriptor {
         // Beancount currencies end in a letter or digit.
         guard currency.range(of: "^[A-Z]([A-Z0-9._-]{0,22}[A-Z0-9])?$", options: .regularExpression) != nil else {
@@ -323,12 +325,55 @@ actor LocalLedgerCatalog {
         }
         let descriptor = try makeDescriptor(name: name, entrypoint: "main.bean")
         let workspace = workspace(for: descriptor)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        let files = Self.customLedgerFiles(title: descriptor.name, currency: currency, accounts: accounts,
+                                           categories: categories, openingDate: openingDate ?? formatter.string(from: Date()),
+                                           layout: layout, importChannels: importChannels)
+        let validate = publicationValidator(for: descriptor)
+        let changes: [LocalLedgerWorkspace.Change] = files.map { .write(Data($0.content.utf8), to: $0.path) }
 
-        var lines: [String] = []
-        lines.append("option \"title\" \"\(escape(descriptor.name))\"")
-        lines.append("option \"operating_currency\" \"\(currency)\"")
-        lines.append("")
+        try await workspace.commit(changes: changes) { root in
+            try await validate(root, descriptor.entrypoint)
+        }
+        try persist(descriptor)
+        return descriptor
+    }
 
+    /// How a new ledger's directives are laid out: one `main.bean`, or
+    /// `main.bean` with the options and includes, `accounts.bean` with the
+    /// commodities and accounts, and `opening.bean` with opening balances.
+    /// Later transactions go to `transactions/YYYY/MM.bean` either way.
+    enum CustomLayout: Sendable {
+        case single, split
+    }
+
+    struct LedgerFile: Equatable, Sendable, Identifiable {
+        let path: String
+        let content: String
+        var id: String { path }
+    }
+
+    /// The files a new custom ledger starts with. `importChannels` picks the
+    /// import configurations written up front: Alipay and WeChat when they
+    /// are among them, or both when none was chosen; other providers get
+    /// their configuration when first used.
+    nonisolated static func customLedgerFiles(
+        title: String,
+        currency: String,
+        accounts: [OnboardingAccountSelection],
+        categories: [OnboardingCategorySelection],
+        openingDate: String,
+        layout: CustomLayout,
+        importChannels: [String] = []
+    ) -> [LedgerFile] {
+        var header: [String] = []
+        header.append("option \"title\" \"\(escapeString(title))\"")
+        header.append("option \"operating_currency\" \"\(currency)\"")
+        header.append("")
+
+        var structure: [String] = []
         var allCurrencies = Set<String>()
         allCurrencies.insert(currency)
         for a in accounts {
@@ -338,12 +383,12 @@ actor LocalLedgerCatalog {
             if !c.currency.isEmpty { allCurrencies.insert(c.currency) }
         }
         for cur in allCurrencies.sorted() {
-            lines.append("1970-01-01 commodity \(cur)")
+            structure.append("1970-01-01 commodity \(cur)")
         }
-        lines.append("")
+        structure.append("")
 
-        lines.append("1970-01-01 open Equity:Opening-Balances")
-        lines.append(String(localized: "  alias: \"期初余额\""))
+        structure.append("1970-01-01 open Equity:Opening-Balances")
+        structure.append(String(localized: "  alias: \"期初余额\""))
 
         let effectiveAccounts = accounts.isEmpty ? [
             OnboardingAccountSelection(name: String(localized: "现金"), account: "Assets:Cash", currency: currency),
@@ -352,12 +397,12 @@ actor LocalLedgerCatalog {
         ] : accounts
 
         for a in effectiveAccounts {
-            lines.append("1970-01-01 open \(a.account) \(a.currency)")
+            structure.append("1970-01-01 open \(a.account) \(a.currency)")
             if !a.name.isEmpty {
-                lines.append("  alias: \"\(escape(a.name))\"")
+                structure.append("  alias: \"\(escapeString(a.name))\"")
             }
         }
-        lines.append("")
+        structure.append("")
 
         let effectiveCategories = categories.isEmpty ? [
             OnboardingCategorySelection(name: String(localized: "工资收入"), account: "Income:Salary", currency: currency),
@@ -370,75 +415,62 @@ actor LocalLedgerCatalog {
         // a foreign-currency account is not rejected by its open constraint.
         for c in effectiveCategories {
             let currencies = [c.currency].filter { !$0.isEmpty } + allCurrencies.sorted().filter { $0 != c.currency }
-            lines.append("1970-01-01 open \(c.account) \(currencies.joined(separator: ","))")
+            structure.append("1970-01-01 open \(c.account) \(currencies.joined(separator: ","))")
             if !c.name.isEmpty {
-                lines.append("  alias: \"\(escape(c.name))\"")
+                structure.append("  alias: \"\(escapeString(c.name))\"")
             }
         }
-        lines.append("")
+        structure.append("")
 
-        let initialBalanceAccounts = effectiveAccounts.compactMap { acct -> (OnboardingAccountSelection, Decimal)? in
+        var opening: [String] = []
+        for acct in effectiveAccounts {
             guard let raw = acct.initialBalance?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty,
-                  let dec = Decimal(string: raw), dec > 0 else { return nil }
-            return (acct, dec)
+                  let dec = Decimal(string: raw), dec > 0 else { continue }
+            let formatted = openingAmount(dec)
+            if acct.isLiability {
+                opening.append(String(localized: "\(openingDate) * \"期初余额\" \"初始化账户欠款 - \(escapeString(acct.name))\""))
+                opening.append("  \(acct.account)  -\(formatted) \(acct.currency)")
+                opening.append("  Equity:Opening-Balances  \(formatted) \(acct.currency)")
+            } else {
+                opening.append(String(localized: "\(openingDate) * \"期初余额\" \"初始化账户余额 - \(escapeString(acct.name))\""))
+                opening.append("  \(acct.account)  \(formatted) \(acct.currency)")
+                opening.append("  Equity:Opening-Balances  -\(formatted) \(acct.currency)")
+            }
+            opening.append("")
         }
 
-        if !initialBalanceAccounts.isEmpty {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.dateFormat = "yyyy-MM-dd"
-            let today = openingDate ?? formatter.string(from: Date())
-
-            for (acct, dec) in initialBalanceAccounts {
-                let formatted = Self.openingAmount(dec)
-                if acct.isLiability {
-                    lines.append(String(localized: "\(today) * \"期初余额\" \"初始化账户欠款 - \(escape(acct.name))\""))
-                    lines.append("  \(acct.account)  -\(formatted) \(acct.currency)")
-                    lines.append("  Equity:Opening-Balances  \(formatted) \(acct.currency)")
-                } else {
-                    lines.append(String(localized: "\(today) * \"期初余额\" \"初始化账户余额 - \(escape(acct.name))\""))
-                    lines.append("  \(acct.account)  \(formatted) \(acct.currency)")
-                    lines.append("  Equity:Opening-Balances  -\(formatted) \(acct.currency)")
-                }
-                lines.append("")
+        var files: [LedgerFile] = []
+        switch layout {
+        case .single:
+            files.append(LedgerFile(path: "main.bean", content: (header + structure + opening).joined(separator: "\n") + "\n"))
+        case .split:
+            var main = header
+            main.append("include \"accounts.bean\"")
+            if !opening.isEmpty { main.append("include \"opening.bean\"") }
+            files.append(LedgerFile(path: "main.bean", content: main.joined(separator: "\n") + "\n"))
+            files.append(LedgerFile(path: "accounts.bean", content: structure.joined(separator: "\n") + "\n"))
+            if !opening.isEmpty {
+                files.append(LedgerFile(path: "opening.bean", content: opening.joined(separator: "\n") + "\n"))
             }
         }
-
-        let content = lines.joined(separator: "\n") + "\n"
-        let validate = publicationValidator(for: descriptor)
 
         let alipayWallet = effectiveAccounts.first { $0.account.contains("Alipay") }?.account
         let wechatWallet = effectiveAccounts.first { $0.account.contains("WeChat") }?.account
         let bankAcct = effectiveAccounts.first { $0.account.hasPrefix("Assets:Bank") }?.account
         let creditAcct = effectiveAccounts.first { $0.account.hasPrefix("Liabilities:CreditCard") }?.account
         let catAccounts = effectiveCategories.map(\.account)
-
-        let alipayYaml = LedgerImportTemplates.generateAlipayConfig(
-            currency: currency,
-            walletAccount: alipayWallet,
-            bankAccount: bankAcct,
-            creditAccount: creditAcct,
-            categories: catAccounts
-        )
-        let wechatYaml = LedgerImportTemplates.generateWechatConfig(
-            currency: currency,
-            walletAccount: wechatWallet,
-            bankAccount: bankAcct,
-            creditAccount: creditAcct,
-            categories: catAccounts
-        )
-
-        let changes: [LocalLedgerWorkspace.Change] = [
-            .write(Data(content.utf8), to: descriptor.entrypoint),
-            .write(Data(alipayYaml.utf8), to: "imports/alipay-config.yaml"),
-            .write(Data(wechatYaml.utf8), to: "imports/wechat-config.yaml")
-        ]
-
-        try await workspace.commit(changes: changes) { root in
-            try await validate(root, descriptor.entrypoint)
+        let chosen = importChannels.filter { $0 != "manual" }
+        if importChannels.isEmpty || chosen.contains("alipay") {
+            files.append(LedgerFile(path: "imports/alipay-config.yaml", content: LedgerImportTemplates.generateAlipayConfig(
+                currency: currency, walletAccount: alipayWallet, bankAccount: bankAcct,
+                creditAccount: creditAcct, categories: catAccounts)))
         }
-        try persist(descriptor)
-        return descriptor
+        if importChannels.isEmpty || chosen.contains("wechat") {
+            files.append(LedgerFile(path: "imports/wechat-config.yaml", content: LedgerImportTemplates.generateWechatConfig(
+                currency: currency, walletAccount: wechatWallet, bankAccount: bankAcct,
+                creditAccount: creditAcct, categories: catAccounts)))
+        }
+        return files
     }
 
     /// An opening balance with two decimals, rounded in decimal: going through
@@ -519,7 +551,7 @@ actor LocalLedgerCatalog {
         #endif
     }
 
-    private func escape(_ value: String) -> String {
+    nonisolated static func escapeString(_ value: String) -> String {
         value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     }
 }

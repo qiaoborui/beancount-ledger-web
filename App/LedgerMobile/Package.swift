@@ -53,6 +53,7 @@ let package = Package(
                 "CategoriesManagementView.swift",
                 "OnboardingWizardView.swift",
                 "LedgerSetupView.swift",
+                "LedgerSetupCards.swift",
                 "LedgerRoundedViews.swift",
                 "InstitutionPickerSheet.swift",
                 "BeanTransactionImport.swift",

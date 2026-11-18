@@ -249,6 +249,9 @@ type turnResponseV1 struct {
 	// Onboarding is the draft after an onboarding turn, returned with the
 	// transcript it belongs to.
 	Onboarding *onboardingStateV1 `json:"onboarding,omitempty"`
+	// OnboardingCard is the native card an onboarding turn ended on with
+	// show_onboarding_card; the reply then repeats its prompt.
+	OnboardingCard *onboardingCardV1 `json:"onboardingCard,omitempty"`
 	// AppSettings is the App settings after a turn that changed them, with
 	// the sections it changed; the shell applies those sections to its own
 	// settings. Absent when the turn changed nothing.
@@ -267,6 +270,7 @@ type turnOutcome struct {
 	// compactedTurns is how many questions the turn's summary replaced.
 	compactedTurns int
 	onboarding     *onboardingStateV1
+	card           *onboardingCardV1
 	// appSettings is the settings after a turn that changed them.
 	appSettings *appSettingsResultV1
 }
@@ -351,7 +355,7 @@ func runTurnJSON(requestJSON string) (responseJSON string) {
 			MemoryUpdated: out.remembered, Error: turnErrorText(ctx, network, err), ModelUnavailable: errors.Is(err, app.ErrLocalModelUnavailable)})
 	}
 	return encode(turnResponseV1{Version: 1, OK: true, Reply: out.reply, ToolCalls: out.calls, Steps: out.steps, Usage: out.usage,
-		Edited: out.edited, MemoryUpdated: out.remembered, Transcript: out.transcript, Ask: out.ask,
+		Edited: out.edited, MemoryUpdated: out.remembered, Transcript: out.transcript, Ask: out.ask, OnboardingCard: out.card,
 		Compacted: compacted, CompactedTurns: compactedTurns, Onboarding: out.onboarding, AppSettings: out.appSettings})
 }
 
@@ -512,13 +516,13 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	var systemPrompt string
 	var remembered *memoryFile
 	var appSettings *appSettingsSession
+	var drafting *onboardingSession
 	if request.Onboarding != nil {
 		if request.WorkspaceRoot != "" || request.ScratchRoot != "" || request.MemoryPath != "" || len(request.Attachments) > 0 {
 			return files, errors.New("onboarding turns take no ledger, scratch copy, memory or attachments")
 		}
 		today := onboardingDay(request.Today)
-		drafting, err := newOnboardingSession(request.Onboarding, today)
-		if err != nil {
+		if drafting, err = newOnboardingSession(request.Onboarding, today); err != nil {
 			return files, err
 		}
 		defer func() { out.onboarding = drafting.snapshot() }()
@@ -742,7 +746,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	if errors.Is(err, agent.ErrMaxTurnsReached) && ctx.Err() == nil {
 		toolsSpent.Store(true)
 		nudge = nudgeToolBudget
-	} else if err == nil && needsAnswer(produced) && !endsOnAsk(produced) {
+	} else if err == nil && needsAnswer(produced) && !endsOnAsk(produced) && !endsOnTool(produced, "show_onboarding_card") {
 		nudge = nudgeEmptyReply
 	}
 	if nudge != "" {
@@ -765,14 +769,22 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 	ask := asking.question()
 	messages := runner.Messages()
 	var reply string
+	var card *onboardingCardV1
+	if drafting != nil {
+		card = drafting.shownCard()
+	}
 	if ask != nil && endsOnAsk(messages) {
 		// The turn ended on the question: it is the reply.
 		reply = ask.Question
-		messages = closeAsk(messages, ask)
+		messages = closeAsk(messages, ask.Question)
+	} else if card != nil && endsOnTool(messages, "show_onboarding_card") {
+		// The turn ended on a card: its prompt is the reply.
+		reply = card.Prompt
+		messages = closeAsk(messages, card.Prompt)
 	} else if reply, err = finalReply(produced); err != nil {
 		return files, err
 	}
-	out.reply, out.ask = reply, ask
+	out.reply, out.ask, out.card = reply, ask, card
 	out.appSettings = appSettings.result()
 	// The whole transcript goes back to the shell, which sends it with the
 	// next question unchanged: the provider then sees the same prefix every
