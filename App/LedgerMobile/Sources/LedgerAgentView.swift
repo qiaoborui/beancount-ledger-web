@@ -28,6 +28,8 @@ struct LedgerAgentView: View {
     var body: some View {
         LedgerAgentChatScreen(isRoot: isRoot, onClose: onClose, conversation: sessions.current)
             .id(sessions.current.id)
+            // Capsule buttons and round cards, to sit with the glass bars.
+            .balancedRoundedControls()
             // The lock and privacy cover hide this page; the conversations
             // stay, so a turn sent before leaving the app still lands here.
             // Another ledger has its own history.
@@ -497,9 +499,9 @@ private struct LedgerAgentChatScreen: View {
                     }
                     if let notice = conversation.restoredNotice {
                         Text(notice).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
-                            .padding(.horizontal, 12).padding(.vertical, 10)
+                            .padding(.horizontal, 14).padding(.vertical, 10)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(BalancedPalette.sunken)
+                            .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: LedgerRound.inset, style: .continuous))
                             .accessibilityIdentifier("ledger-agent-restored-notice")
                     }
                     if let pending = conversation.pending {
@@ -1095,53 +1097,55 @@ private struct LedgerAgentChatScreen: View {
             if editedQuestion != nil { editBanner }
             if !conversation.staged.isEmpty || attaching || attachError != nil { stagedFiles }
             if let failure = voice.failure { voiceFailureNotice(failure) }
-            VStack(spacing: 4) {
-                HStack(alignment: .bottom, spacing: 4) {
-                    attachMenu
-                    composerField
-                    if let ghost {
-                        // Puts the suggestion in the field for editing; the
-                        // send button sends it as it is.
-                        Button { draft = ghost; composerFocused = true } label: {
-                            Image(systemName: "text.insert").font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(BalancedPalette.meta)
-                                .frame(width: 32, height: 40)
-                                .contentShape(Rectangle())
+            HStack(alignment: .bottom, spacing: 8) {
+                attachMenu
+                VStack(spacing: 4) {
+                    HStack(alignment: .bottom, spacing: 4) {
+                        composerField
+                        if let ghost {
+                            // Puts the suggestion in the field for editing; the
+                            // send button sends it as it is.
+                            Button { draft = ghost; composerFocused = true } label: {
+                                Image(systemName: "text.insert").font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(BalancedPalette.meta)
+                                    .frame(width: 32, height: 40)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("编辑建议：\(ghost)")
+                            .accessibilityIdentifier("ledger-agent-ghost-edit")
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("编辑建议：\(ghost)")
-                        .accessibilityIdentifier("ledger-agent-ghost-edit")
+                        if !voiceDocked, !conversation.isRunning { voiceButton }
                     }
-                    if !voiceDocked, !conversation.isRunning { voiceButton }
-                }
-                .padding(.trailing, composerExpanded ? 0 : Self.sendReserve)
-                if composerExpanded {
-                    // Not in the hierarchy at rest, so nothing empty is left
-                    // for VoiceOver or a keyboard to land on.
-                    if voiceDocked {
-                        LedgerVoiceBar(recorder: voice, onCancel: cancelVoice, onConfirm: { Task { await commitVoice() } })
-                            .frame(minHeight: 40)
-                            .transition(.opacity)
-                    } else {
-                        LedgerAgentQuickSwitch(usage: conversation.usage) { settingsPresented = true }
-                            .frame(minHeight: 40)
-                            .padding(.leading, 4)
-                            .padding(.trailing, Self.sendReserve)
-                            .transition(.opacity)
-                            .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in rowPinned = true })
+                    .padding(.trailing, composerExpanded ? 0 : Self.sendReserve)
+                    if composerExpanded {
+                        // Not in the hierarchy at rest, so nothing empty is left
+                        // for VoiceOver or a keyboard to land on.
+                        if voiceDocked {
+                            LedgerVoiceBar(recorder: voice, onCancel: cancelVoice, onConfirm: { Task { await commitVoice() } })
+                                .frame(minHeight: 40)
+                                .transition(.opacity)
+                        } else {
+                            LedgerAgentQuickSwitch(usage: conversation.usage) { settingsPresented = true }
+                                .frame(minHeight: 40)
+                                .padding(.leading, 4)
+                                .padding(.trailing, Self.sendReserve)
+                                .transition(.opacity)
+                                .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in rowPinned = true })
+                        }
                     }
                 }
-            }
-            .overlay(alignment: .bottomTrailing) { sendButton }
-            .padding(8)
-            .modifier(LedgerAgentDock())
-            .overlay(alignment: .top) {
-                // Over the dock rather than in the stack, so it does not move
-                // the conversation while the button is held.
-                if voiceMode == .hold, voice.phase == .recording {
-                    LedgerVoicePill(recorder: voice)
-                        .offset(y: -60)
-                        .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
+                .overlay(alignment: .bottomTrailing) { sendButton }
+                .padding(EdgeInsets(top: 5, leading: 14, bottom: 5, trailing: 5))
+                .modifier(LedgerAgentDock())
+                .overlay(alignment: .top) {
+                    // Over the dock rather than in the stack, so it does not move
+                    // the conversation while the button is held.
+                    if voiceMode == .hold, voice.phase == .recording {
+                        LedgerVoicePill(recorder: voice)
+                            .offset(y: -60)
+                            .transition(.scale(scale: 0.9, anchor: .bottom).combined(with: .opacity))
+                    }
                 }
             }
         }
@@ -1174,6 +1178,9 @@ private struct LedgerAgentChatScreen: View {
 
     /// The send circle's 40pt and the row's 4pt gap before it.
     private static let sendReserve: CGFloat = 44
+    /// One row of the dock: the 42pt field and 5pt above and below it. The
+    /// attach circle beside the dock is as tall, so the two read as a pair.
+    static let dockHeight: CGFloat = 52
 
     private var composerField: some View {
         TextField(text: $draft, prompt: Text(ghost ?? placeholder)
@@ -1477,12 +1484,12 @@ private struct LedgerAgentChatScreen: View {
                 }
             }
         } label: {
-            Image(systemName: "plus").font(.system(size: 18, weight: .medium))
+            Image(systemName: "plus").font(.system(size: 19, weight: .medium))
                 .foregroundStyle(BalancedPalette.ink)
-                .frame(width: 40, height: 40)
-                // The dock is the field; this disc is the one thing inside it,
-                // as the attachment circle sits inside the reference's capsule.
-                .background(Circle().fill(BalancedPalette.sunken))
+                .frame(width: Self.dockHeight, height: Self.dockHeight)
+                // Its own glass circle beside the field's capsule, as the
+                // system composers draw it; a sunken disc before iOS 26.
+                .modifier(LedgerAgentAttachCircle())
                 .contentShape(Circle())
         }
         .disabled(!conversation.canAttach || attaching || conversation.isRunning)
@@ -1777,7 +1784,8 @@ private struct LedgerAgentChatScreen: View {
     }
 }
 
-/// A question: right-aligned in the sunken well, never a bubble with a tail.
+/// A question: right-aligned in a soft sunken bubble (20pt continuous
+/// corners, to sit with the glass), never a bubble with a tail.
 /// Files sent with it are listed above the text.
 private struct LedgerAgentQuestion: View {
     let text: String
@@ -1797,13 +1805,13 @@ private struct LedgerAgentQuestion: View {
                     .lineSpacing(4)
                     .textSelection(.enabled)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 15)
             .padding(.vertical, 10)
             .background(BalancedPalette.sunken)
-            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: LedgerRound.bubble, style: .continuous))
             .overlay {
                 if isEditing {
-                    RoundedRectangle(cornerRadius: 3, style: .continuous).stroke(BalancedPalette.ruleStrong, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: LedgerRound.bubble, style: .continuous).stroke(BalancedPalette.ruleStrong, lineWidth: 1)
                 }
             }
         }
@@ -1868,11 +1876,11 @@ private struct LedgerAgentAttachmentChip: View {
             .buttonStyle(.plain)
             .accessibilityLabel("移除 \(name)")
         }
-        .padding(.leading, 10)
-        .padding(.trailing, 2)
+        .padding(.leading, 14)
+        .padding(.trailing, 4)
         .frame(minHeight: 44)
         .background(BalancedPalette.sunken)
-        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+        .clipShape(Capsule())
     }
 }
 
@@ -1948,51 +1956,8 @@ private struct LedgerAgentAnswer: View {
     /// The options of an `ask_user` card. One tap answers a single choice;
     /// several choices are ticked, then sent together.
     private func choices(_ ask: LedgerAgentAsk) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(ask.options, id: \.self) { option in
-                Button {
-                    if ask.allowsMultiple {
-                        if picked.contains(option) { picked.remove(option) } else { picked.insert(option) }
-                    } else {
-                        onAnswer(option)
-                    }
-                } label: {
-                    HStack(spacing: 10) {
-                        if ask.allowsMultiple {
-                            Image(systemName: picked.contains(option) ? "checkmark.square.fill" : "square")
-                                .font(.system(size: 15)).foregroundStyle(BalancedPalette.ink)
-                        }
-                        Text(option).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
-                            .multilineTextAlignment(.leading)
-                        Spacer(minLength: 12)
-                        if !ask.allowsMultiple {
-                            Image(systemName: "arrow.up").font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(BalancedPalette.edge)
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 44)
-                    .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("ledger-agent-choice")
-            }
-            HStack(spacing: 10) {
-                Text(ask.allowsMultiple ? String(localized: "可多选；也可以直接在下面输入") : String(localized: "也可以直接在下面输入"))
-                    .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
-                Spacer(minLength: 8)
-                if ask.allowsMultiple {
-                    Button("发送") { onAnswer(ask.answer(picked)) }
-                        .buttonStyle(.balanced(.primary))
-                        .disabled(picked.isEmpty)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-        }
-        .background(BalancedPalette.sunken)
-        .accessibilityIdentifier("ledger-agent-ask")
+        LedgerAskCard(ask: ask, picked: $picked, identifier: "ledger-agent-choice", onAnswer: onAnswer)
+            .accessibilityIdentifier("ledger-agent-ask")
     }
 
     /// What was written after this reply, with the way back.
@@ -2033,8 +1998,11 @@ private struct LedgerAgentAnswer: View {
                         .foregroundStyle(BalancedPalette.edge)
                         .rotationEffect(.degrees(toolsExpanded ? 180 : 0))
                 }
-                .frame(minHeight: 32)
-                .contentShape(Rectangle())
+                .padding(.horizontal, 12)
+                .frame(minHeight: 30)
+                .background(Capsule().fill(BalancedPalette.sunken))
+                .contentShape(Capsule())
+                .frame(minHeight: 44)
             }
             .buttonStyle(.plain)
             .accessibilityValue(toolsExpanded ? "已展开" : "已收起")
@@ -2060,8 +2028,9 @@ private struct LedgerAgentAnswer: View {
                         .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
                     }
                 }
-                .padding(.leading, 12)
-                .overlay(alignment: .leading) { BalancedPalette.ruleStrong.frame(width: 1) }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 2)
+                .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: LedgerRound.inset, style: .continuous))
             }
         }
     }
@@ -2101,8 +2070,9 @@ private struct LedgerAgentChangeCard: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(review.files) { file in fileRow(file, single: review.files.count == 1) }
                 }
-                .overlay(alignment: .top) { BalancedPalette.rule.frame(height: 1) }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 14)
+                .ledgerInsetWell()
+                .padding(.horizontal, 12)
                 .padding(.top, 10)
             }
             Text(note).balancedFont(size: 12.5).foregroundStyle(noteColor)
@@ -2124,10 +2094,10 @@ private struct LedgerAgentChangeCard: View {
                 }
             }
             .disabled(isBusy || pending.status == .writing)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 14)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
         }
-        .background(BalancedPalette.sunken)
+        .ledgerCard()
         .accessibilityIdentifier("ledger-agent-change")
     }
 
@@ -2221,7 +2191,7 @@ private struct LedgerAgentChangeCard: View {
             .padding(.vertical, 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BalancedPalette.page)
+        .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .padding(.bottom, 8)
     }
 }
@@ -2688,13 +2658,27 @@ private struct LedgerAgentCircleGlass: ViewModifier {
     }
 }
 
+/// The attach button's own circle beside the dock: interactive glass on
+/// iOS 26, the sunken disc with a hairline before it.
+private struct LedgerAgentAttachCircle: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: Circle())
+        } else {
+            content
+                .background(Circle().fill(BalancedPalette.sunken))
+                .overlay(Circle().stroke(BalancedPalette.rule, lineWidth: 1))
+        }
+    }
+}
+
 /// The composer's floating dock: glass on iOS 26, the sunken well the
 /// earlier system uses elsewhere. Its corner is half the one-row height, so
 /// at rest it is a capsule, and it keeps that corner when the second row or
 /// a multi-line draft makes it taller; a true capsule that tall would cut
 /// into the chip and the send circle in its corners.
 private struct LedgerAgentDock: ViewModifier {
-    private static let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+    private static let shape = RoundedRectangle(cornerRadius: LedgerAgentChatScreen.dockHeight / 2, style: .continuous)
 
     @ViewBuilder func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {

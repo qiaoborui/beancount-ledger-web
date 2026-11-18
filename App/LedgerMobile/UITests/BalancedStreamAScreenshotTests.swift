@@ -152,7 +152,7 @@ final class BalancedStreamAScreenshotTests: XCTestCase {
         app.launchArguments = ["--local-ui-testing", "--pending-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap(); app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
         app.tabBars.buttons["流水"].tap()

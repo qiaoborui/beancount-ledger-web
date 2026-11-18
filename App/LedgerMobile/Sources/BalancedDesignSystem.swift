@@ -234,27 +234,43 @@ struct BalancedTag: View {
     }
 }
 
-/// `.btn` — full width, 48pt min, 3px radius, 1px `--edge` border.
+/// `.btn` — full width, 48pt min, 3px radius, 1px `--edge` border. Inside a
+/// view marked `balancedRoundedControls()` (the 账本助手 and the onboarding
+/// conversation, which sit among Liquid Glass) it is a capsule instead.
 struct BalancedButtonStyle: ButtonStyle {
     enum Variant { case outline, primary, quiet, risk }
     var variant: Variant = .outline
     var isDisabled = false
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        BalancedButtonBody(label: configuration.label, isPressed: configuration.isPressed,
+                           variant: variant, isDisabled: isDisabled)
+    }
+}
+
+private struct BalancedButtonBody<Label: View>: View {
+    let label: Label
+    let isPressed: Bool
+    let variant: BalancedButtonStyle.Variant
+    let isDisabled: Bool
+    @Environment(\.balancedRoundedControls) private var rounded
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: rounded ? 24 : 3, style: .continuous)
+        label
             .balancedFont(size: 15, weight: .medium)
             .foregroundStyle(labelColor)
-            .frame(maxWidth: .infinity, minHeight: 48)
+            .frame(maxWidth: .infinity, minHeight: rounded ? 46 : 48)
             .padding(.horizontal, 18)
             .background(backgroundColor)
             .overlay {
                 if variant == .outline || variant == .risk {
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .stroke(BalancedPalette.edge, lineWidth: 1)
+                    shape.stroke(rounded ? BalancedPalette.ruleStrong : BalancedPalette.edge, lineWidth: 1)
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
-            .opacity(isDisabled ? 0.38 : (configuration.isPressed ? 0.75 : 1))
+            .clipShape(shape)
+            .contentShape(shape)
+            .opacity(isDisabled ? 0.38 : (isPressed ? 0.75 : 1))
     }
 
     private var labelColor: Color {
@@ -268,6 +284,27 @@ struct BalancedButtonStyle: ButtonStyle {
 
     private var backgroundColor: Color {
         variant == .primary ? BalancedPalette.ink : .clear
+    }
+}
+
+private struct BalancedRoundedControlsKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Buttons and wells take the round Liquid Glass shapes (capsules, 20pt+
+    /// corners) instead of the 3pt Balanced corners.
+    var balancedRoundedControls: Bool {
+        get { self[BalancedRoundedControlsKey.self] }
+        set { self[BalancedRoundedControlsKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Round shapes for every Balanced control below: the conversation pages
+    /// sit among glass, whose capsules a 3pt corner fights.
+    func balancedRoundedControls(_ on: Bool = true) -> some View {
+        environment(\.balancedRoundedControls, on)
     }
 }
 
@@ -306,13 +343,16 @@ extension View {
 /// floating card. Used once or twice per screen.
 struct BalancedBand: ViewModifier {
     var lead = false
+    /// Among glass the band is a card with 22pt corners; elsewhere it runs
+    /// square to the column.
+    @Environment(\.balancedRoundedControls) private var rounded
 
     func body(content: Content) -> some View {
         content
             .padding(.horizontal, 16)
             .padding(.top, lead ? 18 : 14)
             .padding(.bottom, lead ? 16 : 14)
-            .background(BalancedPalette.sunken)
+            .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: rounded ? 22 : 0, style: .continuous))
     }
 }
 

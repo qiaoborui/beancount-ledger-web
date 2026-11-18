@@ -186,6 +186,21 @@ struct LedgerAgentOpening: Identifiable, Equatable, Sendable {
         LedgerAgentAsk(question: String(localized: "接下来想做什么？"), options: steps)
     }
 
+    init(text: String, steps: [String] = Self.nextSteps) {
+        self.text = text
+        self.steps = steps
+    }
+
+    /// The greeting once first-run setup connected an existing Git ledger:
+    /// the ledger already has its history, so the next steps differ.
+    static func connected(name: String) -> LedgerAgentOpening {
+        LedgerAgentOpening(
+            text: String(localized: "「\(name)」接好了，之后在这台设备上记的账会推回仓库。") + "\n\n"
+                + String(localized: "接下来想做什么？点一个，也可以直接说。"),
+            steps: [String(localized: "这个月花了多少，主要花在哪"), String(localized: "帮我导入一份账单"),
+                    String(localized: "帮我检查一下账本有没有问题"), String(localized: "帮我设置记账提醒")])
+    }
+
     init(draft: LedgerOnboardingDraft) {
         let accounts = draft.accounts.count
         let categories = draft.incomeCategories.count + draft.expenseCategories.count
@@ -253,9 +268,18 @@ final class LedgerOnboardingConversation: ObservableObject {
         return last.ask
     }
 
-    func start() {
+    /// Starts the conversation. `text` is what the user already said on
+    /// the setup page before a model was connected; it opens the
+    /// conversation as their own first message instead of the hidden one.
+    func start(saying text: String? = nil) {
         guard !hasStarted else { return }
-        run(Self.opening)
+        let said = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if said.isEmpty {
+            run(Self.opening)
+        } else {
+            messages.append(Message(role: .user, text: said))
+            run(Self.opening + "\n" + said)
+        }
     }
 
     func send(_ text: String) {
@@ -382,5 +406,69 @@ final class LedgerOnboardingConversation: ObservableObject {
         }
         if Task.isCancelled, response.cancelled != true { throw CancellationError() }
         return response
+    }
+}
+
+/// The ways into a first ledger that the setup page offers before any model
+/// is involved: build one from scratch with the assistant, connect a Git
+/// repository, or one of the file based ways.
+enum LedgerSetupPath: String, CaseIterable, Sendable {
+    case scratch, git, other
+}
+
+/// The scripted part of first-run setup. It runs on the device without a
+/// model, so it only recognises what it can recognise for certain: which way
+/// the user means and a repository address. Anything else is left to the
+/// cards, or, from scratch, to the model once it is connected.
+enum LedgerSetupScript {
+    /// The way a free-text answer on the welcome screen points to. Anything
+    /// that is not clearly about a repository or a file is about building a
+    /// ledger, which is what most first answers describe.
+    static func path(for text: String) -> LedgerSetupPath {
+        let lower = text.lowercased()
+        if gitRepository(in: text) != nil { return .git }
+        if ["git", "仓库", "repo", "gitea", "gitlab"].contains(where: lower.contains) { return .git }
+        if ["icloud", "云盘", "备份", "文件夹", ".bean", "恢复"].contains(where: lower.contains) { return .other }
+        return .scratch
+    }
+
+    private static let hosts = ["github.com", "gitlab.com", "codeberg.org", "gitee.com", "bitbucket.org"]
+
+    /// The first repository address in the text, as an HTTPS URL: a full
+    /// `https://` address on any host, or `host/owner/repo` on a host that is
+    /// known to serve Git. SSH addresses are not supported by the app's Git
+    /// transport, so they are not recognised.
+    static func gitRepository(in text: String) -> String? {
+        let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "，。；、“”「」()（）<>"))
+        for raw in text.components(separatedBy: separators) {
+            var token = raw.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?'\"`"))
+            guard !token.isEmpty else { continue }
+            let lower = token.lowercased()
+            if lower.hasPrefix("http://") { continue }
+            if !lower.hasPrefix("https://") {
+                guard hosts.contains(where: { lower.hasPrefix($0 + "/") }) else { continue }
+                token = "https://" + token
+            }
+            guard let url = URL(string: token), let host = url.host, !host.isEmpty else { continue }
+            let parts = url.path.split(separator: "/")
+            guard parts.count >= 2 else { continue }
+            // A browser link into the repository (…/tree/main/x) names the
+            // repository by its first two path parts on the known hosts.
+            if hosts.contains(host.lowercased()), parts.count > 2 {
+                return "https://\(host)/\(parts[0])/\(parts[1])"
+            }
+            return token
+        }
+        return nil
+    }
+
+    /// A name for a ledger connected from a repository: its last path part
+    /// without `.git`, or 我的账本.
+    static func ledgerName(forRepository address: String) -> String {
+        guard let url = URL(string: address) else { return String(localized: "我的账本") }
+        var name = url.lastPathComponent
+        if name.lowercased().hasSuffix(".git") { name = String(name.dropLast(4)) }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || trimmed == "/" ? String(localized: "我的账本") : trimmed
     }
 }

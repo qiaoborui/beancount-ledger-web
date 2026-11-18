@@ -46,19 +46,24 @@ final class AssistantScreenshotTests: XCTestCase {
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
 
+        // With no ledger the app opens on the setup conversation.
         let start = app.buttons["local-ledger-open-ai-onboarding"]
         XCTAssertTrue(start.waitForExistence(timeout: 15), app.debugDescription)
         settle()
-        save(app.screenshot(), as: "onboarding-library")
+        save(app.screenshot(), as: "onboarding-welcome")
 
+        // From scratch without a model: the conversation asks for one inline.
         start.tap()
         let setUpModel = app.buttons["ai-onboarding-setup-model"]
         XCTAssertTrue(setUpModel.waitForExistence(timeout: 10), app.debugDescription)
         settle()
         save(app.screenshot(), as: "onboarding-setup")
 
-        // AI 开账 has no ledger yet, so its settings are the model page alone.
-        setUpModel.tap()
+        // No ledger yet, so its settings are the model page alone.
+        app.buttons["ledger-setup-more"].tap()
+        let modelSettings = app.buttons["ledger-setup-model-settings"]
+        XCTAssertTrue(modelSettings.waitForExistence(timeout: 5), app.debugDescription)
+        modelSettings.tap()
         XCTAssertTrue(app.navigationBars["模型与密钥"].waitForExistence(timeout: 10), app.debugDescription)
         settle()
         save(app.screenshot(), as: "onboarding-model-only-settings")

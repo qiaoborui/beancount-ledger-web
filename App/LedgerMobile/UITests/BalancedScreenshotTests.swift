@@ -42,7 +42,7 @@ final class BalancedScreenshotTests: XCTestCase {
         app.launch()
 
         // d01 — the library is the very first screen for a fresh fixture.
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.revealLedgerSetupMenu(), app.debugDescription)
         Thread.sleep(forTimeInterval: 1)
         save(app.screenshot(), as: "d01-library")
 
@@ -83,7 +83,7 @@ final class BalancedScreenshotTests: XCTestCase {
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
 
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.revealLedgerSetupMenu(), app.debugDescription)
         app.buttons["local-ledger-open-wizard"].tap()
         XCTAssertTrue(app.navigationBars["开账"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["下一步"].tap()
@@ -139,7 +139,7 @@ final class BalancedScreenshotTests: XCTestCase {
         app.launchArguments = ["--local-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.revealLedgerSetupMenu(), app.debugDescription)
         app.buttons["local-ledger-create"].tap()
         XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["local-ledger-confirm-create"].tap()
@@ -188,7 +188,7 @@ final class BalancedScreenshotTests: XCTestCase {
         app.launchArguments = ["--local-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.revealLedgerSetupMenu(), app.debugDescription)
         app.buttons["local-ledger-create"].tap()
         XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["local-ledger-confirm-create"].tap()
@@ -220,7 +220,7 @@ final class BalancedScreenshotTests: XCTestCase {
         app.launchArguments = ["--local-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.revealLedgerSetupMenu(), app.debugDescription)
         app.buttons["local-ledger-create"].tap()
         XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["local-ledger-confirm-create"].tap()
@@ -301,7 +301,7 @@ final class BalancedScreenshotTests: XCTestCase {
         app.launchArguments = ["--local-ui-testing"]
         app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
         app.launch()
-        XCTAssertTrue(app.buttons["local-ledger-create"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.revealLedgerSetupMenu(), app.debugDescription)
         app.buttons["local-ledger-create"].tap()
         XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["local-ledger-confirm-create"].tap()
