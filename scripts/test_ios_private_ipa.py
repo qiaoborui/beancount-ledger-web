@@ -222,7 +222,7 @@ class ReleaseVersionTests(unittest.TestCase):
         self.git("checkout", "-q", "HEAD~1")
         result = self.resolve()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("v1.4.2 is not the newest release tag (v1.10.0)", result.stderr)
+        self.assertIn("v1.4.2 is not the newest release tag in this generation (v1.10.0)", result.stderr)
 
     def test_the_highest_of_several_tags_on_head_wins(self):
         self.tag("v1.4.2")
@@ -241,6 +241,37 @@ class ReleaseVersionTests(unittest.TestCase):
         result = self.resolve()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("below 100", result.stderr)
+
+    def test_a_generation_marker_restarts_the_numbering(self):
+        self.tag("v1.4.31")
+        marker = self.repo / "scripts" / "ios-release-generation"
+        marker.parent.mkdir()
+        marker.write_text("restart at 0.1.1\n")
+        self.git("add", "scripts/ios-release-generation")
+        self.commit()
+        self.tag("v0.1.1")
+        result = self.resolve()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "0.1.1 101")
+
+        self.commit()
+        self.tag("v0.1.2")
+        self.assertEqual(self.resolve().stdout.strip(), "0.1.2 102")
+
+    def test_a_legacy_tag_before_the_marker_is_not_the_newest(self):
+        self.tag("v1.4.31")
+        marker = self.repo / "scripts" / "ios-release-generation"
+        marker.parent.mkdir()
+        marker.write_text("restart at 0.1.1\n")
+        self.git("add", "scripts/ios-release-generation")
+        self.commit()
+        self.tag("v0.1.1")
+        self.commit()
+        self.tag("v0.1.2")
+        self.git("checkout", "-q", "HEAD~1")
+        result = self.resolve()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("v0.1.1 is not the newest release tag in this generation (v0.1.2)", result.stderr)
 
 
 if __name__ == "__main__":

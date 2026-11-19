@@ -1,0 +1,9 @@
+# Release generation marker.
+#
+# Only release tags on commits at or after the commit that last changed this
+# file count when deciding the newest release: "newest" is compared within this
+# generation, so a tag below an older generation's versions can still be the
+# next release. Delete the file to compare every tag again.
+#
+# 2026-11-19: public version numbering restarted at 0.1.1. The 1.4.x tags are
+# the previous generation.

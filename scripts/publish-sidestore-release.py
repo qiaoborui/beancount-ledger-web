@@ -185,9 +185,23 @@ def check_tag(version: str, source_commit: str) -> None:
     versions = [tag[1:] for tag in tags if VERSION.match(tag[1:])]
     if version not in versions:
         raise PublishError(f"no local tag v{version}; cut the release first (AGENTS.md, iOS App Version)")
+    # Match scripts/ios-release-version.sh: a generation marker makes only tags
+    # on its commit or a descendant count, so numbering can restart.
+    marker = ROOT / "scripts/ios-release-generation"
+    if marker.exists():
+        generation = run(["git", "-C", str(ROOT), "log", "-1", "--format=%H", "--",
+                         "scripts/ios-release-generation"]).strip()
+        if generation:
+            versions = [
+                candidate for candidate in versions
+                if subprocess.run(
+                    ["git", "-C", str(ROOT), "merge-base", "--is-ancestor", generation,
+                     run(["git", "-C", str(ROOT), "rev-list", "-n", "1", f"v{candidate}"]).strip()],
+                ).returncode == 0
+            ]
     newest = max(versions, key=version_key)
     if newest != version:
-        raise PublishError(f"v{version} is not the newest release tag (v{newest})")
+        raise PublishError(f"v{version} is not the newest release tag in this generation (v{newest})")
     tag = f"v{version}"
     local = run(["git", "-C", str(ROOT), "rev-parse", f"{tag}^{{commit}}"]).strip()
     if local != source_commit:

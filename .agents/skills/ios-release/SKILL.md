@@ -27,8 +27,12 @@ up its version even if the run fails, because tags are never moved or deleted.
   no version-bump PR before it and no build-number commit after it.
 - `scripts/ios-release-version.sh` reads the version from the tag on HEAD and derives the build
   number `MAJOR*10000 + MINOR*100 + PATCH` (v1.4.3 → 10403). It refuses an untagged HEAD, a
-  tag that is not the newest release tag, and MINOR or PATCH of 100 or more. Tags with leading
-  zeros or suffixes (`v1.04.3`, `v1.4.3-rc1`) do not count as release tags.
+  tag that is not the newest release tag in the current generation, and MINOR or PATCH of 100
+  or more. Tags with leading zeros or suffixes (`v1.04.3`, `v1.4.3-rc1`) do not count as
+  release tags.
+- `scripts/ios-release-generation` restarts numbering: when it exists, only tags on the commit
+  that last changed it or a descendant count as "newest". It was added on 2026-11-19 for the
+  0.1.1 line; without it every tag is one generation, as before.
 - `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` in `App/LedgerMobile/project.yml` are local
   development values. Packaging overrides them; never edit them for a release.
 - The tag push runs `.github/workflows/ios-release.yml`. It calls the shared reusable workflow
@@ -64,9 +68,11 @@ gh api repos/qiaoborui/beancount-ledger-releases/contents/sidestore/source.json 
   | jq -r '.apps[0].versions[:3][] | "\(.version) (\(.buildVersion))"'
 ```
 
-The new version is the newest **tag** +PATCH (1.4.3 → 1.4.4), whether the batch adds features
-or only fixes. Bump MINOR only when the maintainer asks for it. A version whose tag already
-exists is never reused, even if it was never published.
+The new version is the newest **tag in the current generation** +PATCH (1.4.3 → 1.4.4),
+whether the batch adds features or only fixes. Bump MINOR only when the maintainer asks for
+it. A version whose tag already exists is never reused, even if it was never published. When
+`scripts/ios-release-generation` starts a new line, the first version is the one the
+maintainer names, not the previous line +PATCH.
 
 ### 3. Write the release notes
 
@@ -160,8 +166,9 @@ Read the failing step first: `gh run view <run-id> --log-failed | tail -80`.
   - Problem in the repository (compile error, non-ASCII bundle name, `select-xcode.sh` or the
     build command): a rerun builds the tag's commit again and will not pick up a fix. Fix it
     through a normal PR, merge, and release the next PATCH.
-  - A rerun works only while its tag is still the newest release tag. Once a higher tag exists,
-    the rerun fails with "is not the newest release tag"; skip that version.
+  - A rerun works only while its tag is still the newest release tag in its generation. Once a
+    higher tag exists, the rerun fails with "is not the newest release tag in this generation";
+    skip that version.
 - **Publish failed on a network or GitHub error**: the release may exist without the source
   update. Rerunning the same run is safe: uploads replace the same-named assets, and the source
   replaces the entry for the same version and build in place.
@@ -197,7 +204,8 @@ python3 scripts/publish-sidestore-release.py --public \
 ```
 
 `publish-sidestore-release.py` refuses: without `--public`; an IPA whose `v<version>` tag is
-missing locally, not pushed, or not the newest; one whose `build-info.txt` does not record a
+missing locally, not pushed, or not the newest in the current generation; one whose
+`build-info.txt` does not record a
 clean worktree at the tag's commit on `origin/main`; a version already in the source or not
 above the newest listed one; a build not above every listed build; and an existing
 `v<version>` release whose IPA asset has a different sha256. So it cannot finish a release that
