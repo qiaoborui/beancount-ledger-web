@@ -52,9 +52,8 @@ enum BalancedMonoWeight {
 }
 
 /// Source Serif 4 — the reading voice, after Claude's replies: a serif for
-/// Latin letters and digits, with CJK falling through the system cascade to
-/// PingFang (the same pairing claude.ai shows on Apple devices). Used only for
-/// the ledger agent's prose; lists, amounts and controls stay in Plex Sans.
+/// Latin letters and digits, with Songti SC for CJK. Used only for the ledger
+/// agent's prose; lists, amounts and controls stay in Plex Sans.
 enum BalancedSerifWeight {
     case regular
     case semibold
@@ -65,16 +64,106 @@ enum BalancedSerifWeight {
         case .semibold: "SourceSerif4-Semibold"
         }
     }
+
+    /// Songti SC ships with iOS, so Chinese reads as a serif without bundling
+    /// a multi-megabyte CJK face. It only has regular and bold.
+    var cjkPostscriptName: String {
+        switch self {
+        case .regular: "STSongti-SC-Regular"
+        case .semibold: "STSongti-SC-Bold"
+        }
+    }
 }
 
 /// Reading text: 16pt, about 1.75 line height. Source Serif 4's natural line
 /// is ~1.37em, so 6pt of extra spacing lands near 28pt per line.
+///
+/// A `Font` can name only one face, and Source Serif 4 has no CJK. Reading
+/// text therefore goes through `serifified(_:)`, which sets Songti SC on CJK
+/// runs and leaves Latin and digits to Source Serif.
 enum BalancedReading {
     static let size: CGFloat = 16
     static let lineSpacing: CGFloat = 6
 
     static func font(_ weight: BalancedSerifWeight = .regular, size: CGFloat = size, relativeTo: Font.TextStyle = .body) -> Font {
         .custom(weight.postscriptName, size: size, relativeTo: relativeTo)
+    }
+
+    static func cjkFont(_ weight: BalancedSerifWeight = .regular, size: CGFloat = size, relativeTo: Font.TextStyle = .body) -> Font {
+        .custom(weight.cjkPostscriptName, size: size, relativeTo: relativeTo)
+    }
+
+    /// Reading text with the Chinese face on its CJK runs. Keep `.font(font(…))`
+    /// on the view as the base: Latin, digits and anything after their own
+    /// formatting inherit it. `weight` is that base weight, so a semibold
+    /// heading keeps semibold Chinese.
+    static func serifified(_ text: String, weight: BalancedSerifWeight = .regular, size: CGFloat = size, relativeTo: Font.TextStyle = .body) -> AttributedString {
+        serifified(AttributedString(text), weight: weight, size: size, relativeTo: relativeTo)
+    }
+
+    /// The attributed form, for Markdown run through `inline(_:)`: inline code
+    /// keeps its own face, `**strong**` becomes the semibold Source Serif or
+    /// Songti face, and links keep the attributes they came with.
+    static func serifified(_ input: AttributedString, weight: BalancedSerifWeight = .regular, size: CGFloat = size, relativeTo: Font.TextStyle = .body) -> AttributedString {
+        var output = AttributedString()
+        for run in input.runs {
+            let attributes = run.attributes
+            let intent = run.inlinePresentationIntent ?? []
+            let text = String(input[run.range].characters)
+            if intent.contains(.code) {
+                var piece = AttributedString(text)
+                piece.setAttributes(attributes)
+                output.append(piece)
+                continue
+            }
+            var chunk = ""
+            var chunkIsCJK: Bool?
+            func flush() {
+                guard !chunk.isEmpty, let isCJK = chunkIsCJK else { return }
+                var piece = AttributedString(chunk)
+                piece.setAttributes(attributes)
+                if intent.contains(.stronglyEmphasized) {
+                    // The face carries the weight; drop the intent so SwiftUI
+                    // doesn't synthesise a heavier Bold on top of it.
+                    var remaining = intent.subtracting(.stronglyEmphasized)
+                    piece.inlinePresentationIntent = remaining.isEmpty ? nil : remaining
+                    piece.font = isCJK
+                        ? cjkFont(.semibold, size: size, relativeTo: relativeTo)
+                        : font(.semibold, size: size, relativeTo: relativeTo)
+                } else if isCJK {
+                    piece.font = cjkFont(weight, size: size, relativeTo: relativeTo)
+                }
+                output.append(piece)
+                chunk = ""
+            }
+            for character in text {
+                let isCJK = character.isCJKReading
+                if chunkIsCJK != isCJK {
+                    flush()
+                    chunkIsCJK = isCJK
+                }
+                chunk.append(character)
+            }
+            flush()
+        }
+        return output
+    }
+}
+
+private extension Character {
+    /// Han, kana, CJK punctuation and fullwidth forms: what Songti draws.
+    /// ASCII (including `build/`, `2.3` and `.cache`) stays with Source Serif.
+    var isCJKReading: Bool {
+        unicodeScalars.contains { scalar in
+            switch scalar.value {
+            case 0x2E80...0x2FFF, 0x3000...0x30FF, 0x31C0...0x31EF,
+                 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF,
+                 0xFE30...0xFE4F, 0xFF00...0xFFEF, 0x20000...0x2FA1F:
+                true
+            default:
+                false
+            }
+        }
     }
 }
 
