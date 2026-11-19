@@ -117,6 +117,13 @@ Other rules:
 - Never move or delete a tag. A broken release is fixed by a new, higher tag.
 - Tags are compared as version numbers, not by commit date, so tagging an older
   commit cannot move the shipped version backwards.
+- A release generation restarts numbering: `scripts/ios-release-generation`
+  marks the commit where a new line starts. Only tags on that commit or a
+  descendant count as "newest", so the next release can sit below the previous
+  line's versions. The file was added on 2026-11-19, when public numbering
+  restarted at 0.1.1 after the 1.4.x tags. Delete it to compare every tag again.
+  Build numbers restart with the line, so anything published in the previous
+  line must no longer be installed by the same source.
 - `FEATURE_PARITY.md` next to the Xcode project records what the app actually
   implements. Update it in the same change that ships or removes a capability.
   Do not list planned work as if it were available.

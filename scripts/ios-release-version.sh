@@ -19,14 +19,33 @@ release_tags() {
   grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n
 }
 
-version="$(git -C "$repo_root" tag --points-at HEAD | release_tags | tail -n 1 || true)"
+# A generation marker restarts the numbering: only tags on the marker's commit
+# or a descendant count. Without the file every tag is one generation, as
+# before. scripts/ios-release-generation explains when and why it is used.
+generation_marker="$repo_root/scripts/ios-release-generation"
+generation_commit=""
+if [[ -f "$generation_marker" ]]; then
+  generation_commit="$(git -C "$repo_root" log -1 --format=%H -- scripts/ios-release-generation)"
+fi
+in_generation() {
+  [[ -z "$generation_commit" ]] && return 0
+  local tag_commit
+  tag_commit="$(git -C "$repo_root" rev-list -n 1 "v$1")"
+  git -C "$repo_root" merge-base --is-ancestor "$generation_commit" "$tag_commit"
+}
+
+version="$(git -C "$repo_root" tag --points-at HEAD | release_tags | while read -r candidate; do
+  if in_generation "$candidate"; then echo "$candidate"; fi
+done | tail -n 1 || true)"
 if [[ -z "$version" ]]; then
   echo "HEAD has no release tag. Tag the commit to ship with 'git tag -a v<MAJOR>.<MINOR>.<PATCH>' and package from that tag." >&2
   exit 1
 fi
-newest="$(git -C "$repo_root" tag --list | release_tags | tail -n 1)"
+newest="$(git -C "$repo_root" tag --list | release_tags | while read -r candidate; do
+  if in_generation "$candidate"; then echo "$candidate"; fi
+done | tail -n 1)"
 if [[ "$version" != "$newest" ]]; then
-  echo "v$version is not the newest release tag (v$newest); only the newest release can be packaged." >&2
+  echo "v$version is not the newest release tag in this generation (v$newest); only the newest release can be packaged." >&2
   exit 1
 fi
 
