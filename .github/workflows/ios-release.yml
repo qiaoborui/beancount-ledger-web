@@ -26,9 +26,11 @@ name: iOS release
 # App/LedgerMobile/Runtime/THIRD_PARTY.md: pushing a tag publishes the IPA.
 #
 # The same tag also uploads a build signed by the paid team to TestFlight
-# (internal testing only), once the repository variable TESTFLIGHT_UPLOAD is
-# "true" and the App Store Connect API key is stored as the secrets
-# ASC_KEY_ID, ASC_ISSUER_ID and ASC_PRIVATE_KEY (the .p8 file's contents).
+# (internal and external testing), once the repository variable
+# TESTFLIGHT_UPLOAD is "true" and an App Store Connect team API key with the
+# Admin role is stored as the secrets ASC_KEY_ID, ASC_ISSUER_ID and
+# ASC_PRIVATE_KEY (the .p8 file's contents). The TestFlight build carries the
+# tag's version and build (v1.4.32 -> 1.4.32 (10432)).
 
 on:
   push:
