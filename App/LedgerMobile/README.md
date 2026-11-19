@@ -454,10 +454,11 @@ team.
 
 `bash scripts/build-ios-team-signed.sh --testflight` archives the tagged
 release with the same version and build as the SideStore package, exports it
-for App Store Connect (internal testing only) and uploads it. It authenticates
+for App Store Connect (usable by internal and external TestFlight groups) and
+uploads it. It authenticates
 with an App Store Connect API key from `ASC_KEY_ID`, `ASC_ISSUER_ID` and
-`ASC_KEY_PATH`; the key needs the Admin or App Manager role so Xcode can create
-the distribution certificate. The App Store Connect app record must exist for
+`ASC_KEY_PATH`; the key needs the Admin role: an App Manager key cannot use the
+cloud-managed distribution certificate, and the Mac runner has no local one. The App Store Connect app record must exist for
 `com.qiaoborui.ledger`. The release workflow runs this as its
 `testflight` job once `TESTFLIGHT_UPLOAD` is `true`.
 

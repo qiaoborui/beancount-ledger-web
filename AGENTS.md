@@ -101,8 +101,8 @@ git push origin v<version>
 - When the repository variable `TESTFLIGHT_UPLOAD` is `true`, the same push also
   runs the `testflight` job: `scripts/build-ios-team-signed.sh --testflight`
   archives with the paid team (`LEDGER_TEAM_ID` in `project.yml`) and uploads
-  the same version and build to App Store Connect for TestFlight internal
-  testing. It needs the secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and
+  the same version and build to App Store Connect for TestFlight (internal
+  and external testing). It needs the secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and
   `ASC_PRIVATE_KEY`.
 
 Manual fallback: from a checkout of the tag, run

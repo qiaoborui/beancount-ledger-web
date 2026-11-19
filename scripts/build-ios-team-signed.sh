@@ -24,9 +24,11 @@
 # --testflight: HEAD must carry the newest v<X.Y.Z> tag, which sets the version
 # and build exactly as for the SideStore package (scripts/ios-release-version.sh).
 # The archive is exported for App Store Connect and uploaded; it shows up in
-# TestFlight once Apple has processed it. Signing and the upload authenticate
-# with an App Store Connect API key (Admin or App Manager role, so Xcode can
-# create the distribution certificate and profiles), read from:
+# TestFlight once Apple has processed it, usable by internal and external
+# testers (external groups still need Beta App Review). Signing and the upload authenticate
+# with an App Store Connect API key with the Admin role (an App Manager key
+# cannot use the cloud-managed distribution certificate, and the runner has no
+# local one), read from:
 #   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH (path to AuthKey_<id>.p8)
 set -euo pipefail
 
@@ -232,7 +234,7 @@ with open(sys.argv[1], "wb") as handle:
         "signingStyle": "automatic",
         "manageAppVersionAndBuildNumber": False,
         "uploadSymbols": True,
-        "testFlightInternalTestingOnly": True,
+        "testFlightInternalTestingOnly": False,
     }, handle)
 PY
 xcodebuild -exportArchive \
