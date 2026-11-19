@@ -243,7 +243,8 @@ struct LedgerAgentThinkingBlock: View {
             .accessibilityValue(expanded ? "已展开" : "已收起")
             .accessibilityIdentifier("ledger-agent-thinking")
             if expanded {
-                Text(step.redacted ? String(localized: "（模型的思考内容已加密）") : step.text)
+                let text = step.redacted ? String(localized: "（模型的思考内容已加密）") : step.text
+                Text(BalancedReading.serifified(text, size: 14.5))
                     .font(BalancedReading.font(size: 14.5)).foregroundStyle(BalancedPalette.secondary)
                     .lineSpacing(4)
                     .textSelection(.enabled)

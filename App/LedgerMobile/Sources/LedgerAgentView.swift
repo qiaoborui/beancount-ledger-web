@@ -953,9 +953,9 @@ private struct LedgerAgentChatScreen: View {
                 .frame(width: 60, height: 60)
                 .padding(.bottom, -8)
                 .accessibilityHidden(true)
-            Text(Self.greeting(at: greetingNow))
+            Text(BalancedReading.serifified(Self.greeting(at: greetingNow), size: 30, relativeTo: .title))
                 // The reading serif, as claude.ai sets its replies: Source
-                // Serif 4 for Latin, falling through to PingFang for CJK.
+                // Serif 4 for Latin, Songti SC for Chinese.
                 .font(BalancedReading.font(.regular, size: 30, relativeTo: .title))
                 .foregroundStyle(BalancedPalette.secondary)
                 .multilineTextAlignment(.center)
@@ -2210,8 +2210,9 @@ struct LedgerAgentReplyBlock: View {
         case let .prose(text):
             prose(text)
         case let .heading(level, text):
-            Text(Self.inline(text))
-                .font(BalancedReading.font(.semibold, size: level == 1 ? 20 : level == 2 ? 18 : 16.5, relativeTo: .headline))
+            let size: CGFloat = level == 1 ? 20 : level == 2 ? 18 : 16.5
+            Text(Self.inline(text, serif: true, weight: .semibold, size: size, relativeTo: .headline))
+                .font(BalancedReading.font(.semibold, size: size, relativeTo: .headline))
                 .foregroundStyle(BalancedPalette.ink)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -2309,8 +2310,11 @@ struct LedgerAgentReplyBlock: View {
 
     /// Inline Markdown. In serif runs, `**bold**` is pinned to the bundled
     /// Semibold face instead of letting the system synthesise a Bold that
-    /// isn't shipped; CJK inside it still falls back to PingFang.
-    private static func inline(_ text: String, serif: Bool = false) -> AttributedString {
+    /// isn't shipped, and CJK runs take Songti SC.
+    private static func inline(_ text: String, serif: Bool = false,
+                               weight: BalancedSerifWeight = .regular,
+                               size: CGFloat = BalancedReading.size,
+                               relativeTo: Font.TextStyle = .body) -> AttributedString {
         let text = LedgerAgentReplyText.encodingLedgerLinks(text)
         var string = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(text)
@@ -2318,15 +2322,7 @@ struct LedgerAgentReplyBlock: View {
             string[run.range].underlineStyle = .single
         }
         guard serif else { return string }
-        for run in string.runs where run.inlinePresentationIntent?.contains(.stronglyEmphasized) == true {
-            // The face carries the weight; drop the intent so SwiftUI doesn't
-            // synthesise a heavier Bold on top of Semibold.
-            var intent = run.inlinePresentationIntent ?? []
-            intent.remove(.stronglyEmphasized)
-            string[run.range].inlinePresentationIntent = intent.isEmpty ? nil : intent
-            string[run.range].font = BalancedReading.font(.semibold)
-        }
-        return string
+        return BalancedReading.serifified(string, weight: weight, size: size, relativeTo: relativeTo)
     }
 
     /// Amount columns align right so their digits line up.
