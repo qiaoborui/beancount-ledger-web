@@ -53,7 +53,7 @@ private extension Color {
 }
 
 /// 设置 › 外观 › 配色方案: one card per scheme, each showing its light and
-/// dark ground with a balance, an income and an expense on it.
+/// dark ground with a balance, an income, an expense and its chart colours.
 struct LedgerColorThemePicker: View {
     @ObservedObject private var store = LedgerColorThemeStore.shared
 
@@ -63,7 +63,7 @@ struct LedgerColorThemePicker: View {
                 ForEach(LedgerColorTheme.allCases) { theme in
                     option(theme)
                 }
-                Text("配色方案只改变背景与文字的色调，收入、支出的颜色保持不变。浅色与深色跟随系统外观。")
+                Text("配色方案改变背景、文字和图表的颜色，金额里收入、支出的颜色保持不变。浅色与深色跟随系统外观。")
                     .balancedFont(size: 12.5)
                     .foregroundStyle(BalancedPalette.meta)
                     .padding(.top, 4)
@@ -128,6 +128,7 @@ struct LedgerColorThemePicker: View {
             row(String(localized: "工资"), amount: "+18,000", color: tokens.income, tokens: tokens)
             Rectangle().fill(Color(ledgerHex: tokens.rule)).frame(height: 1)
             row(String(localized: "午餐"), amount: "-36.50", color: tokens.expense, tokens: tokens)
+            chartStrip(tokens.chart)
         }
         .padding(8)
         .frame(maxWidth: .infinity)
@@ -136,6 +137,26 @@ struct LedgerColorThemePicker: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Color(ledgerHex: tokens.rule), lineWidth: 1)
         }
+    }
+
+    /// A small bar chart in the scheme's chart colours: income and expense
+    /// pairs, then the series hues.
+    private func chartStrip(_ chart: LedgerChartTokens) -> some View {
+        HStack(alignment: .bottom, spacing: 3) {
+            ForEach(Array([0.55, 0.8, 0.45].enumerated()), id: \.offset) { _, height in
+                HStack(alignment: .bottom, spacing: 1.5) {
+                    Capsule().fill(Color(ledgerHex: chart.accent)).frame(width: 4, height: 22 * height)
+                    Capsule().fill(Color(ledgerHex: chart.expense)).frame(width: 4, height: 22 * (1 - height * 0.6))
+                }
+            }
+            Spacer(minLength: 4)
+            ForEach(Array(chart.series.enumerated()), id: \.offset) { _, hex in
+                Circle().fill(Color(ledgerHex: hex)).frame(width: 6, height: 6)
+            }
+        }
+        .frame(height: 22, alignment: .bottom)
+        .padding(.horizontal, 2)
+        .accessibilityHidden(true)
     }
 
     private func row(_ title: String, amount: String, color: UInt32, tokens: LedgerThemeTokens) -> some View {

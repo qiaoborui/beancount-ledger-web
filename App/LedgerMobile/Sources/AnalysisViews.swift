@@ -443,14 +443,14 @@ private struct CashflowTrendChart: View {
                             y: .value("收入", point.income),
                             series: .value("系列", String(localized: "收入"))
                         )
-                        .foregroundStyle(LedgerPalette.income)
+                        .foregroundStyle(BalancedPalette.chartIncome)
                         .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                         LineMark(
                             x: .value("月份", x),
                             y: .value("支出", point.expense),
                             series: .value("系列", String(localized: "支出"))
                         )
-                        .foregroundStyle(LedgerPalette.expense)
+                        .foregroundStyle(BalancedPalette.chartExpense)
                         .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                     }
 
@@ -460,10 +460,10 @@ private struct CashflowTrendChart: View {
                         RuleMark(x: .value("选中日期", x))
                             .foregroundStyle(LedgerPalette.lineStrong)
                         PointMark(x: .value("选中收入", x), y: .value("收入", point.income))
-                            .foregroundStyle(LedgerPalette.income)
+                            .foregroundStyle(BalancedPalette.chartIncome)
                             .symbolSize(44)
                         PointMark(x: .value("选中支出", x), y: .value("支出", point.expense))
-                            .foregroundStyle(LedgerPalette.expense)
+                            .foregroundStyle(BalancedPalette.chartExpense)
                             .symbolSize(44)
                     }
                 }
@@ -483,8 +483,8 @@ private struct CashflowTrendChart: View {
             .frame(height: 190)
 
             AnalysisChartLegend(items: [
-                (String(localized: "收入"), LedgerPalette.income),
-                (String(localized: "支出"), LedgerPalette.expense),
+                (String(localized: "收入"), BalancedPalette.chartIncome),
+                (String(localized: "支出"), BalancedPalette.chartExpense),
             ])
         }
     }

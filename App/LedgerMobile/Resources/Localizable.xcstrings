@@ -22528,12 +22528,12 @@
         }
       }
     },
-    "配色方案只改变背景与文字的色调，收入、支出的颜色保持不变。浅色与深色跟随系统外观。" : {
+    "配色方案改变背景、文字和图表的颜色，金额里收入、支出的颜色保持不变。浅色与深色跟随系统外观。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "A color scheme changes the tones of backgrounds and text; income and expense colors stay the same. Light and dark follow the system appearance."
+            "value" : "A color scheme changes backgrounds, text and charts; income and expense amounts keep their colors. Light and dark follow the system appearance."
           }
         }
       }

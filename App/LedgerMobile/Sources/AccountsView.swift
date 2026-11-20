@@ -448,7 +448,7 @@ private struct AccountsNetWorthChart: View {
     private static let smoothing: InterpolationMethod = .catmullRom
 
     private var areaFill: LinearGradient {
-        LinearGradient(colors: [BalancedPalette.income.opacity(0.18), BalancedPalette.income.opacity(0)],
+        LinearGradient(colors: [BalancedPalette.chartIncome.opacity(0.18), BalancedPalette.chartIncome.opacity(0)],
                        startPoint: .top, endPoint: .bottom)
     }
 
@@ -468,7 +468,7 @@ private struct AccountsNetWorthChart: View {
                     y: .value("净资产", point.value)
                 )
                 .interpolationMethod(Self.smoothing)
-                .foregroundStyle(BalancedPalette.income)
+                .foregroundStyle(BalancedPalette.chartIncome)
                 .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
             }
             if let first = data.first {
@@ -1183,14 +1183,14 @@ private struct AccountBalanceTrendPanel: View {
                         x: .value("日期", x),
                         y: .value("余额", point.balance)
                     )
-                    .foregroundStyle(LedgerPalette.cobalt.opacity(0.10))
+                    .foregroundStyle(BalancedPalette.chartAccent.opacity(0.10))
                     .interpolationMethod(.stepEnd)
 
                     LineMark(
                         x: .value("日期", x),
                         y: .value("余额", point.balance)
                     )
-                    .foregroundStyle(LedgerPalette.cobalt)
+                    .foregroundStyle(BalancedPalette.chartAccent)
                     .lineStyle(StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.stepEnd)
 
@@ -1199,7 +1199,7 @@ private struct AccountBalanceTrendPanel: View {
                             x: .value("日期", x),
                             y: .value("余额", point.balance)
                         )
-                        .foregroundStyle(LedgerPalette.cobalt)
+                        .foregroundStyle(BalancedPalette.chartAccent)
                         .symbolSize(18)
                     }
                 }
@@ -1210,7 +1210,7 @@ private struct AccountBalanceTrendPanel: View {
                     RuleMark(x: .value("选中日期", x))
                         .foregroundStyle(LedgerPalette.lineStrong)
                     PointMark(x: .value("选中日期", x), y: .value("选中余额", point.balance))
-                        .foregroundStyle(LedgerPalette.cobalt)
+                        .foregroundStyle(BalancedPalette.chartAccent)
                         .symbolSize(52)
                 }
             }

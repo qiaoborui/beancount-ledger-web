@@ -38,6 +38,30 @@ final class LedgerColorThemeTests: XCTestCase {
         }
     }
 
+    /// Chart marks are graphics: 3:1 against both grounds, six distinct series.
+    func testChartColoursAreVisibleAndDistinct() {
+        for theme in LedgerColorTheme.allCases {
+            for dark in [false, true] {
+                let t = theme.tokens(dark: dark)
+                let label = "\(theme.rawValue) dark=\(dark)"
+                for mark in [t.chart.accent, t.chart.income, t.chart.expense] {
+                    for ground in [t.page, t.sunken] {
+                        XCTAssertGreaterThanOrEqual(LedgerContrast.ratio(mark, ground), 3, label)
+                    }
+                }
+                XCTAssertEqual(t.chart.series.count, 6, label)
+                XCTAssertEqual(Set(t.chart.series).count, 6, label)
+                XCTAssertEqual(t.value(.chartSeries(6)), t.chart.series[0], label)
+                XCTAssertEqual(t.value(.chartSeries(-1)), t.chart.series[5], label)
+            }
+        }
+        // Paper keeps the ink / income / expense marks it shipped with.
+        let paper = LedgerColorTheme.paper.tokens(dark: false)
+        XCTAssertEqual(paper.chart.accent, paper.ink)
+        XCTAssertEqual(paper.chart.income, paper.income)
+        XCTAssertEqual(paper.chart.expense, paper.expense)
+    }
+
     func testChoicePersistsAndDefaultsToPaper() throws {
         let suite = "LedgerColorThemeTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

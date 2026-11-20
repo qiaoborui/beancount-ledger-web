@@ -24,6 +24,20 @@ enum BalancedPalette {
     static let well = Color(uiColor: .ledgerThemed(.well))
     /// A selected row on the `sunken` ground.
     static let selected = Color(uiColor: .ledgerThemed(.selected))
+
+    // Chart marks follow the 配色方案 (`LedgerChartTokens`). Paper keeps the
+    // ink / income / expense marks; Pure and Slate bring brighter hues. Use
+    // these for data marks and their legend keys only, never for text.
+
+    /// A single-series mark: a balance line, a bar, the 留存 slab.
+    static let chartAccent = Color(uiColor: .ledgerThemed(.chartAccent))
+    static let chartIncome = Color(uiColor: .ledgerThemed(.chartIncome))
+    static let chartExpense = Color(uiColor: .ledgerThemed(.chartExpense))
+    private static let series = (0..<6).map { Color(uiColor: .ledgerThemed(.chartSeries($0))) }
+    /// The `index`th series of a multi-series chart, wrapping after six.
+    static func chartSeries(_ index: Int) -> Color {
+        series[((index % series.count) + series.count) % series.count]
+    }
 }
 
 extension UIColor {

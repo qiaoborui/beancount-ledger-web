@@ -912,7 +912,7 @@ private struct BQLResultChart: View {
                     x: .value(model.labelColumn.name, axis.position(at: index)),
                     y: .value(model.valueColumn.name, displayValue(item.value))
                 )
-                .foregroundStyle(LedgerPalette.cobalt)
+                .foregroundStyle(BalancedPalette.chartAccent)
                 .cornerRadius(3)
                 .opacity(selectedID == nil || selectedID == item.id ? 1 : 0.34)
 
@@ -932,13 +932,13 @@ private struct BQLResultChart: View {
                     x: .value(model.labelColumn.name, axis.position(at: index)),
                     y: .value(model.valueColumn.name, displayValue(item.value))
                 )
-                .foregroundStyle(LedgerPalette.cobalt)
+                .foregroundStyle(BalancedPalette.chartAccent)
                 .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                 PointMark(
                     x: .value(model.labelColumn.name, axis.position(at: index)),
                     y: .value(model.valueColumn.name, displayValue(item.value))
                 )
-                .foregroundStyle(selectedID == item.id ? LedgerPalette.cobalt : LedgerPalette.gold)
+                .foregroundStyle(BalancedPalette.chartAccent)
                 .symbolSize(selectedID == item.id ? 48 : 18)
 
                 if selectedID == item.id {
@@ -1106,18 +1106,10 @@ private struct BQLResultChart: View {
     }
 }
 
+/// The 配色方案's series colours.
 private enum BQLChartColors {
-    private static let palette = [
-        LedgerPalette.cobalt,
-        LedgerPalette.gold,
-        LedgerPalette.income,
-        LedgerPalette.cobaltLight,
-        LedgerPalette.expense,
-        LedgerPalette.olive,
-    ]
-
     static func color(_ index: Int) -> Color {
-        palette[index % palette.count]
+        BalancedPalette.chartSeries(index)
     }
 }
 
