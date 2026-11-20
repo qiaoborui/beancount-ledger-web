@@ -11,6 +11,7 @@ struct LedgerMobileApp: App {
     private let quickActions = LedgerQuickActionCenter.shared
     #endif
     @State private var didStartSession = false
+    @ObservedObject private var colorThemes = LedgerColorThemeStore.shared
 
     init() {
         // As early as possible: a crash during launch or the first ledger read
@@ -62,6 +63,10 @@ struct LedgerMobileApp: App {
             RootView()
                 .ledgerSoftTopEdge()
                 .environmentObject(session)
+                // A new 配色方案 changes the environment, so every palette
+                // colour below resolves again (see LedgerColorThemeStore).
+                .environment(\.ledgerColorTheme, colorThemes.theme)
+                .onAppear { colorThemes.applyToWindows() }
                 .task {
                     session.startLocalAutomaticSyncServices()
                     await session.updateActivity(

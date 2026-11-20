@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var session: LedgerSession
     @ObservedObject private var reminders = LedgerLocalReminders.shared
+    @ObservedObject private var colorThemes = LedgerColorThemeStore.shared
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var compactTabConfigurationPresented = false
     @State private var overviewSectionsPresented = false
@@ -48,6 +49,16 @@ struct SettingsView: View {
                         .listRowBackground(BalancedPalette.page)
                         .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 }
+            }
+
+            Section {
+                SettingsNavRow(title: String(localized: "配色方案"), value: colorThemes.theme.title) {
+                    LedgerColorThemePicker()
+                }
+                .accessibilityIdentifier("settings-color-theme")
+            } header: {
+                TerminalSectionLabel(text: String(localized: "外观")).listRowBackground(BalancedPalette.page)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
             }
 
             Section {

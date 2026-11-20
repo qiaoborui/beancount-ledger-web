@@ -454,13 +454,12 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     /// The drawer's ground. In light mode it is a step darker than the page,
     /// as Claude's sidebar is, so the page lying over it reads as a card;
     /// in dark mode the page is dimmed instead, so the ground stays the page.
-    static let fill = Color(uiColor: UIColor {
-        $0.userInterfaceStyle == .dark ? UIColor(hex: 0x121110) : UIColor(hex: 0xF1EFE9)
+    static let fill = Color(uiColor: UIColor { traits in
+        let tokens = LedgerColorTheme.active.tokens(dark: traits.userInterfaceStyle == .dark)
+        return UIColor(hex: UInt(traits.userInterfaceStyle == .dark ? tokens.page : tokens.sunken))
     })
     /// The selected row and the search field on that ground.
-    static let selectedFill = Color(uiColor: UIColor {
-        $0.userInterfaceStyle == .dark ? UIColor(hex: 0x1B1918) : UIColor(hex: 0xE6E2D9)
-    })
+    static let selectedFill = BalancedPalette.selected
     /// Light mode lifts the pushed page towards white, dark mode dims it.
     private static let veil = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .black : .white })
 
