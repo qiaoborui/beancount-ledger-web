@@ -3,21 +3,54 @@ import SwiftUI
 /// Tokens for the Balanced design language (docs/design/ios-balanced).
 /// Chroma is reserved for direction: `income` and `expense`; everything else is ink.
 enum BalancedPalette {
-    static let page = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x121110) : UIColor(hex: 0xFBFAF8) })
-    static let sunken = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x1B1918) : UIColor(hex: 0xF1EFE9) })
-    static let ink = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0xF6F3EE) : UIColor(hex: 0x14100C) })
-    static let secondary = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0xC4BCB0) : UIColor(hex: 0x453E36) })
-    static let meta = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x9A9086) : UIColor(hex: 0x6F675A) })
-    static let rule = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x2B2825) : UIColor(hex: 0xE2DED4) })
+    static let page = Color(uiColor: .ledgerThemed(.page))
+    static let sunken = Color(uiColor: .ledgerThemed(.sunken))
+    static let ink = Color(uiColor: .ledgerThemed(.ink))
+    static let secondary = Color(uiColor: .ledgerThemed(.secondary))
+    static let meta = Color(uiColor: .ledgerThemed(.meta))
+    static let rule = Color(uiColor: .ledgerThemed(.rule))
     /// Field underlines, day separators, the sheet grabber. A decorative divider,
     /// below the 3:1 contrast a control boundary needs — see `edge`.
-    static let ruleStrong = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x423C36) : UIColor(hex: 0xC8C2B4) })
+    static let ruleStrong = Color(uiColor: .ledgerThemed(.ruleStrong))
     /// The only tone used as a *control* boundary (buttons, segments, toggles,
     /// chevrons, the checkbox, the range field). Clears 3:1 against both `page`
     /// and `sunken` in both themes; `rule`/`ruleStrong` never carry this job.
-    static let edge = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x78746E) : UIColor(hex: 0x88837A) })
-    static let income = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x4FBFAB) : UIColor(hex: 0x0D5346) })
-    static let expense = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0xCF7A52) : UIColor(hex: 0x96401F) })
+    static let edge = Color(uiColor: .ledgerThemed(.edge))
+    static let income = Color(uiColor: .ledgerThemed(.income))
+    static let expense = Color(uiColor: .ledgerThemed(.expense))
+    /// A raised card on the page (account groups): white on paper by day.
+    static let card = Color(uiColor: .ledgerThemed(.card))
+    /// An icon well inside a `card`.
+    static let well = Color(uiColor: .ledgerThemed(.well))
+    /// A selected row on the `sunken` ground.
+    static let selected = Color(uiColor: .ledgerThemed(.selected))
+
+    // Chart marks follow the 配色方案 (`LedgerChartTokens`). Paper keeps the
+    // ink / income / expense marks; Pure and Slate bring brighter hues. Use
+    // these for data marks and their legend keys only, never for text.
+
+    /// A single-series mark: a balance line, a bar, the 留存 slab.
+    static let chartAccent = Color(uiColor: .ledgerThemed(.chartAccent))
+    static let chartIncome = Color(uiColor: .ledgerThemed(.chartIncome))
+    static let chartExpense = Color(uiColor: .ledgerThemed(.chartExpense))
+    private static let series = (0..<6).map { Color(uiColor: .ledgerThemed(.chartSeries($0))) }
+    /// The `index`th series of a multi-series chart, wrapping after six.
+    static func chartSeries(_ index: Int) -> Color {
+        series[((index % series.count) + series.count) % series.count]
+    }
+}
+
+extension UIColor {
+    /// A colour from the active 配色方案 (`LedgerColorTheme.active`), resolved
+    /// for the light or dark appearance each time it is drawn. Switching the
+    /// scheme takes effect on the next resolve; `LedgerColorThemeStore`
+    /// forces that across the app.
+    static func ledgerThemed(_ token: LedgerThemeToken) -> UIColor {
+        UIColor { traits in
+            let tokens = LedgerColorTheme.active.tokens(dark: traits.userInterfaceStyle == .dark)
+            return UIColor(hex: UInt(tokens.value(token)))
+        }
+    }
 }
 
 /// IBM Plex Sans weights bundled with the app. 450 ("Text") is the workhorse —

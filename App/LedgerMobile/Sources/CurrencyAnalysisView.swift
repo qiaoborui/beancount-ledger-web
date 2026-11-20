@@ -321,7 +321,7 @@ private struct CurrencySparkline: View {
                         x: .value("日期", axis.position(at: index)),
                         y: .value("汇率", point.rate)
                     )
-                    .foregroundStyle(LedgerPalette.cobaltLight)
+                    .foregroundStyle(BalancedPalette.chartAccent)
                     .lineStyle(StrokeStyle(lineWidth: 2.25, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.monotone)
                 }
@@ -335,7 +335,7 @@ private struct CurrencySparkline: View {
                         x: .value("选中日期", x),
                         y: .value("选中汇率", selectedPoint.rate)
                     )
-                    .foregroundStyle(LedgerPalette.cobalt)
+                    .foregroundStyle(BalancedPalette.chartAccent)
                     .symbolSize(38)
                 }
             }

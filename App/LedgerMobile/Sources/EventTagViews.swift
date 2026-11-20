@@ -619,8 +619,8 @@ struct EventTagReportView: View {
                 )
                 .foregroundStyle(
                     isSelected
-                        ? LedgerPalette.cobalt
-                        : (selectedDailyDate == nil ? LedgerPalette.cobalt : LedgerPalette.cobalt.opacity(0.45))
+                        ? BalancedPalette.chartAccent
+                        : (selectedDailyDate == nil ? BalancedPalette.chartAccent : BalancedPalette.chartAccent.opacity(0.45))
                 )
                 .cornerRadius(4)
             }

@@ -4194,6 +4194,16 @@
         }
       }
     },
+    "偏冷的浅灰，夜间蓝黑" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cool light grey; blue-black at night"
+          }
+        }
+      }
+    },
     "停止" : {
       "localizations" : {
         "en" : {
@@ -4868,6 +4878,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ABC debit card"
+          }
+        }
+      }
+    },
+    "冷灰" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slate"
           }
         }
       }
@@ -5860,6 +5880,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Medical & health"
+          }
+        }
+      }
+    },
+    "午餐" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lunch"
           }
         }
       }
@@ -7428,6 +7458,16 @@
         }
       }
     },
+    "外观" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appearance"
+          }
+        }
+      }
+    },
     "多个账户" : {
       "localizations" : {
         "en" : {
@@ -8416,6 +8456,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ICBC credit card"
+          }
+        }
+      }
+    },
+    "工资" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salary"
           }
         }
       }
@@ -13164,6 +13214,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Can't open Ledger right now. Try again later."
+          }
+        }
+      }
+    },
+    "暖纸" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paper"
           }
         }
       }
@@ -18058,6 +18118,16 @@
         }
       }
     },
+    "米白纸感，夜间暖黑" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Warm off-white; warm black at night"
+          }
+        }
+      }
+    },
     "类别" : {
       "localizations" : {
         "en" : {
@@ -18174,6 +18244,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "~"
+          }
+        }
+      }
+    },
+    "纯净" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pure"
+          }
+        }
+      }
+    },
+    "纯白背景，夜间纯黑" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pure white; true black at night"
           }
         }
       }
@@ -22424,6 +22514,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Configuration error"
+          }
+        }
+      }
+    },
+    "配色方案" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Color Scheme"
+          }
+        }
+      }
+    },
+    "配色方案改变背景、文字和图表的颜色，金额里收入、支出的颜色保持不变。浅色与深色跟随系统外观。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A color scheme changes backgrounds, text and charts; income and expense amounts keep their colors. Light and dark follow the system appearance."
           }
         }
       }

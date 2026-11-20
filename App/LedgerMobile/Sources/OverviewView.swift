@@ -153,13 +153,13 @@ struct OverviewView: View {
                     Capsule().fill(BalancedPalette.rule)
                 } else {
                     HStack(spacing: 3) {
-                        Capsule().fill(BalancedPalette.ink).frame(width: max(0, (proxy.size.width - 3) * barRatio))
-                        Capsule().fill(BalancedPalette.expense).frame(maxWidth: .infinity)
+                        Capsule().fill(BalancedPalette.chartAccent).frame(width: max(0, (proxy.size.width - 3) * barRatio))
+                        Capsule().fill(BalancedPalette.chartExpense).frame(maxWidth: .infinity)
                     }
                 }
             }.frame(height: 6).padding(.top, 16).padding(.bottom, 12).accessibilityHidden(true)
             HStack {
-                legend(String(localized: "留存"), color: BalancedPalette.ink)
+                legend(String(localized: "留存"), color: BalancedPalette.chartAccent)
                 Spacer(minLength: 16)
                 legend(String(localized: "支出"), color: BalancedPalette.expense)
             }
@@ -465,8 +465,8 @@ struct OverviewView: View {
                 // Debt against assets: the expense share is what the assets already owe.
                 GeometryReader { proxy in
                     HStack(spacing: 3) {
-                        Capsule().fill(BalancedPalette.expense).frame(width: max(0, (proxy.size.width - 3) * min(ratio, 1)))
-                        Capsule().fill(BalancedPalette.ink).frame(maxWidth: .infinity)
+                        Capsule().fill(BalancedPalette.chartExpense).frame(width: max(0, (proxy.size.width - 3) * min(ratio, 1)))
+                        Capsule().fill(BalancedPalette.chartAccent).frame(maxWidth: .infinity)
                     }
                 }
                 .frame(height: 6).padding(.horizontal, 20).padding(.top, 2).padding(.bottom, 10)
@@ -484,7 +484,7 @@ struct OverviewView: View {
                 let gaps = CGFloat(exposure.slices.count - 1) * 2
                 HStack(spacing: 2) {
                     ForEach(Array(exposure.slices.enumerated()), id: \.element.id) { index, slice in
-                        Rectangle().fill(BalancedPalette.ink.opacity(max(0.22, 1 - Double(index) * 0.2)))
+                        Rectangle().fill(BalancedPalette.chartAccent.opacity(max(0.22, 1 - Double(index) * 0.2)))
                             .frame(width: max(2, (proxy.size.width - gaps) * slice.share))
                     }
                 }
@@ -727,7 +727,7 @@ private struct OverviewSpendingTrend: View {
                     BalancedPalette.ruleStrong.frame(width: width, height: 1).offset(y: base)
                     ForEach(Array(trend.bars.enumerated()), id: \.element.id) { index, bar in
                         let isSelected = bar == selected
-                        let fill = isSelected ? BalancedPalette.expense : BalancedPalette.edge
+                        let fill = isSelected ? BalancedPalette.chartExpense : BalancedPalette.edge
                         let left = band * CGFloat(index) + (band - barWidth) / 2
                         if let projected = bar.projected, projected > bar.expense {
                             let top = UnevenRoundedRectangle(topLeadingRadius: 4, topTrailingRadius: 4)

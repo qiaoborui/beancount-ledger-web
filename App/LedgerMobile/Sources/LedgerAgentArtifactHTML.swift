@@ -106,13 +106,12 @@ enum LedgerAgentArtifactHTML {
     }
 
     /// The app's palette as CSS variables, light and dark, and quiet defaults.
-    static let theme = """
-    :root{--page:#FBFAF8;--sunken:#F1EFE9;--ink:#14100C;--secondary:#453E36;--meta:#6F675A;--rule:#E2DED4;\
-    --rule-strong:#C8C2B4;--income:#0D5346;--expense:#96401F;--blue:#0A64D6;--orange:#C46A12;--purple:#7445B5;\
-    --teal:#147D86;color-scheme:light dark}
-    @media (prefers-color-scheme:dark){:root{--page:#121110;--sunken:#1B1918;--ink:#F6F3EE;--secondary:#C4BCB0;\
-    --meta:#9A9086;--rule:#2B2825;--rule-strong:#423C36;--income:#4FBFAB;--expense:#CF7A52;--blue:#5AA2FF;\
-    --orange:#F0A04B;--purple:#B48CF0;--teal:#4CC3C9}}
+    /// Follows the active 配色方案, so a page matches the ground it sits on.
+    static var theme: String {
+        LedgerColorTheme.active.css + "\n" + baseStyle
+    }
+
+    private static let baseStyle = """
     *{box-sizing:border-box}
     html,body{margin:0;background:var(--page);color:var(--ink);-webkit-text-size-adjust:100%}
     body{padding:4px 0 32px;font:15px/1.55 -apple-system,"PingFang SC",system-ui,sans-serif}

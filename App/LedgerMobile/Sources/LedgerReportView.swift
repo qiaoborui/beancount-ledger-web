@@ -486,7 +486,7 @@ private struct ReportDailyChart: View {
                 x: .value("日期", calendar.day(bucket.start) ?? Date(), unit: unit),
                 y: .value("支出", Double(bucket.amount) / 100)
             )
-            .foregroundStyle(BalancedPalette.expense)
+            .foregroundStyle(BalancedPalette.chartExpense)
         }
         .chartYAxis(session.amountsVisible ? .automatic : .hidden)
         .frame(height: 160)

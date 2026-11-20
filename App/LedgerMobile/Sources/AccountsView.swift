@@ -400,8 +400,8 @@ final class AccountGroupExpansion: ObservableObject {
 }
 
 private enum AccountCardPalette {
-    /// White in light mode, #1B1918 in dark.
-    static let background = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: 0x1B1918) : .white })
+    /// The 配色方案's card tone: white on paper by day, #1B1918 at night.
+    static let background = BalancedPalette.card
 }
 
 /// Net-worth line for the accounts page: an area and a smoothed line, a dashed
@@ -448,7 +448,7 @@ private struct AccountsNetWorthChart: View {
     private static let smoothing: InterpolationMethod = .catmullRom
 
     private var areaFill: LinearGradient {
-        LinearGradient(colors: [BalancedPalette.income.opacity(0.18), BalancedPalette.income.opacity(0)],
+        LinearGradient(colors: [BalancedPalette.chartIncome.opacity(0.18), BalancedPalette.chartIncome.opacity(0)],
                        startPoint: .top, endPoint: .bottom)
     }
 
@@ -468,7 +468,7 @@ private struct AccountsNetWorthChart: View {
                     y: .value("净资产", point.value)
                 )
                 .interpolationMethod(Self.smoothing)
-                .foregroundStyle(BalancedPalette.income)
+                .foregroundStyle(BalancedPalette.chartIncome)
                 .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
             }
             if let first = data.first {
@@ -1183,14 +1183,14 @@ private struct AccountBalanceTrendPanel: View {
                         x: .value("日期", x),
                         y: .value("余额", point.balance)
                     )
-                    .foregroundStyle(LedgerPalette.cobalt.opacity(0.10))
+                    .foregroundStyle(BalancedPalette.chartAccent.opacity(0.10))
                     .interpolationMethod(.stepEnd)
 
                     LineMark(
                         x: .value("日期", x),
                         y: .value("余额", point.balance)
                     )
-                    .foregroundStyle(LedgerPalette.cobalt)
+                    .foregroundStyle(BalancedPalette.chartAccent)
                     .lineStyle(StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.stepEnd)
 
@@ -1199,7 +1199,7 @@ private struct AccountBalanceTrendPanel: View {
                             x: .value("日期", x),
                             y: .value("余额", point.balance)
                         )
-                        .foregroundStyle(LedgerPalette.cobalt)
+                        .foregroundStyle(BalancedPalette.chartAccent)
                         .symbolSize(18)
                     }
                 }
@@ -1210,7 +1210,7 @@ private struct AccountBalanceTrendPanel: View {
                     RuleMark(x: .value("选中日期", x))
                         .foregroundStyle(LedgerPalette.lineStrong)
                     PointMark(x: .value("选中日期", x), y: .value("选中余额", point.balance))
-                        .foregroundStyle(LedgerPalette.cobalt)
+                        .foregroundStyle(BalancedPalette.chartAccent)
                         .symbolSize(52)
                 }
             }
@@ -1424,10 +1424,7 @@ private struct AccountRowView: View {
     }
 
     /// Icon well: `sunken` in light mode, `rule` in dark (sunken is the card colour there).
-    private static let iconBackground = Color(uiColor: UIColor { traits in
-        // BalancedPalette.rule (dark) / BalancedPalette.sunken (light)
-        traits.userInterfaceStyle == .dark ? UIColor(hex: 0x2B2825) : UIColor(hex: 0xF1EFE9)
-    })
+    private static let iconBackground = BalancedPalette.well
 
     private var balance: Int { row.periodBalancesAvailable ? row.closingValuation : row.valuation }
 

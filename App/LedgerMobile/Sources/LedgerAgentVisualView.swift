@@ -348,7 +348,7 @@ private struct LedgerAgentStatsView: View {
                 Chart(Array(spark.enumerated()), id: \.offset) { index, value in
                     LineMark(x: .value("序号", index), y: .value("金额", value))
                         .interpolationMethod(.monotone)
-                        .foregroundStyle(accent ?? BalancedPalette.secondary)
+                        .foregroundStyle(accent ?? BalancedPalette.chartAccent)
                         .lineStyle(StrokeStyle(lineWidth: 1.5))
                 }
                 .chartXAxis(.hidden)
@@ -389,9 +389,6 @@ struct LedgerAgentChartView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.ledgerAgentAccent) private var accent
 
-    private static let palette: [Color] = [BalancedPalette.ink, BalancedPalette.expense, BalancedPalette.income,
-                                           BalancedPalette.meta, BalancedPalette.secondary, BalancedPalette.edge,
-                                           BalancedPalette.ruleStrong, BalancedPalette.rule]
     private static let waterfallNames = ["增加", "减少", LedgerAgentChart.waterfallTotal]
 
     private var isPie: Bool { chart.type == .pie }
@@ -401,13 +398,13 @@ struct LedgerAgentChartView: View {
         isWaterfall ? Self.waterfallNames : isPie ? chart.labels : chart.series.map(\.name)
     }
     private var colors: [Color] {
-        if isWaterfall { return [BalancedPalette.income, BalancedPalette.expense, accent ?? BalancedPalette.ink] }
+        if isWaterfall { return [BalancedPalette.chartIncome, BalancedPalette.chartExpense, accent ?? BalancedPalette.chartAccent] }
         return names.indices.map { index in
             if !isPie, let name = chart.series[index].color, let named = LedgerAgentVisual.Style.Accent(rawValue: name) {
                 return LedgerAgentVisualText.color(named)
             }
             if index == 0, let accent { return accent }
-            return Self.palette[index % Self.palette.count]
+            return BalancedPalette.chartSeries(index)
         }
     }
     /// Bars carry their values when asked, unless stacked segments would crowd them.
@@ -534,11 +531,11 @@ struct LedgerAgentChartView: View {
     @ChartContentBuilder private var rules: some ChartContent {
         ForEach(Array((chart.rules ?? []).enumerated()), id: \.offset) { _, rule in
             RuleMark(y: .value("金额", rule.value))
-                .foregroundStyle(BalancedPalette.expense)
+                .foregroundStyle(BalancedPalette.chartExpense)
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 .annotation(position: .top, alignment: .leading, spacing: 2) {
                     Text(verbatim: rule.label ?? LedgerAgentVisual.amount(rule.value, unit: unit))
-                        .font(.system(size: 10)).foregroundStyle(BalancedPalette.expense)
+                        .font(.system(size: 10)).foregroundStyle(BalancedPalette.chartExpense)
                 }
         }
     }
@@ -565,7 +562,7 @@ struct LedgerAgentChartView: View {
             }
             ForEach(Array((chart.rules ?? []).enumerated()), id: \.offset) { _, rule in
                 RuleMark(x: .value("金额", rule.value))
-                    .foregroundStyle(BalancedPalette.expense)
+                    .foregroundStyle(BalancedPalette.chartExpense)
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
             }
         }

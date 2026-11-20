@@ -111,14 +111,14 @@ private struct TerminalReportChart: View {
                 Chart(points) { point in
                     if netOnly {
                         LineMark(x: .value("月份", point.month), y: .value("结余", Double(point.net) / 100))
-                            .foregroundStyle(TerminalPalette.accent).lineStyle(StrokeStyle(lineWidth: 2))
+                            .foregroundStyle(BalancedPalette.chartAccent).lineStyle(StrokeStyle(lineWidth: 2))
                         PointMark(x: .value("月份", point.month), y: .value("结余", Double(point.net) / 100))
-                            .foregroundStyle(TerminalPalette.accent).symbolSize(14)
+                            .foregroundStyle(BalancedPalette.chartAccent).symbolSize(14)
                     } else {
                         BarMark(x: .value("月份", point.month), y: .value("收入", Double(point.income) / 100))
-                            .position(by: .value("类别", "收入")).foregroundStyle(TerminalPalette.ink)
+                            .position(by: .value("类别", "收入")).foregroundStyle(BalancedPalette.chartAccent)
                         BarMark(x: .value("月份", point.month), y: .value("支出", Double(point.expense) / 100))
-                            .position(by: .value("类别", "支出")).foregroundStyle(TerminalPalette.accent)
+                            .position(by: .value("类别", "支出")).foregroundStyle(BalancedPalette.chartExpense)
                     }
                 }
                 .chartYAxis {
@@ -350,9 +350,9 @@ struct TerminalIncomeExpenseReport: View {
             } else {
                 Chart(points) { point in
                     BarMark(x: .value("月份", point.month), y: .value("收入", Double(point.income) / 100))
-                        .position(by: .value("类别", "收入")).foregroundStyle(BalancedPalette.ink)
+                        .position(by: .value("类别", "收入")).foregroundStyle(BalancedPalette.chartAccent)
                     BarMark(x: .value("月份", point.month), y: .value("支出", Double(point.expense) / 100))
-                        .position(by: .value("类别", "支出")).foregroundStyle(BalancedPalette.expense)
+                        .position(by: .value("类别", "支出")).foregroundStyle(BalancedPalette.chartExpense)
                 }
                 .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { value in
                     AxisGridLine().foregroundStyle(BalancedPalette.rule)
@@ -369,8 +369,8 @@ struct TerminalIncomeExpenseReport: View {
                 .padding(EdgeInsets(top: 4, leading: 20, bottom: 8, trailing: 20))
                 .accessibilityLabel(BalancedBucketAxis.title(points.map(\.month))).accessibilityIdentifier("balanced-cashflow-chart")
                 HStack(spacing: 20) {
-                    legendKey(String(localized: "收入"), color: BalancedPalette.ink)
-                    legendKey(String(localized: "支出"), color: BalancedPalette.expense)
+                    legendKey(String(localized: "收入"), color: BalancedPalette.chartAccent)
+                    legendKey(String(localized: "支出"), color: BalancedPalette.chartExpense)
                 }.padding(EdgeInsets(top: 10, leading: 20, bottom: 6, trailing: 20))
                 Text(BalancedBucketAxis.footnote(points.map(\.month))).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                     .padding(EdgeInsets(top: 0, leading: 20, bottom: 4, trailing: 20))
@@ -404,9 +404,9 @@ struct TerminalIncomeExpenseReport: View {
             } else {
                 Chart(points) { point in
                     LineMark(x: .value("月份", point.month), y: .value("净结余", Double(point.net) / 100))
-                        .foregroundStyle(BalancedPalette.ink).lineStyle(StrokeStyle(lineWidth: 1.6))
+                        .foregroundStyle(BalancedPalette.chartAccent).lineStyle(StrokeStyle(lineWidth: 1.6))
                     PointMark(x: .value("月份", point.month), y: .value("净结余", Double(point.net) / 100))
-                        .foregroundStyle(BalancedPalette.ink).symbolSize(16)
+                        .foregroundStyle(BalancedPalette.chartAccent).symbolSize(16)
                 }
                 .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { value in
                     AxisGridLine().foregroundStyle(BalancedPalette.rule)
