@@ -4,8 +4,8 @@ import XCTest
 @testable import LedgerMobile
 
 /// Switching 配色方案 must repaint views that never read the scheme
-/// themselves: palette colours are static dynamic `UIColor`s, and only the
-/// environment change at the root tells SwiftUI to resolve them again. Needs
+/// themselves: palette colours are static dynamic `UIColor`s that SwiftUI
+/// does not resolve again on its own, so the root rebuilds the tree. Needs
 /// the iOS app host (a real window), so it stays out of the SwiftPM target.
 @MainActor
 final class LedgerColorThemeRenderingTests: XCTestCase {
@@ -47,12 +47,12 @@ final class LedgerColorThemeRenderingTests: XCTestCase {
 
     // MARK: Helpers
 
-    /// The app root's shape: the scheme goes into the environment above a
-    /// child that does not read it.
+    /// RootView's shape: the shell is keyed by the scheme, above a child
+    /// that does not read it.
     private struct Root: View {
         @ObservedObject var store = LedgerColorThemeStore.shared
         var body: some View {
-            Page().environment(\.ledgerColorTheme, store.theme)
+            Page().id(store.theme)
         }
     }
 

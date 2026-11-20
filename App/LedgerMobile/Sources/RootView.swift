@@ -4,6 +4,7 @@ import UIKit
 struct RootView: View {
     @State private var showsLaunchAnimation = true
     @EnvironmentObject private var session: LedgerSession
+    @ObservedObject private var colorThemes = LedgerColorThemeStore.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if DEBUG
@@ -64,6 +65,12 @@ struct RootView: View {
                 }
 
             }
+            // A new 配色方案 rebuilds the shell. Palette colours are dynamic
+            // UIColors, and SwiftUI does not resolve them again for a value
+            // they read outside the environment, so only a fresh tree repaints
+            // every page (LedgerColorThemeRenderingTests). Session state lives
+            // above, so the ledger and the selected tab carry over.
+            .id(colorThemes.theme)
             .accessibilityHidden(showsLaunchAnimation || coverVisible)
             .allowsHitTesting(!showsLaunchAnimation && !coverVisible)
 

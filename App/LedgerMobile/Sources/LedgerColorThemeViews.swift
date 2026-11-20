@@ -4,11 +4,11 @@ import UIKit
 /// Holds the chosen 配色方案 and makes a switch show at once.
 ///
 /// Palette colours are dynamic `UIColor`s that read `LedgerColorTheme.active`
-/// whenever they resolve. A switch therefore has to make everything resolve
-/// again: UIKit chrome does that when a colour-affecting trait changes, so the
-/// scheme is set as a custom trait on every window scene; SwiftUI does it when
-/// the environment changes, so the app root passes the scheme down as
-/// `ledgerColorTheme`.
+/// whenever they resolve. SwiftUI caches a resolved `UIColor` per appearance
+/// and does not resolve it again for an environment change it does not track,
+/// so `RootView` rebuilds its shell with `.id(theme)` on a switch. UIKit chrome
+/// re-resolves when a colour-affecting trait changes, so the scheme is also
+/// set as a custom trait on every window scene.
 @MainActor
 final class LedgerColorThemeStore: ObservableObject {
     static let shared = LedgerColorThemeStore()
@@ -44,17 +44,6 @@ struct LedgerColorThemeTrait: UITraitDefinition {
     static let identifier = "com.qiaoborui.ledger.colorTheme"
     static let name = "LedgerColorTheme"
     static let affectsColorAppearance = true
-}
-
-private struct LedgerColorThemeKey: EnvironmentKey {
-    static let defaultValue: LedgerColorTheme = LedgerColorTheme.defaultTheme
-}
-
-extension EnvironmentValues {
-    var ledgerColorTheme: LedgerColorTheme {
-        get { self[LedgerColorThemeKey.self] }
-        set { self[LedgerColorThemeKey.self] = newValue }
-    }
 }
 
 private extension Color {

@@ -63,9 +63,7 @@ struct LedgerMobileApp: App {
             RootView()
                 .ledgerSoftTopEdge()
                 .environmentObject(session)
-                // A new 配色方案 changes the environment, so every palette
-                // colour below resolves again (see LedgerColorThemeStore).
-                .environment(\.ledgerColorTheme, colorThemes.theme)
+                // Names the 配色方案 in UIKit traits (see LedgerColorThemeStore).
                 .onAppear { colorThemes.applyToWindows() }
                 .task {
                     session.startLocalAutomaticSyncServices()
