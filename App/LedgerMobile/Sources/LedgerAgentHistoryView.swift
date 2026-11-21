@@ -7,22 +7,19 @@ import UIKit
 /// 已置顶 then 最近 (the rest, in the order of `LedgerAgentHistoryGroup`), and
 /// 新对话 at the bottom. Picking a conversation switches the screen to it; a
 /// running one keeps running. A row can be renamed, pinned, shared as plain
-/// text or deleted from its context menu, pinned by a swipe from the left
-/// and deleted by a swipe from the right.
+/// text or deleted from its context menu, and pinned by a swipe from the
+/// left. A drag to the left anywhere on it closes the drawer, so rows have
+/// no swipe from the right.
 struct LedgerAgentHistoryView: View {
     /// Whether amounts are on screen; a conversation is not shared as text
     /// while privacy protection masks them.
     var sharesText: Bool
-    /// Closes the drawer.
-    var close: () -> Void
-    /// Opens 助手设置 on the chat page.
-    var openSettings: () -> Void
-    /// Opens one of the places at the top of the drawer on the chat page's
-    /// navigation stack.
-    var openRoute: (LedgerAgentDrawerRoute) -> Void
-    /// A drag to the left on the header or the footer, which moves the
-    /// drawer with the finger and closes it when let go far or fast enough.
-    var closeDrag: LedgerAgentDrawerDrag
+    /// How many times the drawer has gone all the way in; a search is put
+    /// away each time.
+    var closings: Int
+    /// Closes the drawer, opens 助手设置, or opens one of the places at the
+    /// top of the drawer on the chat page's navigation stack.
+    var actions: LedgerAgentDrawerActions
     @ObservedObject private var sessions = LedgerAgentSessions.shared
     @ObservedObject private var automations = LedgerAutomationCenter.shared
     @State private var query = ""
@@ -31,21 +28,15 @@ struct LedgerAgentHistoryView: View {
     @State private var confirmingClear = false
     @State private var renaming: LedgerAgentRenameTarget?
 
-    private var groups: [LedgerAgentHistoryGroup] {
-        LedgerAgentHistoryGroup.grouping(sessions.saved.filter { $0.matches(query) })
-    }
-
-    private var pinned: [LedgerAgentSavedConversation] {
-        groups.first { $0.kind == .pinned }?.items ?? []
-    }
-
-    /// Everything not pinned, newest first, as the groups order it.
-    private var recent: [LedgerAgentSavedConversation] {
-        groups.filter { $0.kind != .pinned }.flatMap(\.items)
-    }
+    private func close() { actions.close() }
 
     var body: some View {
-        VStack(spacing: 0) {
+        // Grouped once per update: a search reads every message.
+        let groups = LedgerAgentHistoryGroup.grouping(sessions.saved.filter { $0.matches(query) })
+        let pinned = groups.first { $0.kind == .pinned }?.items ?? []
+        // Everything not pinned, newest first, as the groups order it.
+        let recent = groups.filter { $0.kind != .pinned }.flatMap(\.items)
+        return VStack(spacing: 0) {
             header
             List {
                 // Claude puts its places (项目, Code, …) above the
@@ -90,14 +81,17 @@ struct LedgerAgentHistoryView: View {
             Button("清空", role: .destructive) { sessions.deleteAll() }
         }
         .ledgerAgentRenameAlert($renaming)
+        .onChange(of: closings) { _, _ in
+            searchFocused = false
+            searching = false
+            query = ""
+        }
     }
 
     // MARK: Header
 
     /// The title, or the search field in its place, and the round button
-    /// that swaps them. Closing the search clears it. The rows keep their
-    /// own swipes, so the drag that closes the drawer lives here, on the
-    /// footer and on the page beside the drawer.
+    /// that swaps them. Closing the search clears it.
     private var header: some View {
         HStack(spacing: 12) {
             if searching {
@@ -151,8 +145,6 @@ struct LedgerAgentHistoryView: View {
         .padding(.trailing, 16)
         .padding(.top, 4)
         .padding(.bottom, 12)
-        .contentShape(Rectangle())
-        .gesture(closeDrag.gesture)
     }
 
     // MARK: Rows
@@ -173,7 +165,7 @@ struct LedgerAgentHistoryView: View {
     private func place(_ route: LedgerAgentDrawerRoute) -> some View {
         Button {
             close()
-            openRoute(route)
+            actions.openRoute(route)
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: route.symbol).font(.system(size: 18, weight: .regular))
@@ -229,14 +221,11 @@ struct LedgerAgentHistoryView: View {
         )
         .accessibilityAddTraits(item.id == sessions.current.id ? .isSelected : [])
         .contextMenu { menu(item) }
+        // Only from the left: a drag to the left closes the drawer, and
+        // deleting is in the menu a long press opens.
         .swipeActions(edge: .leading) {
             Button { sessions.setPinned(item.id, item.pinnedAt == nil) } label: { pinLabel(item) }
                 .tint(BalancedPalette.secondary)
-        }
-        .swipeActions(edge: .trailing) {
-            if !isRunning(item.id) {
-                Button(role: .destructive) { sessions.delete(item.id) } label: { Label("删除", systemImage: "trash") }
-            }
         }
     }
 
@@ -299,7 +288,7 @@ struct LedgerAgentHistoryView: View {
             Menu {
                 Button {
                     close()
-                    openSettings()
+                    actions.openSettings()
                 } label: { Label("助手设置…", systemImage: "slider.horizontal.3") }
                 if !sessions.saved.isEmpty {
                     Button(role: .destructive) { confirmingClear = true } label: {
@@ -351,19 +340,17 @@ struct LedgerAgentHistoryView: View {
                 .ignoresSafeArea(edges: .bottom)
                 .allowsHitTesting(false)
         }
-        .contentShape(Rectangle())
-        .gesture(closeDrag.gesture)
     }
 }
 
 extension View {
     /// The history drawer of a chat page, the way Claude's sidebar works: it
     /// is 80% of the page wide (400pt at most) and pushes the page to the
-    /// right, which becomes a card with rounded corners under a light veil.
-    /// A drag to the right that starts at the leading edge of the screen
-    /// opens it under the finger when `edgeOpens`; a tap on the card, a drag
-    /// to the left on the card or on the drawer's header or footer, or the
-    /// VoiceOver escape closes it, also under the finger. In a regular width
+    /// right, which becomes a card with rounded corners under a light dim.
+    /// A drag to the right that starts anywhere on the page opens it under
+    /// the finger when `edgeOpens`; a tap on the card, a drag to the left
+    /// anywhere on the drawer or the card, or the VoiceOver escape closes
+    /// it. A finger can catch it mid-animation either way. In a regular width
     /// the page stays put and the drawer slides over it. The page is hidden
     /// from assistive technology while the drawer is open.
     func ledgerAgentHistoryDrawer(isPresented: Binding<Bool>, edgeOpens: Bool, sharesText: Bool,
@@ -410,20 +397,57 @@ enum LedgerAgentDrawerRoute: String, Identifiable, Hashable, CaseIterable {
     }
 }
 
-/// A finger moving the drawer: how far it has gone to the right so far
-/// (negative to the left), and at the end, that distance and its speed.
+/// What the drawer's content does on its own: close, open 助手设置, open a
+/// place. Kept in one box the drawer creates once, so the history list sees
+/// the same value on every frame of a drag and is not rebuilt while the
+/// finger moves (closures never compare equal, so passing them directly
+/// re-ran the list's body on every frame).
 @MainActor
-struct LedgerAgentDrawerDrag {
-    var changed: (CGFloat) -> Void
-    var ended: (CGFloat, CGFloat) -> Void
+final class LedgerAgentDrawerActions {
+    var close: () -> Void = {}
+    var openSettings: () -> Void = {}
+    var openRoute: (LedgerAgentDrawerRoute) -> Void = { _ in }
+}
 
-    var gesture: some Gesture {
-        // Measured on the screen, not on the view: the view moves with the
-        // finger, and a translation read in its own space would feed back
-        // into itself and make the drawer shake.
-        DragGesture(minimumDistance: 12, coordinateSpace: .global)
-            .onChanged { changed($0.translation.width) }
-            .onEnded { ended($0.translation.width, $0.velocity.width) }
+/// Where the drawer was last sent by an animation, so a finger that grabs it
+/// mid-flight starts from where it is on screen rather than from where the
+/// animation is going. Not observed: reading it never redraws anything.
+@MainActor
+private final class LedgerAgentDrawerMotion {
+    private var from: Double = 0
+    private var to: Double = 0
+    /// In points per second.
+    private var velocity: Double = 0
+    private var start: CFTimeInterval = 0
+    private var running = false
+    /// The position under the finger when the drag in progress began.
+    var dragBase: CGFloat = 0
+    /// The finger's speed at the end of the last drag, for the animation
+    /// that the change of `isPresented` starts.
+    var releaseSpeed: CGFloat = 0
+    /// The open drag in progress has already tapped, on passing the point
+    /// where letting go opens the drawer.
+    var tickedThisDrag = false
+
+    static let spring = Spring(response: 0.38, dampingRatio: 0.9)
+
+    func began(from: CGFloat, to: CGFloat, velocity: CGFloat) {
+        self.from = from
+        self.to = to
+        self.velocity = velocity
+        start = CACurrentMediaTime()
+        running = true
+    }
+
+    func stop() { running = false }
+
+    /// Where the running animation has the drawer now, if one is running.
+    func presented() -> CGFloat? {
+        guard running else { return nil }
+        let time = CACurrentMediaTime() - start
+        guard time < Self.spring.settlingDuration else { return nil }
+        let moved = Self.spring.value(target: to - from, initialVelocity: velocity, time: time)
+        return from + moved
     }
 }
 
@@ -436,166 +460,212 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
 
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @State private var pageWidth: CGFloat = 0
     /// How far the drawer is out, from 0 (closed) to `width` (open). A
     /// finger sets it directly; letting go or a tap animates it.
     @State private var reveal: CGFloat = 0
-    /// The drawer is in the view tree: from the moment it starts to come out
-    /// until it is all the way back in.
-    @State private var mounted = false
+    /// The drawer is in the view tree. It comes in the first time the drawer
+    /// starts to open and then stays, drawn only while it is out: building
+    /// the list on every open was the hitch at the start of the slide, and
+    /// taking it away at the end of the close flashed the strip behind it.
+    @State private var loaded = false
     /// Counts the moments the drawer comes out, for the haptic tap.
     @State private var openTicks = 0
-    /// The edge drag in progress has already tapped, on passing the point
-    /// where letting go opens the drawer.
-    @State private var tickedThisDrag = false
+    /// Counts the times the drawer has gone all the way in, so the list can
+    /// put away a search when it is out of sight.
+    @State private var closings = 0
+    @State private var motion = LedgerAgentDrawerMotion()
+    @State private var actions = LedgerAgentDrawerActions()
 
     private static let overShape = UnevenRoundedRectangle(bottomTrailingRadius: 28, topTrailingRadius: 28,
                                                           style: .continuous)
-    /// The drawer's ground. In light mode it is a step darker than the page,
-    /// as Claude's sidebar is, so the page lying over it reads as a card;
-    /// in dark mode the page is dimmed instead, so the ground stays the page.
+    /// The radius of the pushed page's leading corners, near the screen's
+    /// own so the card reads as the screen sliding aside.
+    private static let cardRadius: CGFloat = 40
+    /// The drawer's ground, in the colour scheme's own tones: in light mode
+    /// the page colour itself, so the drawer is the app's paper rather than
+    /// a grey panel, and the page lying on it is told apart by a dim; in dark
+    /// mode a step lighter than the page, since a dim on near-black hardly
+    /// shows.
     static let fill = Color(uiColor: UIColor { traits in
-        let tokens = LedgerColorTheme.active.tokens(dark: traits.userInterfaceStyle == .dark)
-        return UIColor(hex: UInt(traits.userInterfaceStyle == .dark ? tokens.page : tokens.sunken))
+        let dark = traits.userInterfaceStyle == .dark
+        let tokens = LedgerColorTheme.active.tokens(dark: dark)
+        return UIColor(hex: UInt(dark ? tokens.sunken : tokens.page))
     })
-    /// The selected row and the search field on that ground.
-    static let selectedFill = BalancedPalette.selected
-    /// Light mode lifts the pushed page towards white, dark mode dims it.
-    private static let veil = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .black : .white })
-
-    @Environment(\.colorScheme) private var colorScheme
+    /// The selected row and the search field on that ground: the scheme's
+    /// selected tone by day, and by night its well, since the selected tone
+    /// there is the step the ground already took.
+    static let selectedFill = Color(uiColor: UIColor { traits in
+        let dark = traits.userInterfaceStyle == .dark
+        let tokens = LedgerColorTheme.active.tokens(dark: dark)
+        return UIColor(hex: UInt(dark ? tokens.well : tokens.selected))
+    })
 
     private var width: CGFloat { min(pageWidth * 0.8, 400) }
-    /// A white veil any stronger would melt the card into the drawer.
+    /// The dim over the pushed page (compact) or the page under the sliding
+    /// drawer (regular), at the drawer fully out.
     private var veilStrength: CGFloat {
-        guard pushes else { return 0.32 }
-        return colorScheme == .dark ? 0.5 : 0.3
+        guard pushes else { return colorScheme == .dark ? 0.45 : 0.2 }
+        return colorScheme == .dark ? 0.4 : 0.08
     }
     /// Compact width pushes the page aside; regular width slides the drawer
     /// over it, since the system navigation bar there would not move.
     private var pushes: Bool { sizeClass != .regular }
     private var progress: CGFloat { width > 0 ? min(1, max(0, reveal / width)) : 0 }
-    private var settling: Animation {
-        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.36, dampingFraction: 0.88)
-    }
-
-    private var closeDrag: LedgerAgentDrawerDrag {
-        LedgerAgentDrawerDrag(
-            changed: { dx in reveal = min(width, max(0, width + min(0, dx))) },
-            ended: { dx, speed in finish(open: !(dx < -width * 0.35 || speed < -600)) })
-    }
+    /// Anything of the drawer is on screen.
+    private var isOut: Bool { reveal > 0.5 || isPresented }
 
     func body(content: Content) -> some View {
         ZStack(alignment: .topLeading) {
             content
                 .accessibilityHidden(isPresented)
-                .overlay { if mounted { cover } }
+                .overlay { if isOut { cover } }
                 .background {
-                    LedgerLeadingEdgePan(
-                        isEnabled: edgeOpens && !isPresented && width > 0,
-                        changed: { dx in
-                            mounted = true
-                            reveal = min(width, max(0, dx))
-                            if dx > width * 0.35 && !tickedThisDrag {
-                                tickedThisDrag = true
-                                openTicks += 1
-                            }
-                        },
-                        ended: { dx, speed in finish(open: (dx > width * 0.35 && speed > -300) || speed > 600) })
+                    LedgerAgentDrawerPan(
+                        mode: !(width > 0) ? .off : isPresented ? .closes : (edgeOpens ? .opens : .off),
+                        began: dragBegan, changed: dragChanged, ended: dragEnded)
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
                 .offset(x: pushes ? reveal : 0)
-            if mounted {
+            if loaded {
                 drawer.zIndex(pushes ? -1 : 1)
             }
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: openTicks)
         .onChange(of: isPresented) { _, shown in
-            if shown && !tickedThisDrag { openTicks += 1 }
-            tickedThisDrag = false
-            settle()
+            if shown && !motion.tickedThisDrag { openTicks += 1 }
+            motion.tickedThisDrag = false
+            let speed = motion.releaseSpeed
+            motion.releaseSpeed = 0
+            settle(speed: speed)
         }
         .onChange(of: width) { _, _ in if isPresented { reveal = width } }
-        .onAppear { if isPresented { settle() } }
+        .onAppear {
+            actions.close = { [isPresented = $isPresented] in isPresented.wrappedValue = false }
+            actions.openSettings = openSettings
+            actions.openRoute = openRoute
+            if isPresented { settle(speed: 0) }
+        }
     }
 
     private var drawer: some View {
-        LedgerAgentHistoryView(sharesText: sharesText, close: { isPresented = false },
-                               openSettings: openSettings, openRoute: openRoute, closeDrag: closeDrag)
+        LedgerAgentHistoryView(sharesText: sharesText, closings: closings, actions: actions)
             .frame(width: width)
             .frame(maxHeight: .infinity)
-            .background {
+            .background(alignment: .leading) {
                 if pushes {
-                    Rectangle().fill(Self.fill).ignoresSafeArea()
+                    // As wide as the screen and then some: the page's rounded
+                    // corners and a spring's last point past the open
+                    // position show this ground, never what lies behind it.
+                    Rectangle().fill(Self.fill)
+                        .frame(width: max(pageWidth, width) + 60)
+                        .ignoresSafeArea()
                 } else {
                     Self.overShape.fill(Self.fill)
-                        .shadow(color: .black.opacity(0.18 * progress), radius: 24, x: 8, y: 0)
+                        .shadow(color: .black.opacity(0.18), radius: 24, x: 8, y: 0)
                         .ignoresSafeArea()
                 }
             }
             // Compact width: the drawer lies still under the page and the
             // page is drawn aside to show it. Regular width: it slides in.
             .offset(x: pushes ? 0 : reveal - width)
+            // Under the opaque page it would only cost drawing.
+            .opacity(isOut ? 1 : 0)
+            .allowsHitTesting(isPresented)
             .accessibilityHidden(!isPresented)
             .accessibilityAddTraits(.isModal)
             .accessibilityAction(.escape) { isPresented = false }
     }
 
-    /// Over the page while the drawer is out: the veil that closes the
-    /// drawer, and in a compact width the card's rounded leading corners and
-    /// the soft shadow it casts on the drawer.
+    /// Over the page while the drawer is out: the dim that closes the drawer
+    /// on a tap, and in a compact width the card's rounded leading corners,
+    /// filled in the drawer's ground. Both are flat fills, so moving them
+    /// with the page costs no offscreen drawing.
     private var cover: some View {
         ZStack(alignment: .leading) {
-            Self.veil.opacity(veilStrength * progress)
+            Color.black.opacity(veilStrength * progress)
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { isPresented = false }
-                .gesture(closeDrag.gesture)
                 .accessibilityElement()
                 .accessibilityLabel("关闭历史对话")
                 .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("ledger-agent-history-dismiss")
                 .accessibilityHidden(!isPresented)
             if pushes {
-                LedgerAgentCardCorners(radius: 44)
+                LedgerAgentCardCorners(radius: Self.cardRadius)
                     .fill(Self.fill)
                     .ignoresSafeArea()
-                    .opacity(progress > 0 ? 1 : 0)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-                LinearGradient(colors: [.black.opacity(0), .black.opacity(colorScheme == .dark ? 0.35 : 0.09)],
-                               startPoint: .leading, endPoint: .trailing)
-                    .frame(width: 22)
-                    .offset(x: -22)
-                    .ignoresSafeArea()
-                    .opacity(progress)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
         }
     }
 
-    private func finish(open: Bool) {
-        if open != isPresented {
-            isPresented = open
-        } else {
-            tickedThisDrag = false
-            settle()
+    // MARK: Dragging
+
+    /// A finger takes the drawer, from wherever it is on screen: at rest, or
+    /// partway through an animation, which it stops.
+    private func dragBegan() {
+        loaded = true
+        let base = min(width, max(0, motion.presented() ?? reveal))
+        motion.stop()
+        motion.dragBase = base
+        motion.tickedThisDrag = false
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { reveal = base }
+    }
+
+    private func dragChanged(_ dx: CGFloat) {
+        let next = min(width, max(0, motion.dragBase + dx))
+        reveal = next
+        // Tap once on passing the point where letting go opens the drawer.
+        if !isPresented && !motion.tickedThisDrag && next > width * 0.5 {
+            motion.tickedThisDrag = true
+            openTicks += 1
         }
     }
 
-    /// Brings the drawer to where `isPresented` says it is, and takes it out
-    /// of the view tree once it is all the way in. That waits for the
-    /// animation to be fully removed, not just logically complete: a spring
-    /// is "logically complete" while the page is still a point or so from
-    /// the edge, and taking the drawer away then flashed the empty strip
-    /// behind it.
-    private func settle() {
-        if isPresented { mounted = true }
-        withAnimation(settling, completionCriteria: .removed) {
-            reveal = isPresented ? width : 0
+    /// Letting go: where the drawer would coast to at the finger's speed
+    /// decides whether it opens, and the animation starts at that speed.
+    private func dragEnded(_ dx: CGFloat, _ speed: CGFloat) {
+        let at = min(width, max(0, motion.dragBase + dx))
+        let projected = at + speed * 0.18
+        let open = projected > width * 0.5
+        if open != isPresented {
+            motion.releaseSpeed = speed
+            isPresented = open
+        } else {
+            motion.tickedThisDrag = false
+            settle(speed: speed)
+        }
+    }
+
+    /// Brings the drawer to where `isPresented` says it is, carrying on at
+    /// `speed` (points per second) from a finger that let go of it.
+    private func settle(speed: CGFloat) {
+        if isPresented { loaded = true }
+        let target = isPresented ? width : 0
+        let from = motion.presented() ?? reveal
+        let distance = target - from
+        let animation: Animation
+        if reduceMotion {
+            animation = .easeInOut(duration: 0.2)
+            motion.stop()
+        } else {
+            // A spring's initial velocity is a share of the distance per
+            // second. A fling faster than the distance allows is capped, so
+            // the page does not overshoot far past the drawer.
+            let relative = abs(distance) > 1 ? min(12, max(-12, speed / distance)) : 0
+            animation = .interpolatingSpring(LedgerAgentDrawerMotion.spring, initialVelocity: relative)
+            motion.began(from: from, to: target, velocity: relative * distance)
+        }
+        withAnimation(animation, completionCriteria: .removed) {
+            reveal = target
         } completion: {
-            if !isPresented && reveal == 0 { mounted = false }
+            if !isPresented && reveal == 0 { closings += 1 }
         }
     }
 }
@@ -609,49 +679,65 @@ private struct LedgerAgentCardCorners: Shape {
         var path = Path()
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))
         path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.minY))
-        path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.minY + radius),
-                          control: CGPoint(x: rect.minX, y: rect.minY))
+        path.addArc(center: CGPoint(x: rect.minX + radius, y: rect.minY + radius), radius: radius,
+                    startAngle: .degrees(-90), endAngle: .degrees(180), clockwise: true)
         path.closeSubpath()
         path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
         path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - radius))
-        path.addQuadCurve(to: CGPoint(x: rect.minX + radius, y: rect.maxY),
-                          control: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addArc(center: CGPoint(x: rect.minX + radius, y: rect.maxY - radius), radius: radius,
+                    startAngle: .degrees(180), endAngle: .degrees(90), clockwise: true)
         path.closeSubpath()
         return path
     }
 }
 
-/// A rightward drag that starts within 24pt of the leading edge of the
-/// screen, on the page that holds this view. The recognizer sits on the
-/// window, so it sees touches over the conversation, a table that scrolls
-/// sideways or a chart; scroll views on the page wait for it to give up, and
-/// it gives up unless the drag starts at the edge and goes mostly right.
+/// What a horizontal drag does to the drawer right now.
+enum LedgerAgentDrawerPanMode: Equatable {
+    /// Nothing: the page is not a root page, or the drawer has no width yet.
+    case off
+    /// A drag to the right that starts anywhere on the page opens it.
+    case opens
+    /// A drag to the left that starts anywhere on the drawer or the page
+    /// beside it closes it.
+    case closes
+}
+
+/// The drawer's drag, as a UIKit pan on the window so it sees touches over
+/// the conversation, a table that scrolls sideways or a chart, and over the
+/// drawer's own list. It begins only for a drag that goes mostly sideways in
+/// the direction of `mode`; the page's and the drawer's scroll views and
+/// swipes wait for it to give up, which it does at once for any other drag.
 /// Anything presented over the page (a sheet, a menu) or pushed on top of it
-/// takes the touch out of its reach, and so does a drawer already open.
-private struct LedgerLeadingEdgePan: UIViewRepresentable {
-    var isEnabled: Bool
+/// takes the touch out of its reach.
+private struct LedgerAgentDrawerPan: UIViewRepresentable {
+    var mode: LedgerAgentDrawerPanMode
+    var began: () -> Void
     var changed: (CGFloat) -> Void
     var ended: (CGFloat, CGFloat) -> Void
 
-    func makeUIView(context: Context) -> LedgerLeadingEdgePanView { LedgerLeadingEdgePanView() }
+    func makeUIView(context: Context) -> LedgerAgentDrawerPanView { LedgerAgentDrawerPanView() }
 
-    func updateUIView(_ view: LedgerLeadingEdgePanView, context: Context) {
+    func updateUIView(_ view: LedgerAgentDrawerPanView, context: Context) {
+        view.began = began
         view.changed = changed
         view.ended = ended
-        view.setEnabled(isEnabled)
+        view.setMode(mode)
     }
 
-    static func dismantleUIView(_ view: LedgerLeadingEdgePanView, coordinator: ()) { view.detach() }
+    static func dismantleUIView(_ view: LedgerAgentDrawerPanView, coordinator: ()) { view.detach() }
 }
 
-final class LedgerLeadingEdgePanView: UIView {
+final class LedgerAgentDrawerPanView: UIView {
+    var began: (() -> Void)?
     var changed: ((CGFloat) -> Void)?
     var ended: ((CGFloat, CGFloat) -> Void)?
-    private let driver = LedgerLeadingEdgePanDriver()
+    private(set) var mode: LedgerAgentDrawerPanMode = .off
+    private let driver = LedgerAgentDrawerPanDriver()
     private lazy var pan: UIPanGestureRecognizer = {
-        let pan = UIPanGestureRecognizer(target: driver, action: #selector(LedgerLeadingEdgePanDriver.handle(_:)))
+        let pan = UIPanGestureRecognizer(target: driver, action: #selector(LedgerAgentDrawerPanDriver.handle(_:)))
         pan.delegate = driver
         pan.maximumNumberOfTouches = 1
+        pan.isEnabled = false
         return pan
     }()
     private weak var attachedWindow: UIWindow?
@@ -665,8 +751,12 @@ final class LedgerLeadingEdgePanView: UIView {
 
     required init?(coder: NSCoder) { nil }
 
-    func setEnabled(_ enabled: Bool) {
-        if pan.isEnabled != enabled { pan.isEnabled = enabled }
+    func setMode(_ mode: LedgerAgentDrawerPanMode) {
+        self.mode = mode
+        // A drag in progress keeps going when the drawer it opened becomes
+        // presented; only a new one reads the new mode.
+        let enabled = mode != .off
+        if pan.isEnabled != enabled && (enabled || pan.state == .possible) { pan.isEnabled = enabled }
     }
 
     override func didMoveToWindow() {
@@ -683,7 +773,7 @@ final class LedgerLeadingEdgePanView: UIView {
     }
 
     /// The view of the page this view is on: that of the nearest view
-    /// controller.
+    /// controller. The drawer is drawn in it too.
     var pageView: UIView? {
         var responder: UIResponder? = self
         while let next = responder {
@@ -695,8 +785,10 @@ final class LedgerLeadingEdgePanView: UIView {
 }
 
 @MainActor
-final class LedgerLeadingEdgePanDriver: NSObject, UIGestureRecognizerDelegate {
-    weak var view: LedgerLeadingEdgePanView?
+final class LedgerAgentDrawerPanDriver: NSObject, UIGestureRecognizerDelegate {
+    weak var view: LedgerAgentDrawerPanView?
+    /// A drag that starts this close to the leading edge opens the drawer
+    /// even over content that scrolls sideways.
     private static let edgeWidth: CGFloat = 24
     /// Where the finger came down, in the window. A pan's translation is
     /// still zero when it asks whether to begin, so the distance is measured
@@ -710,13 +802,17 @@ final class LedgerLeadingEdgePanDriver: NSObject, UIGestureRecognizerDelegate {
 
     @objc func handle(_ pan: UIPanGestureRecognizer) {
         guard let view, let window = view.window else { return }
+        let dx = pan.translation(in: window).x
         switch pan.state {
-        case .began, .changed:
-            view.changed?(pan.translation(in: window).x)
+        case .began:
+            view.began?()
+            view.changed?(dx)
+        case .changed:
+            view.changed?(dx)
         case .ended:
-            view.ended?(pan.translation(in: window).x, pan.velocity(in: window).x)
+            view.ended?(dx, pan.velocity(in: window).x)
         case .cancelled, .failed:
-            view.ended?(0, 0)
+            view.ended?(dx, 0)
         default:
             break
         }
@@ -724,7 +820,7 @@ final class LedgerLeadingEdgePanDriver: NSObject, UIGestureRecognizerDelegate {
 
     func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
         guard let pan = recognizer as? UIPanGestureRecognizer, let view, let window = view.window,
-              let page = view.pageView else { return false }
+              let page = view.pageView, view.mode != .off else { return false }
         let now = pan.location(in: window)
         let start = touchDown ?? now
         var moved = CGPoint(x: now.x - start.x, y: now.y - start.y)
@@ -732,17 +828,41 @@ final class LedgerLeadingEdgePanDriver: NSObject, UIGestureRecognizerDelegate {
             let speed = pan.velocity(in: window)
             moved = CGPoint(x: speed.x, y: speed.y)
         }
-        guard moved.x > 0, moved.x > abs(moved.y) else { return false }
-        guard start.x <= window.safeAreaInsets.left + Self.edgeWidth,
-              let hit = window.hitTest(start, with: nil) else { return false }
-        return hit.isDescendant(of: page)
+        // Mostly sideways: a slanted scroll of the conversation stays a scroll.
+        guard abs(moved.x) > abs(moved.y) * 1.2 else { return false }
+        guard view.mode == .opens ? moved.x > 0 : moved.x < 0 else { return false }
+        guard let hit = window.hitTest(start, with: nil), hit.isDescendant(of: page) else { return false }
+        if view.mode == .closes { return true }
+        if start.x <= window.safeAreaInsets.left + Self.edgeWidth { return true }
+        return !Self.claimsRightwardDrag(from: hit, upTo: page)
     }
 
+    /// Something under the finger that a drag to the right already means
+    /// something to: a slider or other control, or a scroll view that is
+    /// scrolled away from its leading end (a wide table, a code block).
+    private static func claimsRightwardDrag(from hit: UIView, upTo page: UIView) -> Bool {
+        var current: UIView? = hit
+        while let view = current, view !== page {
+            if view is UISlider || view is UISwitch || view is UIDatePicker { return true }
+            if let scroll = view as? UIScrollView {
+                let insets = scroll.adjustedContentInset
+                let scrollsSideways = scroll.contentSize.width + insets.left + insets.right > scroll.bounds.width + 1
+                if scrollsSideways && scroll.contentOffset.x > -insets.left + 1 { return true }
+            }
+            current = view.superview
+        }
+        return false
+    }
+
+    /// The page's and the drawer's own drags, scrolls and row swipes among
+    /// them, wait to see whether this one takes the touch. It decides on the
+    /// first movement, so they start as soon as it does not. Taps and long
+    /// presses do not wait: a still finger would hold them up.
     func gestureRecognizer(_ recognizer: UIGestureRecognizer,
                            shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
-        guard let scroll = other.view as? UIScrollView, other === scroll.panGestureRecognizer,
+        guard other is UIPanGestureRecognizer, let otherView = other.view,
               let page = view?.pageView else { return false }
-        return scroll.isDescendant(of: page)
+        return otherView.isDescendant(of: page)
     }
 }
 
