@@ -31,6 +31,15 @@ name: iOS release
 # Admin role is stored as the secrets ASC_KEY_ID, ASC_ISSUER_ID and
 # ASC_PRIVATE_KEY (the .p8 file's contents). The TestFlight build carries the
 # tag's version and build (v1.4.32 -> 1.4.32 (10432)).
+#
+# The runner's login keychain is locked whenever nobody is logged in at the
+# Mac, so the job signs from a keychain of its own instead
+# (.github/scripts/signing-keychain.sh). It imports the secrets
+# SIGNING_CERTIFICATE_P12 (base64 of a .p12 with the paid team's Apple
+# Development certificate and private key) and SIGNING_CERTIFICATE_PASSWORD.
+#
+# A failed upload is retried with "Re-run failed jobs" on the tag's run; that
+# reruns only this job and leaves the SideStore release alone.
 
 on:
   push:
@@ -97,6 +106,11 @@ jobs:
           # ios-release-version.sh compares every release tag.
           fetch-depth: 0
           persist-credentials: false
+      - name: Unlock a signing keychain for this job
+        env:
+          SIGNING_CERTIFICATE_P12: ${{ secrets.SIGNING_CERTIFICATE_P12 }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+        run: bash .github/scripts/signing-keychain.sh create
       - name: Archive with the paid team and upload
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -111,3 +125,6 @@ jobs:
           printf '%s\n' "$ASC_PRIVATE_KEY" > "$key_dir/AuthKey_${ASC_KEY_ID}.p8"
           export ASC_KEY_PATH="$key_dir/AuthKey_${ASC_KEY_ID}.p8"
           bash scripts/build-ios-team-signed.sh --testflight
+      - name: Remove the signing keychain
+        if: always()
+        run: bash .github/scripts/signing-keychain.sh delete

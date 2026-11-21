@@ -103,7 +103,13 @@ git push origin v<version>
   archives with the paid team (`LEDGER_TEAM_ID` in `project.yml`) and uploads
   the same version and build to App Store Connect for TestFlight (internal
   and external testing). It needs the secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and
-  `ASC_PRIVATE_KEY`.
+  `ASC_PRIVATE_KEY` (an Admin key), plus `SIGNING_CERTIFICATE_P12` and
+  `SIGNING_CERTIFICATE_PASSWORD`: the paid team's Apple Development certificate
+  with its private key, exported from Keychain Access as .p12 and stored as
+  `base64 -i cert.p12`. The job imports it into a keychain of its own, because
+  the runner user's login keychain is locked without a console login (codesign
+  then fails with `errSecInternalComponent`). A failed upload is retried with
+  "Re-run failed jobs" on the tag's run, without a new tag.
 
 Manual fallback: from a checkout of the tag, run
 `bash scripts/build-ios-ipa.sh --private-local <new-dir>` and then

@@ -159,6 +159,11 @@ class TeamSigningTests(unittest.TestCase):
         self.assertIn("github.repository == 'qiaoborui/beancount-ledger-web'", job)
         self.assertIn("build-ios-team-signed.sh --testflight", job)
         self.assertNotIn("write", job)
+        # The runner's login keychain is locked without a console login, so
+        # the job signs from its own keychain and always removes it.
+        create = job.index("signing-keychain.sh create")
+        self.assertLess(create, job.index("build-ios-team-signed.sh --testflight"))
+        self.assertIn("if: always()\n        run: bash .github/scripts/signing-keychain.sh delete", job)
 
 
 class ReleaseVersionTests(unittest.TestCase):
