@@ -103,7 +103,12 @@ git push origin v<version>
   archives with the paid team (`LEDGER_TEAM_ID` in `project.yml`) and uploads
   the same version and build to App Store Connect for TestFlight (internal
   and external testing). It needs the secrets `ASC_KEY_ID`, `ASC_ISSUER_ID` and
-  `ASC_PRIVATE_KEY`.
+  `ASC_PRIVATE_KEY` (an Admin key) and no certificate on the runner: the
+  archive is unsigned with ad-hoc entitlement signatures, and the export signs
+  it in the cloud. The runner user's login keychain is locked without a console
+  login, so anything that signs with a local identity fails there with
+  `errSecInternalComponent`. A failed upload is retried with "Re-run failed
+  jobs" on the tag's run, without a new tag.
 
 Manual fallback: from a checkout of the tag, run
 `bash scripts/build-ios-ipa.sh --private-local <new-dir>` and then

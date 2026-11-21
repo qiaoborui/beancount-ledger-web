@@ -25,11 +25,15 @@
 # and build exactly as for the SideStore package (scripts/ios-release-version.sh).
 # The archive is exported for App Store Connect and uploaded; it shows up in
 # TestFlight once Apple has processed it, usable by internal and external
-# testers (external groups still need Beta App Review). Signing and the upload authenticate
-# with an App Store Connect API key with the Admin role (an App Manager key
-# cannot use the cloud-managed distribution certificate, and the runner has no
-# local one), read from:
+# testers (external groups still need Beta App Review). No signing identity is
+# needed on the machine: the archive is built unsigned with ad-hoc signatures
+# that carry the entitlements, and the export signs it with the cloud-managed
+# distribution certificate. That and the upload authenticate with an App Store
+# Connect API key with the Admin role (an App Manager key cannot use cloud
+# signing), read from:
 #   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH (path to AuthKey_<id>.p8)
+# This keeps CI off the runner user's login keychain, which is locked without a
+# console login (codesign then fails with errSecInternalComponent).
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -145,27 +149,40 @@ build_settings=(
   "LEDGER_BUNDLE_ID=${bundle_id}"
   "LEDGER_APP_GROUP=${app_group}"
   "CURRENT_PROJECT_VERSION=${build_number}"
-  CODE_SIGN_STYLE=Automatic
 )
 if [[ -n "$marketing_version" ]]; then
   build_settings+=("MARKETING_VERSION=${marketing_version}")
 fi
-registration=(-allowProvisioningDeviceRegistration)
+icloud_container="$(sed -n 's/^ *LEDGER_ICLOUD_CONTAINER: *\([A-Za-z0-9.]*\) *$/\1/p' "${project_dir}/project.yml" | head -n 1)"
+
 if [[ "$testflight" == 1 ]]; then
-  registration=()
+  # No local signing identity: the archive is built unsigned and given
+  # certificate-free ad-hoc signatures that carry the entitlements; the export
+  # below re-signs it with the cloud-managed distribution certificate.
+  build_settings+=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
+  xcodebuild archive \
+    -project LedgerMobile.xcodeproj \
+    -scheme LedgerMobile \
+    -configuration Release \
+    -quiet \
+    -destination "$destination" \
+    -derivedDataPath "${work_dir}/DerivedData" \
+    -archivePath "$archive" \
+    "${build_settings[@]}"
+else
+  xcodebuild archive \
+    -project LedgerMobile.xcodeproj \
+    -scheme LedgerMobile \
+    -configuration Release \
+    -quiet \
+    -destination "$destination" \
+    -derivedDataPath "${work_dir}/DerivedData" \
+    -archivePath "$archive" \
+    -allowProvisioningUpdates \
+    -allowProvisioningDeviceRegistration \
+    "${build_settings[@]}" \
+    CODE_SIGN_STYLE=Automatic
 fi
-xcodebuild archive \
-  -project LedgerMobile.xcodeproj \
-  -scheme LedgerMobile \
-  -configuration Release \
-  -quiet \
-  -destination "$destination" \
-  -derivedDataPath "${work_dir}/DerivedData" \
-  -archivePath "$archive" \
-  -allowProvisioningUpdates \
-  ${registration[@]+"${registration[@]}"} \
-  ${auth_arguments[@]+"${auth_arguments[@]}"} \
-  "${build_settings[@]}"
 
 app="${archive}/Products/Applications/LedgerMobile.app"
 if [[ ! -d "$app" ]]; then
@@ -173,10 +190,61 @@ if [[ ! -d "$app" ]]; then
   exit 1
 fi
 
+if [[ "$testflight" == 1 ]]; then
+  shopt -s nullglob
+  for framework in "$app/Frameworks/"*.framework; do
+    codesign --force --sign - "$framework"
+  done
+  shopt -u nullglob
+  # The committed entitlements name values through build settings, which an
+  # unsigned archive never expands.
+  adhoc_sign() {
+    local bundle="$1" source_entitlements="$2" identifier="$3"
+    local entitlements="${work_dir}/$(basename "$bundle").entitlements"
+    python3 - "$source_entitlements" "$entitlements" "$team" "$identifier" "$app_group" "$icloud_container" <<'PY'
+import plistlib
+import sys
+
+source, target, team, identifier, group, container = sys.argv[1:]
+values = {
+    "$(LEDGER_APP_GROUP)": group,
+    "$(LEDGER_ICLOUD_CONTAINER)": container,
+    "$(AppIdentifierPrefix)": team + ".",
+    "$(TeamIdentifierPrefix)": team + ".",
+}
+
+def expand(value):
+    if isinstance(value, str):
+        for name, replacement in values.items():
+            value = value.replace(name, replacement)
+        if "$(" in value:
+            sys.exit(f"{source}: unexpanded build setting in {value}")
+        return value
+    if isinstance(value, list):
+        return [expand(item) for item in value]
+    return value
+
+with open(source, "rb") as handle:
+    entitlements = {key: expand(value) for key, value in plistlib.load(handle).items()}
+entitlements["application-identifier"] = f"{team}.{identifier}"
+entitlements["com.apple.developer.team-identifier"] = team
+entitlements["get-task-allow"] = False
+with open(target, "wb") as handle:
+    plistlib.dump(entitlements, handle)
+PY
+    codesign --force --sign - --entitlements "$entitlements" --generate-entitlement-der "$bundle"
+  }
+  adhoc_sign "$app/PlugIns/LedgerWidgets.appex" "${project_dir}/WidgetExtension/LedgerWidgets.entitlements" "${bundle_id}.widgets"
+  adhoc_sign "$app/PlugIns/LedgerShare.appex" "${project_dir}/ShareExtension/LedgerShare.entitlements" "${bundle_id}.share"
+  adhoc_sign "$app" "${project_dir}/Supporting/LedgerMobile.entitlements" "$bundle_id"
+  codesign --verify --deep --strict "$app"
+fi
+
 # Every bundle must carry the team's IDs, one version, and the App Group in both
-# the provisioning profile and the signature.
-icloud_container="$(sed -n 's/^ *LEDGER_ICLOUD_CONTAINER: *\([A-Za-z0-9.]*\) *$/\1/p' "${project_dir}/project.yml" | head -n 1)"
-python3 - "$app" "$bundle_id" "$app_group" "$build_number" "$marketing_version" "$icloud_container" <<'PY'
+# the provisioning profile and the signature. A TestFlight build is checked in
+# the exported IPA, signed by Apple, instead of in the unsigned archive.
+verify_signed_app() {
+  python3 - "$1" "$bundle_id" "$app_group" "$build_number" "$marketing_version" "$icloud_container" <<'PY'
 import pathlib
 import plistlib
 import subprocess
@@ -214,22 +282,32 @@ for bundle, identifier in expected.items():
         ["codesign", "-d", "--entitlements", "-", "--xml", str(bundle)],
         check=True, capture_output=True,
     ).stdout
-    if plistlib.loads(signed).get("com.apple.security.application-groups") != [group]:
+    signed_entitlements = plistlib.loads(signed)
+    if signed_entitlements.get("com.apple.security.application-groups") != [group]:
         sys.exit(f"{bundle.name}: signature does not carry exactly {group}")
+    if bundle == app and signed_entitlements.get("com.apple.developer.icloud-container-identifiers") != [container]:
+        sys.exit(f"{bundle.name}: signature does not carry iCloud container {container}")
 print(f"Signed {bundle_id} and both extensions with {group}.")
 PY
+}
 
-echo "Archive: $archive"
-[[ "$testflight" == 1 ]] || exit 0
+if [[ "$testflight" != 1 ]]; then
+  verify_signed_app "$app"
+  echo "Archive: $archive"
+  exit 0
+fi
 
-export_options="${work_dir}/ExportOptions.plist"
-python3 - "$export_options" "$team" <<'PY'
+# Signing and upload both use the Admin API key: Xcode creates the App Store
+# profiles and signs with the cloud-managed distribution certificate. The first
+# export writes the IPA so it can be checked before anything is uploaded.
+write_export_options() {
+  python3 - "$1" "$team" "$2" <<'PY'
 import plistlib
 import sys
 with open(sys.argv[1], "wb") as handle:
     plistlib.dump({
         "method": "app-store-connect",
-        "destination": "upload",
+        "destination": sys.argv[3],
         "teamID": sys.argv[2],
         "signingStyle": "automatic",
         "manageAppVersionAndBuildNumber": False,
@@ -237,10 +315,35 @@ with open(sys.argv[1], "wb") as handle:
         "testFlightInternalTestingOnly": False,
     }, handle)
 PY
+}
+write_export_options "${work_dir}/ExportLocal.plist" export
 xcodebuild -exportArchive \
   -archivePath "$archive" \
-  -exportOptionsPlist "$export_options" \
-  -exportPath "${work_dir}/export" \
+  -exportOptionsPlist "${work_dir}/ExportLocal.plist" \
+  -exportPath "${work_dir}/ipa" \
+  -allowProvisioningUpdates \
+  "${auth_arguments[@]}"
+ipa="$(find "${work_dir}/ipa" -maxdepth 1 -name '*.ipa' | head -n 1)"
+if [[ -z "$ipa" ]]; then
+  echo "Export wrote no IPA." >&2
+  exit 1
+fi
+mkdir "${work_dir}/unzipped"
+ditto -x -k "$ipa" "${work_dir}/unzipped"
+exported_app="${work_dir}/unzipped/Payload/LedgerMobile.app"
+verify_signed_app "$exported_app"
+authority="$(codesign -dvv "$exported_app" 2>&1 | sed -n 's/^Authority=//p' | head -n 1)"
+if [[ "$authority" != "Apple Distribution"* && "$authority" != "iPhone Distribution"* ]]; then
+  echo "Exported app is signed by '${authority}', not a distribution certificate." >&2
+  exit 1
+fi
+echo "Exported IPA signed by ${authority}."
+
+write_export_options "${work_dir}/ExportUpload.plist" upload
+xcodebuild -exportArchive \
+  -archivePath "$archive" \
+  -exportOptionsPlist "${work_dir}/ExportUpload.plist" \
+  -exportPath "${work_dir}/upload" \
   -allowProvisioningUpdates \
   "${auth_arguments[@]}"
 echo "Uploaded ${marketing_version} (${build_number}) to App Store Connect; it reaches TestFlight after Apple's processing."

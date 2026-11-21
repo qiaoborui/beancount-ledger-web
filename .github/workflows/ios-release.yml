@@ -31,6 +31,11 @@ name: iOS release
 # Admin role is stored as the secrets ASC_KEY_ID, ASC_ISSUER_ID and
 # ASC_PRIVATE_KEY (the .p8 file's contents). The TestFlight build carries the
 # tag's version and build (v1.4.32 -> 1.4.32 (10432)).
+#
+# The job needs no signing certificate on the runner: the archive is built
+# unsigned and the export is signed in the cloud with that API key (see
+# scripts/build-ios-team-signed.sh). A failed upload is retried with "Re-run
+# failed jobs" on the tag's run, which leaves the SideStore release alone.
 
 on:
   push:
