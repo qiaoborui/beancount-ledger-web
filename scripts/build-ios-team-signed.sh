@@ -30,6 +30,8 @@
 # cannot use the cloud-managed distribution certificate, and the runner has no
 # local one), read from:
 #   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH (path to AuthKey_<id>.p8)
+# The archive itself is signed with a local Apple Development identity. When
+# LEDGER_SIGNING_KEYCHAIN names a keychain, codesign uses only that one (CI).
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -149,6 +151,11 @@ build_settings=(
 )
 if [[ -n "$marketing_version" ]]; then
   build_settings+=("MARKETING_VERSION=${marketing_version}")
+fi
+# CI passes the job's own unlocked keychain (.github/scripts/signing-keychain.sh),
+# because the runner user's login keychain is locked without a console login.
+if [[ -n "${LEDGER_SIGNING_KEYCHAIN:-}" ]]; then
+  build_settings+=("OTHER_CODE_SIGN_FLAGS=--keychain ${LEDGER_SIGNING_KEYCHAIN}")
 fi
 registration=(-allowProvisioningDeviceRegistration)
 if [[ "$testflight" == 1 ]]; then
