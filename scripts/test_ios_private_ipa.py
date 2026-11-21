@@ -159,11 +159,17 @@ class TeamSigningTests(unittest.TestCase):
         self.assertIn("github.repository == 'qiaoborui/beancount-ledger-web'", job)
         self.assertIn("build-ios-team-signed.sh --testflight", job)
         self.assertNotIn("write", job)
-        # The runner's login keychain is locked without a console login, so
-        # the job signs from its own keychain and always removes it.
-        create = job.index("signing-keychain.sh create")
-        self.assertLess(create, job.index("build-ios-team-signed.sh --testflight"))
-        self.assertIn("if: always()\n        run: bash .github/scripts/signing-keychain.sh delete", job)
+
+    def test_testflight_archive_needs_no_local_identity(self):
+        """The runner's login keychain is locked, so only the export signs (in the cloud)."""
+        script = TEAM_SCRIPT.read_text()
+        testflight_archive = script[script.index('if [[ "$testflight" == 1 ]]; then\n  # No local signing identity'):]
+        testflight_archive = testflight_archive[:testflight_archive.index("\nelse\n")]
+        self.assertIn("CODE_SIGNING_ALLOWED=NO", script)
+        self.assertNotIn("allowProvisioning", testflight_archive)
+        self.assertNotIn("authenticationKey", testflight_archive)
+        self.assertEqual(script.count('-allowProvisioningUpdates \\\n  "${auth_arguments[@]}"'), 2)
+        self.assertIn('verify_signed_app "$exported_app"', script)
 
 
 class ReleaseVersionTests(unittest.TestCase):
