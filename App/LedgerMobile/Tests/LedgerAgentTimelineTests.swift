@@ -334,7 +334,7 @@ final class LedgerAgentTimelineTests: XCTestCase {
         let conversation = LedgerAgentConversation()
         let gate = Gate()
         var lengths: [Int] = []
-        let watch = conversation.$live.sink { lengths.append($0?.text.count ?? 0) }
+        let watch = conversation.liveFeed.$turn.sink { lengths.append($0?.text.count ?? 0) }
         defer { watch.cancel() }
         conversation.send("长回答", reporting: { _, _, _, report in
             // One burst, as a model's deltas often arrive.
