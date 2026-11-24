@@ -2,6 +2,7 @@
 import Charts
 import PhotosUI
 import SwiftUI
+import Observation
 import UniformTypeIdentifiers
 
 /// 账本助手 — a conversation over the local ledger. It opens as a chat, not a
@@ -133,6 +134,8 @@ private struct LedgerAgentChatScreen: View {
     /// before, given back when the edit is cancelled.
     @State private var editing: UUID?
     @State private var draftBeforeEdit = ""
+    /// The conversation being renamed from the bar's menu.
+    @State private var renaming: LedgerAgentRenameTarget?
     /// A regenerate, edit or switch waiting for the user's word.
     @State private var confirming: BranchConfirmation?
     /// Counts copies, for the haptic.
@@ -211,6 +214,7 @@ private struct LedgerAgentChatScreen: View {
                 })
             }
         }
+        .ledgerAgentRenameAlert($renaming)
         .onChange(of: historyPresented) { _, shown in if shown { composerFocused = false } }
         .fileImporter(isPresented: $choosingFiles, allowedContentTypes: LedgerAgentAttachments.pickerTypes,
                       allowsMultipleSelection: true) { result in
@@ -400,6 +404,63 @@ private struct LedgerAgentChatScreen: View {
         .accessibilityIdentifier(identifier)
     }
 
+    private var moreMenu: some View {
+        Menu {
+            if !conversationIsFresh {
+                // The conversation's name heads the menu, since the page has
+                // no title to show it.
+                Section(sessions.title(of: conversation)) {
+                    Button { retitle() } label: {
+                        Label(conversation.retitling ? "正在生成标题…" : "重新生成标题", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(conversation.retitling || conversation.isRunning || conversation.answerCount == 0
+                              || !settings.hasKey || session.privacyShielded)
+                    .accessibilityIdentifier("ledger-agent-retitle")
+                    Button {
+                        renaming = .init(id: conversation.id, shown: sessions.title(of: conversation))
+                    } label: {
+                        Label("重命名", systemImage: "pencil")
+                    }
+                    .accessibilityIdentifier("ledger-agent-rename")
+                }
+            }
+            Button { settingsPresented = true } label: { Label("助手设置", systemImage: "slider.horizontal.3") }
+                .accessibilityIdentifier("ledger-agent-settings")
+        } label: {
+            Image(systemName: "ellipsis").font(.system(size: 17, weight: .medium))
+                .foregroundStyle(BalancedPalette.ink)
+                .frame(width: 40, height: 40)
+                .background {
+                    if !LedgerGlass.isAvailable { Circle().fill(BalancedPalette.sunken) }
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+        }
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .accessibilityLabel("更多")
+        .accessibilityIdentifier("ledger-agent-more")
+    }
+
+    /// Asks the model for a new name for this conversation; one the user
+    /// typed gives way to it, since they asked for it.
+    private func retitle() {
+        guard settings.hasKey, !session.privacyShielded,
+              let repository = session.localRepository, let key = try? settings.apiKey() else { return }
+        let choice = settings.choice, id = conversation.id
+        Task {
+            let name = await conversation.retitle { history in
+                try await repository.agentSessionTitle(history: history, choice: choice, apiKey: key)
+            }
+            if name != nil {
+                if sessions.customTitle(of: id) != nil { sessions.rename(id, to: "") }
+                LedgerFeedback.success()
+            } else {
+                LedgerFeedback.error()
+            }
+        }
+    }
+
     private var historyButton: some View {
         circleButton("line.3.horizontal", label: "历史对话", identifier: "ledger-agent-history") {
             historyPresented = true
@@ -413,36 +474,22 @@ private struct LedgerAgentChatScreen: View {
         conversation.messages.isEmpty && !conversation.isRunning && conversation.pending == nil
     }
 
-    /// The first button follows the conversation, then settings, then the
-    /// close button when the assistant is a full-screen sheet. A fresh
-    /// conversation has nothing to leave behind, so its first button is the
-    /// app's own amount privacy (the same `toggleAmounts` as every other
-    /// page's eye, not a separate "do not keep this chat" mode); once there
-    /// is something on the page it becomes 新对话, one tap from the
-    /// conversation it replaces.
+    /// Two buttons at most, as FlowDown keeps its bar: 新对话 once there is
+    /// something on the page to leave, and a menu with what is done to this
+    /// conversation (a new name from the model, or one typed) and 助手设置.
+    /// The close button follows when the assistant is a full-screen sheet.
     private var actions: some View {
         HStack(spacing: 0) {
             // The bar's trailing cluster already supplies one glass capsule
             // for its controls, so these are plain buttons inside it.
-            if conversationIsFresh {
-                circleButton(session.amountsVisible ? "eye.slash" : "eye",
-                             label: session.amountsVisible ? "隐藏金额" : "显示金额",
-                             identifier: "ledger-agent-privacy", drawsGlass: false) {
-                    LedgerFeedback.selection()
-                    session.toggleAmounts()
-                }
-                .transition(.scale(scale: 0.6).combined(with: .opacity))
-            } else {
+            if !conversationIsFresh {
                 circleButton("square.and.pencil", label: "新对话", identifier: "ledger-agent-new",
                              drawsGlass: false) {
                     sessions.startNew()
                 }
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
-            circleButton("slider.horizontal.3", label: "助手设置", identifier: "ledger-agent-settings",
-                         drawsGlass: false) {
-                settingsPresented = true
-            }
+            moreMenu
             if let onClose {
                 circleButton("xmark", label: "关闭", identifier: "ledger-agent-close", drawsGlass: false,
                              action: onClose)
@@ -475,8 +522,12 @@ private struct LedgerAgentChatScreen: View {
     @State private var contentHeight: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
     /// The height the conversation rests in, so the empty state can sit in
-    /// the middle of the page rather than at its top.
-    @State private var emptyHeight: CGFloat = 0
+    /// the middle of the page rather than at its top. Kept in an observed
+    /// box only the empty state reads: it changes on every frame of the
+    /// keyboard coming up or going down, and as screen state it redrew the
+    /// whole page, every message of a long conversation included, each of
+    /// those frames, which is what made the keyboard stutter.
+    @State private var restingHeight = LedgerAgentRestingHeight()
     /// When the empty state last read the clock for its greeting.
     @State private var greetingNow = Date()
 
@@ -521,15 +572,11 @@ private struct LedgerAgentChatScreen: View {
                     switch conversation.phase {
                     case .idle: EmptyView()
                     case let .running(since):
-                        // The streamed turn once its first event is in; before
-                        // that (preparing, or a core that does not stream) the
-                        // step line with its elapsed and slow hints.
-                        if let live = conversation.live, !live.isEmpty || live.compacting {
-                            LedgerAgentLiveTimeline(turn: live, since: since, quietSince: conversation.stepSince ?? since,
-                                                    following: following)
-                        } else {
-                            LedgerAgentRunning(step: conversation.step, steps: conversation.stepCount,
-                                               since: since, stepSince: conversation.stepSince ?? since)
+                        LedgerAgentLiveSlot(feed: conversation.liveFeed, conversation: conversation,
+                                            step: conversation.step, since: since, following: following) {
+                            // The reply growing while it streams is followed
+                            // without an animation per redraw.
+                            if following, contentOverflows { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
                         }
                     case let .failed(error, question): failure(error, question: question)
                     }
@@ -555,7 +602,7 @@ private struct LedgerAgentChatScreen: View {
             .onGeometryChange(for: CGFloat.self) { geometry in
                 geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom
             } action: { height in
-                emptyHeight = height
+                restingHeight.value = height
                 if #available(iOS 18.0, *) { return }
                 viewportHeight = height
                 measureFit()
@@ -580,11 +627,6 @@ private struct LedgerAgentChatScreen: View {
                 // The question the user just sent is always shown.
                 follow(proxy, force: last == .user)
                 if last == .assistant, conversation.messages.last?.stopped == false { announceAnswer() }
-            }
-            // The reply growing while it streams is followed without an
-            // animation per redraw.
-            .onChange(of: conversation.live) { _, _ in
-                if following, contentOverflows { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
             // Opening a tool group or reasoning block is reading back: the
             // rows it shows stay where they were tapped.
@@ -638,6 +680,8 @@ private struct LedgerAgentChatScreen: View {
         let asksNow = message.id == conversation.messages.last?.id && !conversation.isRunning && !sessions.busyElsewhere
         let undoFailure = conversation.undoFailure?.message == message.id ? conversation.undoFailure?.text : nil
         return VStack(alignment: .leading, spacing: 6) {
+            // Equatable, so the page redrawing for a keystroke, the keyboard
+            // or the running turn leaves the answers above it alone.
             LedgerAgentAnswer(
                 message: message,
                 asksNow: asksNow,
@@ -652,6 +696,7 @@ private struct LedgerAgentChatScreen: View {
                 onAsk: { ask($0) },
                 onUndo: { undo(message) },
                 onUndoSettings: { conversation.undoAppSettings(message) })
+                .equatable()
             // No context menu over the answer: a long press there selects
             // its text, tool sources and errors, as everywhere else.
             answerActions(message)
@@ -997,7 +1042,7 @@ private struct LedgerAgentChatScreen: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: max(0, emptyHeight - 52), alignment: .center)
+        .modifier(LedgerAgentRestingFrame(height: restingHeight, less: 52))
         .padding(.vertical, 16)
     }
 
@@ -1887,7 +1932,40 @@ private struct LedgerAgentAttachmentChip: View {
 }
 
 /// A reply on the page, with the reads behind it folded above.
-private struct LedgerAgentAnswer: View {
+/// The running turn's place on the page: the streamed turn once its first
+/// event is in; before that (preparing, or a core that does not stream) the
+/// step line with its elapsed and slow hints. It alone watches the live feed,
+/// so a frame of streamed text redraws this and not the page around it.
+private struct LedgerAgentLiveSlot: View {
+    @ObservedObject var feed: LedgerAgentLiveFeed
+    let conversation: LedgerAgentConversation
+    let step: LedgerAgentStep?
+    let since: Date
+    var following = false
+    let onGrow: () -> Void
+
+    var body: some View {
+        let stepSince = conversation.stepSince ?? since
+        Group {
+            if let live = feed.turn, !live.isEmpty || live.compacting {
+                LedgerAgentLiveTimeline(turn: live, since: since, quietSince: stepSince, following: following)
+            } else {
+                LedgerAgentRunning(step: step, steps: conversation.stepCount, since: since, stepSince: stepSince)
+            }
+        }
+        .onChange(of: feed.turn) { _, _ in onGrow() }
+    }
+}
+
+private struct LedgerAgentAnswer: View, Equatable {
+    /// What the answer shows; the actions are the page's and do not change
+    /// what is drawn.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.message == rhs.message && lhs.asksNow == rhs.asksNow && lhs.undoing == rhs.undoing
+            && lhs.canUndo == rhs.canUndo && lhs.undoFailure == rhs.undoFailure
+            && lhs.undoingSettings == rhs.undoingSettings && lhs.canUndoSettings == rhs.canUndoSettings
+    }
+
     let message: LedgerAgentMessage
     /// The reply is the last message and nothing is running, so its choices
     /// can still be picked.
@@ -2199,7 +2277,11 @@ private struct LedgerAgentChangeCard: View {
 }
 
 /// One Markdown block of a reply.
-struct LedgerAgentReplyBlock: View {
+struct LedgerAgentReplyBlock: View, Equatable {
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.segment == rhs.segment && lhs.revealsNewText == rhs.revealsNewText
+    }
+
     let segment: LedgerAgentReplyText.Segment
     /// Text that arrives fades in, while the reply is still being written.
     var revealsNewText = false
@@ -2685,6 +2767,24 @@ private struct LedgerAgentCircleGlass: ViewModifier {
 /// at rest it is a capsule, and it keeps that corner when the second row or
 /// a multi-line draft makes it taller; a true capsule that tall would cut
 /// into the chip and the send circle in its corners.
+/// The page's resting height, observed only by the view that sizes itself
+/// to it.
+@MainActor @Observable
+final class LedgerAgentRestingHeight {
+    var value: CGFloat = 0
+}
+
+/// At least the page's resting height less `less`, content centred, read
+/// here so a change redraws only this.
+private struct LedgerAgentRestingFrame: ViewModifier {
+    let height: LedgerAgentRestingHeight
+    let less: CGFloat
+
+    func body(content: Content) -> some View {
+        content.frame(maxWidth: .infinity, minHeight: max(0, height.value - less), alignment: .center)
+    }
+}
+
 private struct LedgerAgentDock: ViewModifier {
     private static let shape = RoundedRectangle(cornerRadius: LedgerAgentChatScreen.dockHeight / 2, style: .continuous)
 

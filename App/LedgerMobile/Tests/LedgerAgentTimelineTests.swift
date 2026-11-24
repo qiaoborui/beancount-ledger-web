@@ -334,7 +334,7 @@ final class LedgerAgentTimelineTests: XCTestCase {
         let conversation = LedgerAgentConversation()
         let gate = Gate()
         var lengths: [Int] = []
-        let watch = conversation.$live.sink { lengths.append($0?.text.count ?? 0) }
+        let watch = conversation.liveFeed.$turn.sink { lengths.append($0?.text.count ?? 0) }
         defer { watch.cancel() }
         conversation.send("长回答", reporting: { _, _, _, report in
             // One burst, as a model's deltas often arrive.
@@ -583,6 +583,17 @@ final class LedgerAgentTimelineTests: XCTestCase {
         // The root closed but the fence not yet: no placeholder.
         let whole = head + "{\"type\":\"note\",\"text\":\"一\"}]}"
         XCTAssertEqual(LedgerAgentReplyText.segments(whole, ending: .streaming), [.prose("看："), .visual(first)])
+    }
+
+    func testAReplyIsParsedOnceForEachTextAndEnding() {
+        let text = "## 十月\n\n共 **812** 元。\(UUID().uuidString)"
+        let first = LedgerAgentReplyText.segments(text)
+        let count = LedgerAgentSegmentCache.shared.count
+        XCTAssertEqual(LedgerAgentReplyText.segments(text), first)
+        XCTAssertEqual(LedgerAgentSegmentCache.shared.count, count)
+        // The same text still being written is its own entry, kept apart.
+        _ = LedgerAgentReplyText.segments(text, ending: .streaming)
+        XCTAssertEqual(LedgerAgentSegmentCache.shared.count, count + 1)
     }
 
     func testStreamingTailClosesItsOpenInlineMarks() {
