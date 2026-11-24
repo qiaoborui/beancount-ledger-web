@@ -698,9 +698,15 @@ private struct LedgerAgentChatScreen: View {
             // page it was squeezed between the bar and the raised composer.
             .overlay {
                 if conversation.messages.isEmpty && !conversation.isRunning {
+                    // It stays where it is and fades while the keyboard is
+                    // up, rather than moving with the keyboard or lying
+                    // under the raised composer.
                     emptyState
                         .padding(.bottom, Self.emptyStateClearance)
                         .ignoresSafeArea(.keyboard)
+                        .opacity(composerFocused ? 0 : 1)
+                        .allowsHitTesting(!composerFocused)
+                        .animation(.easeOut(duration: 0.2), value: composerFocused)
                 }
             }
             // Bills and screenshots can also be dragged in from Photos, Files
