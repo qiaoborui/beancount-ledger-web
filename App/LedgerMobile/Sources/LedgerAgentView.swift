@@ -1,5 +1,6 @@
 #if os(iOS)
 import Charts
+import Combine
 import PhotosUI
 import SwiftUI
 import Observation
@@ -541,6 +542,9 @@ private struct LedgerAgentChatScreen: View {
     /// The conversation's UIKit list: its jump button and the scrolls the
     /// page asks of it (`LedgerAgentMessageList`).
     @StateObject private var listModel = LedgerAgentListModel()
+    /// Counts the conversation's changes, so the list's rows are worked out
+    /// again only after one, not for a keystroke or the keyboard.
+    @State private var conversationRevision = LedgerAgentRevision()
     /// When the empty state last read the clock for its greeting.
     @State private var greetingNow = Date()
 
@@ -667,15 +671,17 @@ private struct LedgerAgentChatScreen: View {
         // The safe area here is the bar above and the composer (with the
         // keyboard) below; the list runs under both and keeps its content
         // clear of them with insets.
-        GeometryReader { proxy in
-            LedgerAgentMessageList(rows: listRows, insets: proxy.safeAreaInsets,
-                                   running: conversation.isRunning, model: listModel) {
+        LedgerAgentListHost(
+            inputs: .init(revision: conversationRevision.value(of: conversation), editing: editing,
+                          canStart: canStartVersion, busyElsewhere: sessions.busyElsewhere,
+                          shares: session.amountsVisible, crash: crashReport),
+            running: conversation.isRunning, model: listModel, rows: { listRows },
+            onTap: {
                 // A touch on the conversation lets go of a row held open for
                 // the model menu.
                 if rowPinned { rowPinned = false }
-            }
-            .ignoresSafeArea()
-        }
+            })
+            .equatable()
         .onChange(of: conversation.messages.count) { _, _ in
             // Another version on screen: nothing was asked or answered,
             // and the user stays by the switch they tapped.
@@ -2542,6 +2548,57 @@ struct LedgerTouchFloor: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UIView, context: Context) {}
+}
+
+/// The conversation's list, worked out again only when what its rows show
+/// may have changed: the conversation, or the page state a row reads. The
+/// page redraws for every keystroke and focus change; the rows (each with
+/// its versions and undo state) are not built for those.
+private struct LedgerAgentListHost: View, Equatable {
+    struct Inputs: Equatable {
+        let revision: Int
+        let editing: UUID?
+        let canStart, busyElsewhere, shares: Bool
+        let crash: String?
+    }
+
+    let inputs: Inputs
+    let running: Bool
+    let model: LedgerAgentListModel
+    let rows: () -> [LedgerAgentListRow]
+    let onTap: () -> Void
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.inputs == rhs.inputs && lhs.running == rhs.running && lhs.model === rhs.model
+    }
+
+    var body: some View {
+        // Built here, not in the reader below: the keyboard and the composer
+        // change only the safe area, which reruns the reader alone.
+        let rows = rows()
+        GeometryReader { proxy in
+            LedgerAgentMessageList(rows: rows, insets: proxy.safeAreaInsets, running: running,
+                                   model: model, onTap: onTap)
+                .ignoresSafeArea()
+        }
+    }
+}
+
+/// Counts a conversation's changes as they are announced.
+@MainActor
+final class LedgerAgentRevision {
+    private var count = 0
+    private weak var watched: LedgerAgentConversation?
+    private var subscription: AnyCancellable?
+
+    func value(of conversation: LedgerAgentConversation) -> Int {
+        if watched !== conversation {
+            watched = conversation
+            count += 1
+            subscription = conversation.objectWillChange.sink { [weak self] _ in self?.count += 1 }
+        }
+        return count
+    }
 }
 
 /// Back to the end of the conversation, while the reader is away from it.

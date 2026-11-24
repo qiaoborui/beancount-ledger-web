@@ -124,7 +124,8 @@ struct LedgerAgentHistoryView: View {
                     query = ""
                 } else {
                     sessions.startNew()
-                    close()
+                    // As for a picked conversation: built first, then closed.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { close() }
                 }
             } label: {
                 Image(systemName: searching ? "xmark" : "square.and.pencil")
@@ -211,7 +212,10 @@ struct LedgerAgentHistoryView: View {
     private func entry(_ item: LedgerAgentSavedConversation) -> some View {
         Button {
             sessions.open(item.id)
-            close()
+            // The page builds the conversation first, while nothing moves,
+            // and the drawer closes over it after: building it during the
+            // slide dropped a tenth of a second of the close.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { close() }
         } label: { row(item) }
         .buttonStyle(.plain)
         .listRowInsets(EdgeInsets(top: 0, leading: 22, bottom: 0, trailing: 22))
