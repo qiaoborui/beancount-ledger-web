@@ -2656,7 +2656,7 @@ private struct LedgerAgentScrollTracking: ViewModifier {
                     let bottom = geometry.contentSize.height + geometry.contentInsets.bottom - Self.pageHeight(geometry)
                     return Position(offset: geometry.contentOffset.y, toBottom: bottom - geometry.contentOffset.y)
                 } action: { old, new in
-                    toBottom = new.toBottom
+                    if toBottom != new.toBottom { toBottom = new.toBottom }
                     // Moving up and away from the bottom by any means other
                     // than a drag (the status bar, VoiceOver, a pointer) is
                     // reading back too. The app's own scrolls only go down,

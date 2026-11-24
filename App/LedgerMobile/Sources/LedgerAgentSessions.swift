@@ -363,7 +363,7 @@ final class LedgerAgentSessions: ObservableObject {
         saved = []
         unsent = [:]
         loading = Task { [weak self] in
-            let records = await storage.load().compactMap { try? Self.decoder.decode(LedgerAgentSavedConversation.self, from: $0) }
+            let records = await Self.decodeOffMain(await storage.load())
             guard let self, self.ledgerID == id else { return }
             self.merge(records)
             let keep = Set(records.map(\.id) + [self.current.id, self.background?.id].compactMap { $0 })
@@ -377,7 +377,7 @@ final class LedgerAgentSessions: ObservableObject {
     func reloadSaved() {
         guard let id = ledgerID, let storage else { return }
         Task { [weak self] in
-            let records = await storage.load().compactMap { try? Self.decoder.decode(LedgerAgentSavedConversation.self, from: $0) }
+            let records = await Self.decodeOffMain(await storage.load())
             guard let self, self.ledgerID == id else { return }
             let live = Set([self.current.id, self.background?.id].compactMap { $0 })
             let kept = self.saved.filter { live.contains($0.id) }
@@ -614,6 +614,16 @@ final class LedgerAgentSessions: ObservableObject {
         encoder.dateEncodingStrategy = .iso8601
         return encoder
     }()
+
+    /// Decodes saved conversations away from the main thread: at launch
+    /// this was about 80 ms of the main thread's time.
+    nonisolated private static func decodeOffMain(_ blobs: [Data]) async -> [LedgerAgentSavedConversation] {
+        await Task.detached(priority: .userInitiated) {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return blobs.compactMap { try? decoder.decode(LedgerAgentSavedConversation.self, from: $0) }
+        }.value
+    }
 
     private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
