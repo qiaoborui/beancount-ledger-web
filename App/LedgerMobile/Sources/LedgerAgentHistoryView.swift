@@ -428,8 +428,21 @@ private final class LedgerAgentDrawerMotion {
     /// The open drag in progress has already tapped, on passing the point
     /// where letting go opens the drawer.
     var tickedThisDrag = false
+    /// The drag in progress went far enough to decide: the drawer is already
+    /// on its way, and the rest of that drag moves nothing.
+    var committed = false
 
-    static let spring = Spring(response: 0.38, dampingRatio: 0.9)
+    /// FlowDown's sidebar spring: half a second, damping 0.9.
+    static let spring = Spring(duration: 0.5, bounce: 0.1)
+    /// A drag this far opens or closes the drawer at once, as FlowDown's
+    /// sidebar does: the finger only has to say which way, and the spring
+    /// carries the drawer the rest of the way.
+    static let commitDistance: CGFloat = 100
+    /// How far the drawer starts left of its place, so it slides in a little
+    /// under the page rather than lying still.
+    static let parallax: CGFloat = 50
+    /// How much the page shrinks into a card at the drawer fully out.
+    static let cardShrink: CGFloat = 0.1
 
     func began(from: CGFloat, to: CGFloat, velocity: CGFloat) {
         self.from = from
@@ -528,6 +541,21 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
             content
                 .accessibilityHidden(isPresented)
                 .overlay { if isOut { cover } }
+                // Compact width: the page draws back into a floating card,
+                // as FlowDown's chat does beside its sidebar, with a shadow
+                // from a plain shape behind it so the page itself is never
+                // drawn offscreen.
+                .scaleEffect(pushes ? 1 - LedgerAgentDrawerMotion.cardShrink * progress : 1, anchor: .leading)
+                .background {
+                    if pushes && isOut {
+                        RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous)
+                            .fill(BalancedPalette.page)
+                            .shadow(color: .black.opacity(0.12 * progress), radius: 16, x: 0, y: 0)
+                            .scaleEffect(1 - LedgerAgentDrawerMotion.cardShrink * progress, anchor: .leading)
+                            .ignoresSafeArea()
+                            .allowsHitTesting(false)
+                    }
+                }
                 .background {
                     LedgerAgentDrawerPan(
                         mode: !(width > 0) ? .off : isPresented ? .closes : (edgeOpens ? .opens : .off),
@@ -574,9 +602,9 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                         .ignoresSafeArea()
                 }
             }
-            // Compact width: the drawer lies still under the page and the
-            // page is drawn aside to show it. Regular width: it slides in.
-            .offset(x: pushes ? 0 : reveal - width)
+            // Compact width: the drawer slides in a little under the page as
+            // the page is drawn aside. Regular width: it slides in whole.
+            .offset(x: pushes ? (progress - 1) * LedgerAgentDrawerMotion.parallax : reveal - width)
             // Under the opaque page it would only cost drawing.
             .opacity(isOut ? 1 : 0)
             .allowsHitTesting(isPresented)
@@ -621,10 +649,21 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
         motion.stop()
         motion.dragBase = base
         motion.tickedThisDrag = false
+        motion.committed = false
         withTransaction(Self.still) { reveal = base }
     }
 
     private func dragChanged(_ dx: CGFloat) {
+        guard !motion.committed else { return }
+        // Far enough to say which way: the spring takes it from here.
+        if !isPresented && dx > LedgerAgentDrawerMotion.commitDistance {
+            commit(open: true)
+            return
+        }
+        if isPresented && dx < -LedgerAgentDrawerMotion.commitDistance {
+            commit(open: false)
+            return
+        }
         let next = min(width, max(0, motion.dragBase + dx))
         reveal = next
         // Tap once on passing the point where letting go opens the drawer.
@@ -637,6 +676,10 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     /// Letting go: where the drawer would coast to at the finger's speed
     /// decides whether it opens, and the animation starts at that speed.
     private func dragEnded(_ dx: CGFloat, _ speed: CGFloat) {
+        guard !motion.committed else {
+            motion.committed = false
+            return
+        }
         let at = min(width, max(0, motion.dragBase + dx))
         let projected = at + speed * 0.18
         let open = projected > width * 0.5
@@ -647,6 +690,18 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
             motion.tickedThisDrag = false
             settle(speed: speed)
         }
+    }
+
+    /// Sends the drawer open or closed in the middle of a drag, from where
+    /// the finger has it, at the speed the spring gives a decided move.
+    private func commit(open: Bool) {
+        motion.committed = true
+        if open && !motion.tickedThisDrag {
+            motion.tickedThisDrag = true
+            openTicks += 1
+        }
+        motion.releaseSpeed = 0
+        isPresented = open
     }
 
     /// Brings the drawer to where `isPresented` says it is, carrying on at
