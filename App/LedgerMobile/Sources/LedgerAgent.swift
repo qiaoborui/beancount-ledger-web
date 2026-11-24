@@ -1440,6 +1440,8 @@ final class LedgerAgentConversation: ObservableObject {
     private var livePacer = LedgerAgentStreamPacer()
     /// Lets the pacer's next frame out while it holds anything.
     private var livePump: Task<Void, Never>?
+    /// When the page was last given new text, which it fades in.
+    private var liveTextAt: Date?
 
     /// A turn the user stopped whose native loop has not returned yet. It
     /// still brings back the authoritative partial reply and a transcript
@@ -1723,6 +1725,7 @@ final class LedgerAgentConversation: ObservableObject {
                 outcome = .success(.init(response: response, draft: draft, review: review,
                                          settingsChange: settingsChange, settingsFailure: settingsFailure))
             } catch { outcome = .failure(error) }
+            await self?.settleLive(started: started)
             self?.finish(outcome, question: question, questionID: questionID, started: started)
         }
     }
@@ -2220,14 +2223,36 @@ final class LedgerAgentConversation: ObservableObject {
         let events = livePacer.release(frames: frames)
         guard !events.isEmpty else { return }
         var shown = live ?? LedgerAgentLiveTurn()
-        for event in events { shown.apply(event) }
+        for event in events {
+            shown.apply(event)
+            switch event {
+            case .textDelta, .thinkingDelta: liveTextAt = Date()
+            default: break
+            }
+        }
         live = shown
+    }
+
+    /// Before a turn's answer takes the live reply's place: waits, briefly,
+    /// for the page to write out what the pacer still holds and fade its
+    /// last text in, so the answer replaces a reply already whole rather
+    /// than finishing it with a jump. Returns at once for a turn no longer
+    /// running (stopped or reset), which settles as it always has.
+    private func settleLive(started: Date) async {
+        let reveal = LedgerAgentStreamPacer.revealDuration
+        let deadline = Date().addingTimeInterval(LedgerAgentStreamPacer.drainWindow + reveal + 0.3)
+        while Date() < deadline, !Task.isCancelled, case let .running(since) = phase, since == started {
+            let revealed = liveTextAt.map { Date().timeIntervalSince($0) >= reveal } ?? true
+            if livePump == nil, revealed { return }
+            try? await Task.sleep(nanoseconds: 30_000_000)
+        }
     }
 
     private func clearLive() {
         livePump?.cancel()
         livePump = nil
         livePacer = LedgerAgentStreamPacer()
+        liveTextAt = nil
         liveDraft = nil
         live = nil
     }

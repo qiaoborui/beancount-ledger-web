@@ -79,7 +79,8 @@ struct LedgerAgentLiveTimeline: View {
             if !texts.isEmpty {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(texts, id: \.self) { index in
-                        LedgerAgentStreamingReply(text: turn.steps[index].text, streaming: index == turn.steps.indices.last)
+                        LedgerAgentStreamingReply(text: turn.steps[index].text, streaming: index == turn.steps.indices.last,
+                                                  reveals: true)
                             .transition(following ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .offset(y: 6)))
                     }
                 }
@@ -268,6 +269,77 @@ private struct LedgerAgentShimmer: ViewModifier {
     }
 }
 
+/// Fades a streaming block's new text in, a glyph at a time, as FlowDown's
+/// replies do (`LedgerAgentRevealStore` keeps when each glyph appeared).
+/// iOS 18 draws it through a `TextRenderer`; before that, under Reduce
+/// Motion, in UI test runs, or once the reply is saved, text simply shows.
+struct LedgerAgentRevealText: ViewModifier {
+    let text: String
+    let active: Bool
+    @State private var store = LedgerAgentRevealStore()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            if active && !reduceMotion && LedgerMotion.allowsAmbientMotion {
+                let now = Date.timeIntervalSinceReferenceDate
+                let _ = store.note(text, now: now)
+                // Ticks only while something may still be fading.
+                TimelineView(.animation(minimumInterval: 1.0 / 60, paused: store.isSettled(now: now))) { context in
+                    content.textRenderer(LedgerAgentRevealRenderer(store: store,
+                                                                   tick: context.date.timeIntervalSinceReferenceDate))
+                }
+            } else {
+                content
+            }
+        } else {
+            content
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct LedgerAgentRevealRenderer: TextRenderer {
+    let store: LedgerAgentRevealStore
+    /// The frame being drawn; a new one redraws the fade.
+    let tick: TimeInterval
+
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        var glyphs = 0
+        for line in layout {
+            for run in line { glyphs += run.count }
+        }
+        let now = Date.timeIntervalSinceReferenceDate
+        let appeared = store.appearances(glyphs: glyphs, now: now)
+        func opacity(_ index: Int) -> Double {
+            index < appeared.count ? LedgerAgentRevealStore.opacity(appeared: appeared[index], now: now) : 1
+        }
+        var index = 0
+        for line in layout {
+            for run in line {
+                // Times grow along the text: a run whose last glyph is whole
+                // is whole, and is drawn in one go.
+                if run.isEmpty || opacity(index + run.count - 1) >= 1 {
+                    context.draw(run)
+                    index += run.count
+                    continue
+                }
+                for glyph in run {
+                    let alpha = opacity(index)
+                    index += 1
+                    if alpha >= 1 {
+                        context.draw(glyph)
+                    } else if alpha > 0 {
+                        var faded = context
+                        faded.opacity = alpha
+                        faded.draw(glyph)
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// One reasoning block in an opened process line. Collapsed, it says how
 /// long the model thought, or that it still is; expanded, the whole text.
 struct LedgerAgentThinkingBlock: View {
@@ -438,11 +510,14 @@ struct LedgerAgentToolRow: View {
 struct LedgerAgentStreamingReply: View {
     let text: String
     var streaming = true
+    /// New text fades in (`LedgerAgentRevealText`): the live turn's text,
+    /// never a saved answer's.
+    var reveals = false
     var onAsk: (String) -> Void = { _ in }
 
     var body: some View {
         ForEach(Array(LedgerAgentReplyText.segments(text, ending: streaming ? .streaming : .finished).enumerated()), id: \.offset) { _, segment in
-            LedgerAgentReplyBlock(segment: segment, onAsk: onAsk)
+            LedgerAgentReplyBlock(segment: segment, revealsNewText: reveals, onAsk: onAsk)
         }
     }
 }

@@ -87,4 +87,47 @@ final class LedgerAgentStreamPacerTests: XCTestCase {
         while !pacer.isEmpty { pacer.release(frames: 3).forEach { paced.apply($0) } }
         XCTAssertEqual(paced, direct)
     }
+
+    // MARK: Reveal
+
+    func testNewGlyphsSweepInWithinTheFrameAndNeverDrift() {
+        let store = LedgerAgentRevealStore()
+        let first = store.appearances(glyphs: 3, now: 100)
+        XCTAssertEqual(first.count, 3)
+        XCTAssertEqual(first[0], 100)
+        XCTAssertEqual(first[2], 100.02, accuracy: 0.0001)
+        // The same glyphs keep their times.
+        XCTAssertEqual(store.appearances(glyphs: 3, now: 100.2), first)
+        // A frame later, a bigger batch spreads within the frame.
+        let next = store.appearances(glyphs: 13, now: 100.033)
+        XCTAssertEqual(next.count, 13)
+        XCTAssertEqual(next[3], 100.033, accuracy: 0.0001)
+        XCTAssertLessThanOrEqual(next[12], 100.033 + LedgerAgentRevealStore.frameSpread)
+        XCTAssertEqual(next, next.sorted())
+        // Text that shrank (a mark resolving) drops its last glyphs.
+        XCTAssertEqual(store.appearances(glyphs: 10, now: 100.05).count, 10)
+    }
+
+    func testABlockFirstSeenLongIsShownWhole() {
+        let store = LedgerAgentRevealStore()
+        let times = store.appearances(glyphs: LedgerAgentRevealStore.freshLimit + 1, now: 5)
+        XCTAssertTrue(times.allSatisfy { LedgerAgentRevealStore.opacity(appeared: $0, now: 5) == 1 })
+        // What comes after still fades in.
+        let more = store.appearances(glyphs: LedgerAgentRevealStore.freshLimit + 2, now: 6)
+        XCTAssertEqual(LedgerAgentRevealStore.opacity(appeared: more.last ?? 0, now: 6), 0)
+    }
+
+    func testOpacityRampsOverTheRevealAndSettles() {
+        let reveal = LedgerAgentStreamPacer.revealDuration
+        XCTAssertEqual(LedgerAgentRevealStore.opacity(appeared: 10, now: 9), 0)
+        XCTAssertEqual(LedgerAgentRevealStore.opacity(appeared: 10, now: 10 + reveal / 2), 0.5, accuracy: 0.0001)
+        XCTAssertEqual(LedgerAgentRevealStore.opacity(appeared: 10, now: 11), 1)
+
+        let store = LedgerAgentRevealStore()
+        XCTAssertTrue(store.isSettled(now: 0))
+        store.note("共", now: 1)
+        XCTAssertFalse(store.isSettled(now: 1.2))
+        store.note("共", now: 1.5)
+        XCTAssertTrue(store.isSettled(now: 1 + reveal + 0.2))
+    }
 }

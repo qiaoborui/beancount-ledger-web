@@ -2201,6 +2201,8 @@ private struct LedgerAgentChangeCard: View {
 /// One Markdown block of a reply.
 struct LedgerAgentReplyBlock: View {
     let segment: LedgerAgentReplyText.Segment
+    /// Text that arrives fades in, while the reply is still being written.
+    var revealsNewText = false
     var onAsk: (String) -> Void = { _ in }
     /// Counts copies of a code block, for the haptic.
     @State private var copies = 0
@@ -2215,6 +2217,7 @@ struct LedgerAgentReplyBlock: View {
                 .font(BalancedReading.font(.semibold, size: size, relativeTo: .headline))
                 .foregroundStyle(BalancedPalette.ink)
                 .textSelection(.enabled)
+                .modifier(LedgerAgentRevealText(text: text, active: revealsNewText))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 4)
                 .accessibilityAddTraits(.isHeader)
@@ -2305,6 +2308,7 @@ struct LedgerAgentReplyBlock: View {
         Text(Self.inline(text, serif: true)).font(BalancedReading.font()).foregroundStyle(color)
             .lineSpacing(BalancedReading.lineSpacing)
             .textSelection(.enabled)
+            .modifier(LedgerAgentRevealText(text: text, active: revealsNewText))
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 

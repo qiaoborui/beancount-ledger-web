@@ -110,3 +110,76 @@ struct LedgerAgentStreamPacer: Sendable {
         return (String(text[..<cut]), String(text[cut...]))
     }
 }
+
+extension LedgerAgentStreamPacer {
+    /// How long a streamed character takes to fade in on the page.
+    static let revealDuration: TimeInterval = 0.5
+}
+
+/// When each glyph of a block still being written appeared, so the page can
+/// fade new text in, as FlowDown does, rather than have it pop: a glyph is
+/// drawn at the share of `revealDuration` it has been on screen. A frame's
+/// new glyphs start a little apart, all within the frame, so they sweep in
+/// rather than land together, and the sweep never falls behind the stream.
+/// Times only grow along the text, so once a glyph is whole every glyph
+/// before it is too.
+///
+/// Drawing may happen off the main actor; the lock keeps the record whole.
+final class LedgerAgentRevealStore: @unchecked Sendable {
+    /// A block first drawn with more than this in it (reopened mid-reply, or
+    /// scrolled back to) shows what it has at once.
+    static let freshLimit = 40
+    /// Every glyph of a frame starts within this.
+    static let frameSpread: TimeInterval = 0.03
+    static let maximumStagger: TimeInterval = 0.02
+
+    private let lock = NSLock()
+    private var appeared: [TimeInterval] = []
+    private var drawn = false
+    private var text: String?
+    private var changedAt: TimeInterval = -.infinity
+
+    /// Takes the text the block shows now.
+    func note(_ text: String, now: TimeInterval) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard text != self.text else { return }
+        self.text = text
+        changedAt = now
+    }
+
+    /// Nothing has changed for long enough that every glyph is whole.
+    func isSettled(now: TimeInterval) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return now - changedAt > LedgerAgentStreamPacer.revealDuration + Self.frameSpread + 0.1
+    }
+
+    /// When each of `glyphs` glyphs appeared, the ones not seen before
+    /// appearing from `now`.
+    func appearances(glyphs: Int, now: TimeInterval) -> [TimeInterval] {
+        lock.lock()
+        defer { lock.unlock() }
+        if !drawn {
+            drawn = true
+            if glyphs > Self.freshLimit {
+                appeared = Array(repeating: -.infinity, count: glyphs)
+                return appeared
+            }
+        }
+        if glyphs < appeared.count {
+            appeared.removeLast(appeared.count - glyphs)
+        } else if glyphs > appeared.count {
+            let added = glyphs - appeared.count
+            let step = min(Self.maximumStagger, Self.frameSpread / Double(added))
+            let start = max(now, appeared.last ?? now)
+            for offset in 0..<added { appeared.append(start + Double(offset) * step) }
+        }
+        return appeared
+    }
+
+    /// How much of a glyph that appeared at `appeared` is drawn at `now`.
+    static func opacity(appeared: TimeInterval, now: TimeInterval) -> Double {
+        min(max((now - appeared) / LedgerAgentStreamPacer.revealDuration, 0), 1)
+    }
+}
