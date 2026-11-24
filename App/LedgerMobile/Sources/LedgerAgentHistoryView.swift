@@ -542,7 +542,7 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                 // painted in the drawer's ground, with the shadow on top.
                 .overlay {
                     if pushes && isOut {
-                        LedgerAgentCardFrame(radius: cardedPage ? Self.cardRadius : 0)
+                        LedgerAgentCardFrame(radius: cardedPage ? Self.cardRadius : 0, shadowed: cardedPage)
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                     }
@@ -761,11 +761,16 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
 /// to the outside of the card so it never darkens the page.
 private struct LedgerAgentCardFrame: UIViewRepresentable {
     var radius: CGFloat
+    /// FlowDown casts the card's shadow only while the card is drawn back;
+    /// on a page filling the screen it would draw lines along the safe
+    /// area's edges.
+    var shadowed: Bool
 
     func makeUIView(context: Context) -> FrameView { FrameView() }
 
     func updateUIView(_ view: FrameView, context: Context) {
         view.radius = radius
+        view.setShadowed(shadowed)
     }
 
     final class FrameView: UIView {
@@ -786,7 +791,7 @@ private struct LedgerAgentCardFrame: UIViewRepresentable {
             groundMask.fillRule = .evenOdd
             ground.mask = groundMask
             shadow.shadowColor = UIColor.black.cgColor
-            shadow.shadowOpacity = 0.1
+            shadow.shadowOpacity = 0
             shadow.shadowRadius = 8
             shadow.shadowOffset = .zero
             shadowMask.fillRule = .evenOdd
@@ -796,6 +801,18 @@ private struct LedgerAgentCardFrame: UIViewRepresentable {
         }
 
         required init?(coder: NSCoder) { nil }
+
+        func setShadowed(_ on: Bool) {
+            let opacity: Float = on ? 0.1 : 0
+            guard shadow.shadowOpacity != opacity else { return }
+            // Faded with the card's spring rather than switched.
+            let fade = CABasicAnimation(keyPath: "shadowOpacity")
+            fade.fromValue = shadow.presentation()?.shadowOpacity ?? shadow.shadowOpacity
+            fade.toValue = opacity
+            fade.duration = 0.3
+            shadow.add(fade, forKey: "fade")
+            shadow.shadowOpacity = opacity
+        }
 
         override func layoutSubviews() {
             super.layoutSubviews()
