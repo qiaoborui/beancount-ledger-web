@@ -140,6 +140,12 @@ private struct LedgerAgentChatScreen: View {
     @State private var confirming: BranchConfirmation?
     /// Counts copies, for the haptic.
     @State private var copies = 0
+    /// What has already run on this screen's first appearance. The screen
+    /// appears again each time a page pushed over it is swiped away, and
+    /// redoing the work then (a keychain read, the inbox and crash files, a
+    /// redraw of the whole conversation for the greeting's clock) ran on
+    /// the first frames of the swipe and made it stutter.
+    @State private var firstAppearance = LedgerAgentFirstAppearance()
 
     private struct BookkeepingPrefill: Identifiable {
         let id = UUID()
@@ -189,30 +195,19 @@ private struct LedgerAgentChatScreen: View {
         // after the chrome so the top bar and the dock move with the page.
         // A drag from the leading edge opens it on a root page; a pushed one
         // leaves that edge to the system's back swipe.
-        .ledgerAgentHistoryDrawer(isPresented: $historyPresented, edgeOpens: isRoot && settings.isReady,
+        .ledgerAgentHistoryDrawer(isPresented: $historyPresented,
+                                  // Not under a page pushed from the drawer:
+                                  // its back swipe is the system's alone.
+                                  edgeOpens: isRoot && settings.isReady && drawerRoute == nil,
                                   sharesText: session.amountsVisible,
                                   openSettings: { settingsPresented = true },
                                   openRoute: { drawerRoute = $0 })
         .navigationDestination(item: $drawerRoute) { route in
-            switch route {
-            case .terminal: LedgerLinuxTerminalScreen()
-            case .files: LedgerLinuxFilesView(path: "/root")
-            case .skills: LedgerAgentSkillsView()
-            case .memory: LedgerAgentMemoryView()
-            case .automations:
-                LedgerAutomationView(onOpen: { run, reloadingDraft in
-                    drawerRoute = nil
-                    Task { await LedgerAutomationCenter.shared.open(run, reloadingDraft: reloadingDraft) }
-                })
-            case .artifacts:
-                LedgerAgentArtifactsView(onRevise: { artifact in
-                    drawerRoute = nil
-                    revise(artifact)
-                }, onAsk: { question in
-                    drawerRoute = nil
-                    ask(question)
-                })
-            }
+            drawerPage(route)
+                // This page hides the system bar, so the pages pushed from
+                // its drawer draw the same glass bar rather than bringing
+                // the system one in and out under a back swipe.
+                .environment(\.ledgerBarlessPush, true)
         }
         .ledgerAgentRenameAlert($renaming)
         .onChange(of: historyPresented) { _, shown in if shown { composerFocused = false } }
@@ -254,7 +249,10 @@ private struct LedgerAgentChatScreen: View {
             conversation.isOnScreen = true
             LedgerAgentBackgroundRun.shared.conversationSeen()
             resumeIfInterrupted()
-            greetingNow = Date()
+            // Only past a minute: the greeting reads the hour, and a new
+            // value redraws the whole page.
+            let now = Date()
+            if now.timeIntervalSince(greetingNow) >= 60 { greetingNow = now }
         }
         .onDisappear { conversation.isOnScreen = false }
         // A turn the system cut short goes on by itself once the user is
@@ -278,6 +276,8 @@ private struct LedgerAgentChatScreen: View {
         // and an empty one offers fresh suggestions — unless they are hidden,
         // in which case fetching them would be a model call nobody reads.
         .task(id: conversation.id) {
+            guard firstAppearance.conversation != conversation.id else { return }
+            firstAppearance.conversation = conversation.id
             if conversation.restored { recapIfWanted() }
             if conversation.messages.isEmpty, settings.suggestions { refreshStarters() }
             // Answers that landed while another conversation was on screen
@@ -306,11 +306,17 @@ private struct LedgerAgentChatScreen: View {
             if case .failed(.interrupted, _) = phase { resumeIfInterrupted() }
         }
         .task {
+            guard !firstAppearance.readCrashReport else { return }
+            firstAppearance.readCrashReport = true
             guard crashReport == nil, let repository = session.localRepository else { return }
             crashReport = LedgerAgentCrashReport.take(
                 runtimeRoot: repository.workspace.rootDirectory.appendingPathComponent("runtime"))
         }
-        .task { refreshInbox() }
+        .task {
+            guard !firstAppearance.readInbox else { return }
+            firstAppearance.readInbox = true
+            refreshInbox()
+        }
         .onChange(of: sessions.queuedQuestion) { _, _ in sendQueuedQuestion() }
         .onAppear { sendQueuedQuestion() }
         .onChange(of: sessions.queuedShare) { _, _ in receiveSharedFiles() }
@@ -498,6 +504,29 @@ private struct LedgerAgentChatScreen: View {
         .animation(.easeInOut(duration: 0.2), value: conversationIsFresh)
     }
 
+    /// A place picked in the drawer, on this page's stack.
+    @ViewBuilder private func drawerPage(_ route: LedgerAgentDrawerRoute) -> some View {
+        switch route {
+        case .terminal: LedgerLinuxTerminalScreen()
+        case .files: LedgerLinuxFilesView(path: "/root")
+        case .skills: LedgerAgentSkillsView()
+        case .memory: LedgerAgentMemoryView()
+        case .automations:
+            LedgerAutomationView(onOpen: { run, reloadingDraft in
+                drawerRoute = nil
+                Task { await LedgerAutomationCenter.shared.open(run, reloadingDraft: reloadingDraft) }
+            })
+        case .artifacts:
+            LedgerAgentArtifactsView(onRevise: { artifact in
+                drawerRoute = nil
+                revise(artifact)
+            }, onAsk: { question in
+                drawerRoute = nil
+                ask(question)
+            })
+        }
+    }
+
     // MARK: Conversation
 
     /// The 1-pt anchor under the last message is on screen; the jump button
@@ -582,13 +611,20 @@ private struct LedgerAgentChatScreen: View {
                     }
                     Color.clear.frame(height: 1).id(Self.bottomID)
                         .onAppear {
-                            isAtBottom = true
+                            // Each write redraws the page; the anchor comes
+                            // back on screen too when a pushed page is
+                            // swiped away, with nothing changed.
+                            if !isAtBottom { isAtBottom = true }
                             // Reached without the reader moving the page (it
                             // opened here, or content shrank onto it); a
                             // scroll they are making decides when it ends.
-                            if !readerScrolling { following = true }
+                            if !readerScrolling, !following { following = true }
                         }
-                        .onDisappear { isAtBottom = false }
+                        .onDisappear {
+                            // A page pushed over this one hides the anchor
+                            // without the conversation moving.
+                            if drawerRoute == nil, isAtBottom { isAtBottom = false }
+                        }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
@@ -633,7 +669,7 @@ private struct LedgerAgentChatScreen: View {
             .environment(\.ledgerAgentFollowPause, LedgerAgentFollowPause { following = false })
             .onAppear {
                 // A conversation still answering opens on its reply.
-                guard conversation.isRunning else { return }
+                guard conversation.isRunning, !following else { return }
                 following = true
                 // Once, before the page has measured whether it overflows; a
                 // single scroll does not bounce the way one per update did.
@@ -945,9 +981,16 @@ private struct LedgerAgentChatScreen: View {
 
     private func jumpToBottom(_ proxy: ScrollViewProxy) -> some View {
         Button {
+            let flinging = readerScrolling
             following = true
             readerScrolling = false
-            scrollToBottom(proxy)
+            if flinging {
+                // The page is still coasting: a jump without an animation
+                // stops it where an animated one would be fought by it.
+                proxy.scrollTo(Self.bottomID, anchor: .bottom)
+            } else {
+                scrollToBottom(proxy)
+            }
         } label: {
             Image(systemName: "arrow.down").font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(BalancedPalette.ink)
@@ -963,6 +1006,10 @@ private struct LedgerAgentChatScreen: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        // A view of its own under the button, so a touch there is not
+        // taken by the scroll view: while the page coasts, the scroll view
+        // caught the tap to stop itself and the button never saw it.
+        .background(LedgerTouchFloor().frame(width: 44, height: 44))
         .accessibilityLabel("回到底部")
         .accessibilityIdentifier("ledger-agent-jump-bottom")
     }
@@ -2484,6 +2531,41 @@ private struct LedgerAgentRunning: View {
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("ledger-agent-running")
     }
+}
+
+/// Whether the app opens on 账本助手.
+enum LedgerAgentLaunch {
+    static let storageKey = "ledger.agent.opensAtLaunch"
+
+    /// A UI test or preview fixture launch, which expects the tabs.
+    static var isFixture: Bool {
+        ProcessInfo.processInfo.arguments.contains {
+            $0.hasPrefix("--safe-") || $0.hasPrefix("--local-") || $0.hasPrefix("--initial-tab=")
+        }
+    }
+}
+
+/// What a chat screen has done on its first appearance, kept in a box so
+/// marking it never redraws the screen.
+@MainActor
+final class LedgerAgentFirstAppearance {
+    var conversation: UUID?
+    var readCrashReport = false
+    var readInbox = false
+}
+
+/// A plain view that takes touches, under a control floating over a scroll
+/// view. Without one the nearest UIKit view under the finger is the scroll
+/// view, which keeps a touch for itself while it is moving.
+struct LedgerTouchFloor: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = true
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
 }
 
 /// Turns following off when the reader scrolls up and back on when they

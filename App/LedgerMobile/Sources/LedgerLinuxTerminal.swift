@@ -230,17 +230,19 @@ struct LedgerLinuxTerminalScreen: View {
                     .padding()
                 }
             }
-            .navigationTitle("终端")
-            .navigationBarTitleDisplayMode(.inline)
             // The terminal is dark in either mode, so its bar is too; a
             // light-mode title would be black on black.
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("重新开始", systemImage: "arrow.counterclockwise") { restart() }
-                        .accessibilityIdentifier("ledger-linux-terminal-restart")
+            .ledgerSubpageChrome(String(localized: "终端"), dark: true, actions: AnyView(
+                Button { restart() } label: {
+                    Image(systemName: "arrow.counterclockwise").font(.system(size: 17))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-            }
+                .buttonStyle(.plain)
+                .foregroundStyle(BalancedPalette.ink)
+                .accessibilityLabel("重新开始")
+                .accessibilityIdentifier("ledger-linux-terminal-restart")
+            ))
     }
 
     private func restart() {

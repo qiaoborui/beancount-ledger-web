@@ -171,7 +171,9 @@ struct LedgerAgentHistoryView: View {
     /// A place: its symbol and name, set like a conversation row.
     private func place(_ route: LedgerAgentDrawerRoute) -> some View {
         Button {
-            close()
+            // Pushed over the open drawer, which closes out of sight once
+            // the page covers it (`onDisappear` below): closing it while the
+            // page came in ran two slides at once.
             actions.openRoute(route)
         } label: {
             HStack(spacing: 12) {
@@ -430,6 +432,9 @@ private final class LedgerAgentDrawerMotion {
     /// The drag in progress went far enough to decide: the drawer is already
     /// on its way, and the rest of that drag moves nothing.
     var committed = false
+    /// The next settle jumps to its place without animating: the drawer
+    /// is out of sight under a pushed page.
+    var instant = false
 
     /// FlowDown's sidebar spring: half a second, damping 0.9.
     static let spring = Spring(duration: 0.5, bounce: 0.1)
@@ -542,14 +547,19 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                 .accessibilityHidden(isPresented)
                 .overlay { if isOut { cover } }
                 // Compact width: the page slides aside as one card with
-                // rounded corners and FlowDown's light shadow, drawn by a
-                // plain shape behind it. It keeps its size: shrinking it
-                // moved the logo and greeting up and down under the finger.
-                .background {
+                // rounded corners and a light edge along its leading side.
+                // It keeps its size: shrinking it moved the logo and greeting
+                // up and down under the finger. The edge is a fixed gradient,
+                // not a shadow: a blurred shadow behind a screen-sized shape,
+                // its strength changing with the drag, was drawn offscreen on
+                // every frame and made the slide stutter again.
+                .background(alignment: .leading) {
                     if pushes && isOut {
-                        RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous)
-                            .fill(BalancedPalette.page)
-                            .shadow(color: .black.opacity(0.1 * progress), radius: 8, x: 0, y: 0)
+                        LinearGradient(colors: [.black.opacity(0), .black.opacity(0.07)],
+                                       startPoint: .leading, endPoint: .trailing)
+                            .frame(width: 10)
+                            .padding(.vertical, Self.cardRadius)
+                            .offset(x: -10)
                             .ignoresSafeArea()
                             .allowsHitTesting(false)
                     }
@@ -579,6 +589,13 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
             actions.openSettings = openSettings
             actions.openRoute = openRoute
             if isPresented { settle(speed: 0) }
+        }
+        // A page pushed from the drawer now covers it: it closes where it
+        // cannot be seen, so a swipe back lands on the conversation.
+        .onDisappear {
+            guard isPresented else { return }
+            motion.instant = true
+            isPresented = false
         }
     }
 
@@ -709,6 +726,18 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
         let target = isPresented ? width : 0
         let from = motion.presented() ?? reveal
         if isPresented || from > 0.5 { withTransaction(Self.still) { drawn = true } }
+        if motion.instant {
+            motion.instant = false
+            motion.stop()
+            withTransaction(Self.still) {
+                reveal = target
+                if !isPresented {
+                    drawn = false
+                    closings += 1
+                }
+            }
+            return
+        }
         let distance = target - from
         let animation: Animation
         if reduceMotion {

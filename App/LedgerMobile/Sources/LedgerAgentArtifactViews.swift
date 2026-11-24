@@ -333,9 +333,8 @@ struct LedgerAgentArtifactsView: View {
                 .accessibilityIdentifier("ledger-agent-artifact-row")
             }
         }
-        .navigationTitle("产物")
         .terminalNativeChrome()
-        .navigationBarTitleDisplayMode(.inline)
+        .ledgerSubpageChrome(String(localized: "产物"))
         .privacySensitive()
         .task(id: shelf.revision) { await load() }
         .fullScreenCover(item: $opened) { item in

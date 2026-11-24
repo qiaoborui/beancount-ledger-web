@@ -53,9 +53,8 @@ struct LedgerAgentSkillsView: View {
             }
         }
         .font(.subheadline)
-        .navigationTitle("技能")
         .terminalNativeChrome()
-        .navigationBarTitleDisplayMode(.inline)
+        .ledgerSubpageChrome(String(localized: "技能"))
         .privacySensitive()
         .task { await load() }
         .sheet(item: $reading) { skill in

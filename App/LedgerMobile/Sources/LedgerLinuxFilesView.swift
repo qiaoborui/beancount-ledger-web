@@ -23,6 +23,8 @@ struct LedgerLinuxFilesView: View {
     @State private var naming = false
     @State private var newName = ""
     @State private var deleting: Entry?
+    /// Handed on to the folders pushed from here, so they keep this page's bar.
+    @Environment(\.ledgerBarlessPush) private var barless
 
     struct Entry: Identifiable, Hashable {
         enum Kind { case folder, file, link(String), other }
@@ -70,22 +72,22 @@ struct LedgerLinuxFilesView: View {
             }
         }
         .font(.subheadline)
-        .navigationTitle(path == "/" ? "/" : (path as NSString).lastPathComponent)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("导入文件", systemImage: "square.and.arrow.down") { importing = true }
-                    Button("新建文件夹", systemImage: "folder.badge.plus") {
-                        newName = ""
-                        naming = true
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+        .ledgerSubpageChrome(path == "/" ? "/" : (path as NSString).lastPathComponent, actions: AnyView(
+            Menu {
+                Button("导入文件", systemImage: "square.and.arrow.down") { importing = true }
+                Button("新建文件夹", systemImage: "folder.badge.plus") {
+                    newName = ""
+                    naming = true
                 }
-                .accessibilityIdentifier("ledger-linux-files-menu")
+            } label: {
+                Image(systemName: "ellipsis").font(.system(size: 18))
+                    .foregroundStyle(BalancedPalette.ink)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
-        }
+            .accessibilityLabel("更多")
+            .accessibilityIdentifier("ledger-linux-files-menu")
+        ))
         .quickLookPreview($preview)
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             switch result {
@@ -117,6 +119,7 @@ struct LedgerLinuxFilesView: View {
         case .folder:
             NavigationLink {
                 LedgerLinuxFilesView(path: child(entry.name))
+                    .environment(\.ledgerBarlessPush, barless)
             } label: {
                 Label(entry.name, systemImage: "folder")
             }
