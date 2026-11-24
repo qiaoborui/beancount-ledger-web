@@ -70,11 +70,16 @@ struct LedgerAgentLiveTimeline: View {
                     Group {
                         switch block {
                         case let .round(indices):
+                            // Equatable, like the text below: a frame of the
+                            // stream redraws the block being written, not the
+                            // rounds and text it already finished.
                             LedgerAgentRoundView(steps: turn.steps, indices: indices, running: turn.running,
                                                  isActive: block.id == blocks.last?.id, reveals: true)
+                                .equatable()
                         case let .text(index):
                             LedgerAgentStreamingReply(text: turn.steps[index].text,
                                                       streaming: index == turn.steps.indices.last, reveals: true)
+                                .equatable()
                         }
                     }
                     // Only the new block's opacity animates; nothing moves,
@@ -128,7 +133,18 @@ struct LedgerAgentLiveTimeline: View {
 /// One round of an answer: its title, then each thought in full and each
 /// call on its line. How much is open follows 助手设置 › 显示; tapping the
 /// title flips it for this round.
-struct LedgerAgentRoundView: View {
+struct LedgerAgentRoundView: View, Equatable {
+    /// What the round draws: its own steps, which of them run, and whether
+    /// the turn is at work on it. The rest of the turn's steps do not count.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.indices == rhs.indices && lhs.isActive == rhs.isActive && lhs.reveals == rhs.reveals
+            && lhs.indices.allSatisfy { index in
+                lhs.steps.indices.contains(index) && rhs.steps.indices.contains(index)
+                    && lhs.steps[index] == rhs.steps[index]
+                    && lhs.running.contains(index) == rhs.running.contains(index)
+            }
+    }
+
     let steps: [LedgerAgentStepRecord]
     let indices: [Int]
     /// Calls still running, by step index.
@@ -463,7 +479,11 @@ struct LedgerAgentToolRow: View {
 /// Reply text through the same Markdown blocks as a finished answer. While
 /// it streams, a chart or visual still being written draws what it can and a
 /// placeholder for the rest.
-struct LedgerAgentStreamingReply: View {
+struct LedgerAgentStreamingReply: View, Equatable {
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.text == rhs.text && lhs.streaming == rhs.streaming && lhs.reveals == rhs.reveals
+    }
+
     let text: String
     var streaming = true
     /// New text fades in (`LedgerAgentRevealText`): the live turn's text,
@@ -473,7 +493,10 @@ struct LedgerAgentStreamingReply: View {
 
     var body: some View {
         ForEach(Array(LedgerAgentReplyText.segments(text, ending: streaming ? .streaming : .finished).enumerated()), id: \.offset) { _, segment in
+            // A paragraph already written is left alone while the next one
+            // streams in.
             LedgerAgentReplyBlock(segment: segment, revealsNewText: reveals, onAsk: onAsk)
+                .equatable()
         }
     }
 }

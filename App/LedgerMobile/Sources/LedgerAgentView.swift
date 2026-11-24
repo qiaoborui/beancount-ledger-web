@@ -2231,7 +2231,11 @@ private struct LedgerAgentChangeCard: View {
 }
 
 /// One Markdown block of a reply.
-struct LedgerAgentReplyBlock: View {
+struct LedgerAgentReplyBlock: View, Equatable {
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.segment == rhs.segment && lhs.revealsNewText == rhs.revealsNewText
+    }
+
     let segment: LedgerAgentReplyText.Segment
     /// Text that arrives fades in, while the reply is still being written.
     var revealsNewText = false
