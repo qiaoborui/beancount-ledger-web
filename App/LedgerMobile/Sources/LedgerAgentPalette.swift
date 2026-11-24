@@ -25,6 +25,16 @@ enum LedgerAgentPalette {
     static let ruleStrong = Color(uiColor: .opaqueSeparator)
     static let edge = Color(uiColor: .systemGray3)
 
+    /// The drawer's ground, from the page colour at the top to this at the
+    /// bottom: FlowDown's sidebar lies on a soft wash of colour (its blurred
+    /// background texture) rather than on the page.
+    static let groundTopUI = dynamic(light: 0xFFFFFF, dark: 0x242424)
+    static let groundBottomUI = dynamic(light: 0xD6EEF5, dark: 0x1B2A30)
+    static var ground: LinearGradient {
+        LinearGradient(colors: [Color(uiColor: groundTopUI), Color(uiColor: groundBottomUI)],
+                       startPoint: .top, endPoint: .bottom)
+    }
+
     /// FlowDown's `AccentColor`.
     static let accent = Color(uiColor: UIColor(red: 65 / 255, green: 190 / 255, blue: 171 / 255, alpha: 1))
     /// The user's bubble: FlowDown's accent at 10% to 15%, top to bottom.

@@ -61,18 +61,14 @@ struct LedgerAgentHistoryView: View {
                 if !sessions.saved.isEmpty {
                     note("对话跟着账本存在本机，不进 Git 同步、备份或导出。置顶的对话不会因为数量太多被自动清理。")
                 }
-                // Room for the last line to clear the footer's fade.
-                Color.clear.frame(height: 28)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .accessibilityHidden(true)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .scrollDismissesKeyboard(.immediately)
             .accessibilityIdentifier("ledger-agent-history-list")
-            .safeAreaInset(edge: .bottom, spacing: 0) { footer }
+            // FlowDown's list ends above its footer instead of running
+            // under it.
+            footer
         }
         .privacySensitive()
         // New runs of the scheduled tasks join the history below.
@@ -222,10 +218,11 @@ struct LedgerAgentHistoryView: View {
         .listRowSeparator(.hidden)
         // The conversation on screen sits on a sunken block, inset 14pt
         // from the drawer's edges like Claude's selected row.
+        // FlowDown's selected row: a rounded pill tinted with its accent.
         .listRowBackground(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(item.id == sessions.current.id ? LedgerAgentHistoryDrawer.selectedFill : Color.clear)
-                .padding(.horizontal, 14)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(item.id == sessions.current.id ? LedgerAgentPalette.accent.opacity(0.12) : Color.clear)
+                .padding(.horizontal, 12)
                 .padding(.vertical, 1)
         )
         .accessibilityAddTraits(item.id == sessions.current.id ? .isSelected : [])
@@ -332,15 +329,6 @@ struct LedgerAgentHistoryView: View {
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 4)
-        .background {
-            LinearGradient(stops: [.init(color: LedgerAgentHistoryDrawer.fill.opacity(0), location: 0),
-                                   .init(color: LedgerAgentHistoryDrawer.fill.opacity(0.9), location: 0.4),
-                                   .init(color: LedgerAgentHistoryDrawer.fill, location: 1)],
-                           startPoint: .top, endPoint: .bottom)
-                .padding(.top, -24)
-                .ignoresSafeArea(edges: .bottom)
-                .allowsHitTesting(false)
-        }
     }
 }
 
@@ -553,10 +541,16 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                 .safeAreaPadding(.bottom, cardedPage ? 0 : screenInsets.bottom)
                 .padding(.top, cardedPage ? screenInsets.top + Self.cardInset : 0)
                 .padding(.bottom, cardedPage ? screenInsets.bottom + Self.cardInset : 0)
-                .clipShape(RoundedRectangle(cornerRadius: cardedPage ? Self.cardRadius : 0, style: .continuous))
-                .background {
+                // The card's outline is drawn over the page rather than cut
+                // out of it: a clip left the page's scroll view, a UIKit
+                // view, with square corners and its edge effect showing
+                // above the card. Everything outside the rounded card is
+                // painted in the drawer's ground, with the shadow on top.
+                .overlay {
                     if pushes && isOut {
-                        LedgerAgentCardShadow(radius: cardedPage ? Self.cardRadius : 0)
+                        LedgerAgentCardFrame(radius: Self.cardRadius)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                 }
                 .overlay { if isOut { cover } }
@@ -613,7 +607,7 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                     // As wide as the screen and then some: the page's rounded
                     // corners and a spring's last point past the open
                     // position show this ground, never what lies behind it.
-                    Rectangle().fill(Self.fill)
+                    Rectangle().fill(LedgerAgentPalette.ground)
                         .frame(width: max(pageWidth, width) + 60)
                         .ignoresSafeArea()
                 } else {
@@ -776,32 +770,85 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     }
 }
 
-/// FlowDown's card shadow: black at 10%, 8pt, on a path, so it is drawn
-/// from the shape rather than by rendering the page offscreen.
-private struct LedgerAgentCardShadow: UIViewRepresentable {
+/// What lies outside FlowDown's chat card while the drawer is out: the
+/// drawer's ground, everywhere beyond the card's rounded outline, and the
+/// card's shadow (black at 10%, 8pt) over it, cast from a path and masked
+/// to the outside of the card so it never darkens the page.
+private struct LedgerAgentCardFrame: UIViewRepresentable {
     var radius: CGFloat
 
-    func makeUIView(context: Context) -> ShadowView {
-        let view = ShadowView()
-        view.isUserInteractionEnabled = false
-        view.backgroundColor = .clear
-        view.layer.shadowColor = UIColor.black.cgColor
-        view.layer.shadowOpacity = 0.1
-        view.layer.shadowRadius = 8
-        view.layer.shadowOffset = .zero
-        return view
-    }
+    func makeUIView(context: Context) -> FrameView { FrameView() }
 
-    func updateUIView(_ view: ShadowView, context: Context) {
+    func updateUIView(_ view: FrameView, context: Context) {
         view.radius = radius
     }
 
-    final class ShadowView: UIView {
+    final class FrameView: UIView {
         var radius: CGFloat = 0 { didSet { if radius != oldValue { setNeedsLayout() } } }
+        private let ground = CAGradientLayer()
+        private let groundMask = CAShapeLayer()
+        private let shadow = CALayer()
+        private let shadowMask = CAShapeLayer()
+        /// How far past the card the ground reaches: off every edge of the
+        /// screen, whichever way the card has moved.
+        private static let reach: CGFloat = 3000
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            backgroundColor = .clear
+            clipsToBounds = false
+            groundMask.fillRule = .evenOdd
+            ground.mask = groundMask
+            shadow.shadowColor = UIColor.black.cgColor
+            shadow.shadowOpacity = 0.1
+            shadow.shadowRadius = 8
+            shadow.shadowOffset = .zero
+            shadowMask.fillRule = .evenOdd
+            shadow.mask = shadowMask
+            layer.addSublayer(ground)
+            layer.addSublayer(shadow)
+        }
+
+        required init?(coder: NSCoder) { nil }
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: radius).cgPath
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            let card = UIBezierPath(roundedRect: bounds, cornerRadius: radius)
+            let outside = UIBezierPath(rect: bounds.insetBy(dx: -Self.reach, dy: -Self.reach))
+            outside.append(card)
+            // The ground's wash runs down the screen, not the card, so the
+            // margin matches the drawer's ground beside it.
+            let screen = window?.bounds ?? bounds
+            let top = window.map { convert(CGPoint.zero, to: $0).y } ?? 0
+            ground.frame = CGRect(x: -Self.reach, y: -top, width: Self.reach * 2 + bounds.width,
+                                  height: max(screen.height, bounds.height))
+            ground.colors = [LedgerAgentPalette.groundTopUI, LedgerAgentPalette.groundBottomUI]
+                .map { $0.resolvedColor(with: traitCollection).cgColor }
+            // The mask is in the ground's own coordinates.
+            let shift = CGAffineTransform(translationX: Self.reach, y: top)
+            let maskPath = UIBezierPath(rect: CGRect(x: 0, y: 0, width: ground.frame.width,
+                                                     height: ground.frame.height))
+            maskPath.append(UIBezierPath(roundedRect: bounds.applying(shift), cornerRadius: radius))
+            groundMask.frame = CGRect(origin: .zero, size: ground.frame.size)
+            groundMask.path = maskPath.cgPath
+            shadow.frame = bounds
+            shadow.shadowPath = card.cgPath
+            shadowMask.frame = bounds
+            shadowMask.path = outside.cgPath
+            CATransaction.commit()
+        }
+
+        override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+            super.traitCollectionDidChange(previous)
+            setNeedsLayout()
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            setNeedsLayout()
         }
     }
 }
