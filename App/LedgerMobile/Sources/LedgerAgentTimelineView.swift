@@ -126,7 +126,8 @@ struct LedgerAgentLiveTimeline: View {
 }
 
 /// One round of an answer: its title, then each thought in full and each
-/// call on its line. Open by default; tapping the title folds it.
+/// call on its line. How much is open follows 助手设置 › 显示; tapping the
+/// title flips it for this round.
 struct LedgerAgentRoundView: View {
     let steps: [LedgerAgentStepRecord]
     let indices: [Int]
@@ -136,8 +137,11 @@ struct LedgerAgentRoundView: View {
     var isActive = false
     /// Thoughts write on a glyph at a time (the live turn).
     var reveals = false
-    @State private var collapsed = false
+    @AppStorage(LedgerAgentStepsDisplay.storageKey) private var display = LedgerAgentStepsDisplay.standard
+    @State private var toggled = false
     @Environment(\.ledgerAgentFollowPause) private var followPause
+
+    private var collapsed: Bool { (display == .folded) != toggled }
 
     private var title: String {
         LedgerAgentRound.title(steps, indices, isActive: isActive,
@@ -148,7 +152,7 @@ struct LedgerAgentRoundView: View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
                 followPause?.pause()
-                withLedgerAnimation(LedgerMotion.disclose) { collapsed.toggle() }
+                withLedgerAnimation(LedgerMotion.disclose) { toggled.toggle() }
             } label: {
                 Text(title).balancedFont(size: 15).foregroundStyle(BalancedPalette.meta)
                     .lineLimit(1).truncationMode(.tail)
@@ -169,7 +173,7 @@ struct LedgerAgentRoundView: View {
                         if let call = steps[index].call {
                             LedgerAgentToolRow(call: call, isRunning: running.contains(index), compact: true)
                         } else {
-                            LedgerAgentThought(step: steps[index], reveals: reveals)
+                            LedgerAgentThought(step: steps[index], reveals: reveals, folded: display != .expanded)
                         }
                     }
                     .transition(.opacity.animation(.easeInOut(duration: 0.3)))
@@ -180,21 +184,47 @@ struct LedgerAgentRoundView: View {
 }
 
 /// A reasoning block written out in full, dim and small, as FlowDown lists
-/// a thought under its round.
+/// a thought under its round. Folded, it keeps to its latest line, which
+/// changes as the model thinks on, and a tap opens the rest.
 struct LedgerAgentThought: View {
     let step: LedgerAgentStepRecord
     var reveals = false
+    var folded = false
+    @State private var open = false
+    @Environment(\.ledgerAgentFollowPause) private var followPause
 
     var body: some View {
         let text = step.redacted ? String(localized: "（模型的思考内容已加密）")
             : step.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty {
-            Text(text).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
-                .lineSpacing(3)
-                .textSelection(.enabled)
-                .modifier(LedgerAgentRevealText(text: text, active: reveals))
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if folded && !open {
+                Button {
+                    followPause?.pause()
+                    withLedgerAnimation(LedgerMotion.disclose) { open = true }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(LedgerAgentRound.lastLine(text)).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                            .lineLimit(1).truncationMode(.tail)
+                            .contentTransition(.opacity)
+                            .ledgerAnimation(.easeInOut(duration: 0.25), value: LedgerAgentRound.lastLine(text))
+                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(BalancedPalette.meta)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(text)
+                .accessibilityHint("展开思考")
                 .accessibilityIdentifier("ledger-agent-thinking")
+            } else {
+                Text(text).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .modifier(LedgerAgentRevealText(text: text, active: reveals && !folded))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("ledger-agent-thinking")
+            }
         }
     }
 }

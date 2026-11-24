@@ -196,6 +196,14 @@ final class LedgerAgentTimelineTests: XCTestCase {
                        [.thinking(index: 0), .text(index: 1), .tools(indices: [2, 3])])
     }
 
+    func testFoldedThoughtsShowTheirLatestLineAndTheSettingDefaultsToThat() {
+        XCTAssertEqual(LedgerAgentRound.lastLine("先查十月\n\n  再按商户分组  \n"), "再按商户分组")
+        XCTAssertEqual(LedgerAgentRound.lastLine("一行"), "一行")
+        XCTAssertEqual(LedgerAgentStepsDisplay.standard, .thoughtsFolded)
+        XCTAssertEqual(LedgerAgentStepsDisplay(rawValue: "folded"), .folded)
+        XCTAssertEqual(LedgerAgentStepsDisplay.allCases.map(\.rawValue), ["expanded", "thoughtsFolded", "folded"])
+    }
+
     func testRoundsHoldReasoningAndCallsBetweenTexts() {
         let steps: [LedgerAgentStepRecord] = [
             .init(kind: .thinking, text: "想", durationMs: 1400),

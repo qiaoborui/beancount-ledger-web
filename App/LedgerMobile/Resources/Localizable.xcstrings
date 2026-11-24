@@ -4434,6 +4434,16 @@
         }
       }
     },
+    "全部收起" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fold all"
+          }
+        }
+      }
+    },
     "全部日期" : {
       "localizations" : {
         "en" : {
@@ -8410,6 +8420,16 @@
         }
       }
     },
+    "展开思考" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show thinking"
+          }
+        }
+      }
+    },
     "崩溃日志" : {
       "localizations" : {
         "en" : {
@@ -10198,12 +10218,42 @@
         }
       }
     },
+    "思考与工具" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking & tools"
+          }
+        }
+      }
+    },
     "思考了 %lld 秒" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Thought for %lld s"
+          }
+        }
+      }
+    },
+    "思考只显示最新一行，点开看全文；工具调用照常显示。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking shows only its latest line; tap to read it all. Tool calls show as usual."
+          }
+        }
+      }
+    },
+    "思考和工具调用都完整显示。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking and tool calls are shown in full."
           }
         }
       }
@@ -11928,6 +11978,16 @@
         }
       }
     },
+    "收起思考" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fold thinking"
+          }
+        }
+      }
+    },
     "收起键盘" : {
       "localizations" : {
         "en" : {
@@ -12824,6 +12884,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Yesterday I bought a book for 128 yuan with my CMB credit card, 48 of it paid on behalf of a coworker."
+          }
+        }
+      }
+    },
+    "显示" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Display"
           }
         }
       }
@@ -16244,6 +16314,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "This ledger's imported transactions, plus any natural-language descriptions and drafts you request suggestions for, payment methods and card digits, candidate accounts, and up to 5 related history snippets will be sent to TypeSafe. Usage is billed to your API key, and you can turn this off anytime."
+          }
+        }
+      }
+    },
+    "每一轮只显示一行标题，点标题展开。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Each round shows a single title line; tap it to expand."
           }
         }
       }

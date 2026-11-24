@@ -444,7 +444,43 @@ enum LedgerAgentProcess {
 /// An answer's steps as the page lays them out, after FlowDown: each run of
 /// reasoning and tool calls is a round under its own title, and text the
 /// model wrote between rounds stands between them. Nothing is folded away.
+/// How a turn's rounds show their thinking and calls. Everything open reads
+/// like FlowDown, but a model that thinks at length can push the answer far
+/// down; folding thoughts keeps each to its latest line, and folding
+/// everything leaves only each round's title.
+enum LedgerAgentStepsDisplay: String, CaseIterable, Identifiable, Sendable {
+    case expanded, thoughtsFolded, folded
+
+    static let storageKey = "ledger.agent.stepsDisplay"
+    static let standard: LedgerAgentStepsDisplay = .thoughtsFolded
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .expanded: String(localized: "全部展开")
+        case .thoughtsFolded: String(localized: "收起思考")
+        case .folded: String(localized: "全部收起")
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .expanded: String(localized: "思考和工具调用都完整显示。")
+        case .thoughtsFolded: String(localized: "思考只显示最新一行，点开看全文；工具调用照常显示。")
+        case .folded: String(localized: "每一轮只显示一行标题，点标题展开。")
+        }
+    }
+}
+
 enum LedgerAgentRound {
+    /// A thought's latest non-empty line, what a folded thought shows.
+    static func lastLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty } ?? text
+    }
+
     enum Block: Equatable, Identifiable, Sendable {
         case round(indices: [Int])
         case text(index: Int)
