@@ -15748,6 +15748,16 @@
         }
       }
     },
+    "正在执行工具…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Running tools…"
+          }
+        }
+      }
+    },
     "正在扫描已归档的汇丰账单…" : {
       "localizations" : {
         "en" : {
