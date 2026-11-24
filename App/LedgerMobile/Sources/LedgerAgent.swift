@@ -1415,6 +1415,13 @@ struct LedgerAgentPendingEdit: Equatable {
 /// back waits for the change card's confirmation. `LedgerAgentSessions` keeps
 /// it beyond the screen, so a turn keeps running when the user leaves the
 /// page or the app, and saves it after every settled turn.
+/// The running turn as the page draws it, watched only by the view of that
+/// turn (`LedgerAgentConversation.live`).
+@MainActor
+final class LedgerAgentLiveFeed: ObservableObject {
+    @Published fileprivate(set) var turn: LedgerAgentLiveTurn?
+}
+
 @MainActor
 final class LedgerAgentConversation: ObservableObject {
     let id: UUID
@@ -1459,7 +1466,17 @@ final class LedgerAgentConversation: ObservableObject {
     /// event, and from cores that do not stream. Text is let out evenly a
     /// frame at a time (`LedgerAgentStreamPacer`), so a burst from the model
     /// writes on steadily instead of landing as one jump.
-    @Published private(set) var live: LedgerAgentLiveTurn?
+    ///
+    /// Published by `liveFeed`, not by the conversation: it changes up to 30
+    /// times a second, and as the conversation's own change it redrew the
+    /// whole page each time, every earlier answer included. Only the view of
+    /// the running turn watches the feed, as FlowDown's stream only reloads
+    /// the row being written.
+    private(set) var live: LedgerAgentLiveTurn? {
+        get { liveFeed.turn }
+        set { liveFeed.turn = newValue }
+    }
+    let liveFeed = LedgerAgentLiveFeed()
     /// How full the model's context was at the latest turn, for the meter.
     @Published private(set) var usage: LedgerAgentUsage?
     /// Everything the model saw and said so far, tool results included, as
@@ -2952,6 +2969,54 @@ struct LedgerAgentChart: Codable, Equatable, Sendable {
 
 /// Splits a reply into prose and fenced code, and finds the beancount entry a
 /// read-only reply suggests for a write request.
+/// Parsed replies by text and ending. A reply being written changes every
+/// frame, so those few are kept apart and never push out the finished ones a
+/// long conversation shows.
+final class LedgerAgentSegmentCache: @unchecked Sendable {
+    static let shared = LedgerAgentSegmentCache()
+
+    private struct Key: Hashable {
+        var text: String
+        var ending: LedgerAgentReplyText.Ending
+    }
+
+    static let settledLimit = 400
+    static let streamingLimit = 8
+
+    private let lock = NSLock()
+    private var settled: [Key: [LedgerAgentReplyText.Segment]] = [:]
+    private var streaming: [Key: [LedgerAgentReplyText.Segment]] = [:]
+
+    func segments(_ text: String, _ ending: LedgerAgentReplyText.Ending,
+                  parse: () -> [LedgerAgentReplyText.Segment]) -> [LedgerAgentReplyText.Segment] {
+        let key = Key(text: text, ending: ending)
+        let live = ending == .streaming
+        lock.lock()
+        if let hit = live ? streaming[key] : settled[key] {
+            lock.unlock()
+            return hit
+        }
+        lock.unlock()
+        let parsed = parse()
+        lock.lock()
+        defer { lock.unlock() }
+        if live {
+            if streaming.count >= Self.streamingLimit { streaming.removeAll(keepingCapacity: true) }
+            streaming[key] = parsed
+        } else {
+            if settled.count >= Self.settledLimit { settled.removeAll(keepingCapacity: true) }
+            settled[key] = parsed
+        }
+        return parsed
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return settled.count + streaming.count
+    }
+}
+
 enum LedgerAgentReplyText {
     /// A block of a reply's Markdown. Text inside a block keeps its inline
     /// Markdown (emphasis, code spans, links) for the view to render.
@@ -2993,7 +3058,15 @@ enum LedgerAgentReplyText {
         case stopped
     }
 
+    /// The reply's blocks, parsed once for each text and ending and then
+    /// kept, as FlowDown keeps a message's parsed Markdown: a page redraws
+    /// far more often than a reply changes, and every redraw used to parse
+    /// every reply on it again.
     static func segments(_ text: String, ending: Ending = .finished) -> [Segment] {
+        LedgerAgentSegmentCache.shared.segments(text, ending) { parse(text, ending: ending) }
+    }
+
+    private static func parse(_ text: String, ending: Ending) -> [Segment] {
         var segments: [Segment] = []
         var lines: [Substring] = []
         var inCode = false

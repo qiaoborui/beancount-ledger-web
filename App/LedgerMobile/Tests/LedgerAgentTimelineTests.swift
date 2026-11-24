@@ -585,6 +585,17 @@ final class LedgerAgentTimelineTests: XCTestCase {
         XCTAssertEqual(LedgerAgentReplyText.segments(whole, ending: .streaming), [.prose("看："), .visual(first)])
     }
 
+    func testAReplyIsParsedOnceForEachTextAndEnding() {
+        let text = "## 十月\n\n共 **812** 元。\(UUID().uuidString)"
+        let first = LedgerAgentReplyText.segments(text)
+        let count = LedgerAgentSegmentCache.shared.count
+        XCTAssertEqual(LedgerAgentReplyText.segments(text), first)
+        XCTAssertEqual(LedgerAgentSegmentCache.shared.count, count)
+        // The same text still being written is its own entry, kept apart.
+        _ = LedgerAgentReplyText.segments(text, ending: .streaming)
+        XCTAssertEqual(LedgerAgentSegmentCache.shared.count, count + 1)
+    }
+
     func testStreamingTailClosesItsOpenInlineMarks() {
         func close(_ text: String) -> String { LedgerAgentReplyText.closingInlineMarks(text) }
         XCTAssertEqual(close("共 **812"), "共 **812**")

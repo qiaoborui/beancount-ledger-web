@@ -526,15 +526,11 @@ private struct LedgerAgentChatScreen: View {
                     switch conversation.phase {
                     case .idle: EmptyView()
                     case let .running(since):
-                        // The streamed turn once its first event is in; before
-                        // that (preparing, or a core that does not stream) the
-                        // step line with its elapsed and slow hints.
-                        if let live = conversation.live, !live.isEmpty || live.compacting {
-                            LedgerAgentLiveTimeline(turn: live, since: since, quietSince: conversation.stepSince ?? since,
-                                                    following: following)
-                        } else {
-                            LedgerAgentRunning(step: conversation.step, steps: conversation.stepCount,
-                                               since: since, stepSince: conversation.stepSince ?? since)
+                        LedgerAgentLiveSlot(feed: conversation.liveFeed, conversation: conversation,
+                                            step: conversation.step, since: since, following: following) {
+                            // The reply growing while it streams is followed
+                            // without an animation per redraw.
+                            if following, contentOverflows { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
                         }
                     case let .failed(error, question): failure(error, question: question)
                     }
@@ -585,11 +581,6 @@ private struct LedgerAgentChatScreen: View {
                 // The question the user just sent is always shown.
                 follow(proxy, force: last == .user)
                 if last == .assistant, conversation.messages.last?.stopped == false { announceAnswer() }
-            }
-            // The reply growing while it streams is followed without an
-            // animation per redraw.
-            .onChange(of: conversation.live) { _, _ in
-                if following, contentOverflows { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
             }
             // Opening a tool group or reasoning block is reading back: the
             // rows it shows stay where they were tapped.
@@ -643,6 +634,8 @@ private struct LedgerAgentChatScreen: View {
         let asksNow = message.id == conversation.messages.last?.id && !conversation.isRunning && !sessions.busyElsewhere
         let undoFailure = conversation.undoFailure?.message == message.id ? conversation.undoFailure?.text : nil
         return VStack(alignment: .leading, spacing: 6) {
+            // Equatable, so the page redrawing for a keystroke, the keyboard
+            // or the running turn leaves the answers above it alone.
             LedgerAgentAnswer(
                 message: message,
                 asksNow: asksNow,
@@ -657,6 +650,7 @@ private struct LedgerAgentChatScreen: View {
                 onAsk: { ask($0) },
                 onUndo: { undo(message) },
                 onUndoSettings: { conversation.undoAppSettings(message) })
+                .equatable()
             // No context menu over the answer: a long press there selects
             // its text, tool sources and errors, as everywhere else.
             answerActions(message)
@@ -1892,7 +1886,40 @@ private struct LedgerAgentAttachmentChip: View {
 }
 
 /// A reply on the page, with the reads behind it folded above.
-private struct LedgerAgentAnswer: View {
+/// The running turn's place on the page: the streamed turn once its first
+/// event is in; before that (preparing, or a core that does not stream) the
+/// step line with its elapsed and slow hints. It alone watches the live feed,
+/// so a frame of streamed text redraws this and not the page around it.
+private struct LedgerAgentLiveSlot: View {
+    @ObservedObject var feed: LedgerAgentLiveFeed
+    let conversation: LedgerAgentConversation
+    let step: LedgerAgentStep?
+    let since: Date
+    var following = false
+    let onGrow: () -> Void
+
+    var body: some View {
+        let stepSince = conversation.stepSince ?? since
+        Group {
+            if let live = feed.turn, !live.isEmpty || live.compacting {
+                LedgerAgentLiveTimeline(turn: live, since: since, quietSince: stepSince, following: following)
+            } else {
+                LedgerAgentRunning(step: step, steps: conversation.stepCount, since: since, stepSince: stepSince)
+            }
+        }
+        .onChange(of: feed.turn) { _, _ in onGrow() }
+    }
+}
+
+private struct LedgerAgentAnswer: View, Equatable {
+    /// What the answer shows; the actions are the page's and do not change
+    /// what is drawn.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.message == rhs.message && lhs.asksNow == rhs.asksNow && lhs.undoing == rhs.undoing
+            && lhs.canUndo == rhs.canUndo && lhs.undoFailure == rhs.undoFailure
+            && lhs.undoingSettings == rhs.undoingSettings && lhs.canUndoSettings == rhs.canUndoSettings
+    }
+
     let message: LedgerAgentMessage
     /// The reply is the last message and nothing is running, so its choices
     /// can still be picked.
