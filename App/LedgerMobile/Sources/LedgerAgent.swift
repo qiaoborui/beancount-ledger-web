@@ -2160,6 +2160,24 @@ final class LedgerAgentConversation: ObservableObject {
         }
     }
 
+    /// A name asked for by the user is on its way.
+    @Published private(set) var retitling = false
+
+    /// Names the conversation again because the user asked, as FlowDown's
+    /// Generate New Title does: whatever it is called now and however many
+    /// automatic tries it had. Returns the new name, or nil when none came.
+    func retitle(using write: @escaping Assist<String>) async -> String? {
+        guard !retitling, !isRunning, answerCount > 0 else { return nil }
+        retitling = true
+        defer { retitling = false }
+        let epoch = epoch, history = visibleHistory
+        let name = (try? await write(history))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard self.epoch == epoch, let name, !name.isEmpty else { return nil }
+        generatedTitle = name
+        onSettled?(self)
+        return name
+    }
+
     /// Writes a recap of the conversation for its bottom; it is saved with
     /// the conversation.
     func summarize(using write: @escaping Assist<String>) {

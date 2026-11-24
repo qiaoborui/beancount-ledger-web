@@ -120,6 +120,28 @@ final class LedgerAgentConversationListTests: XCTestCase {
     }
 
     @MainActor
+    func testANewTitleAskedForReplacesTheNameItHas() async throws {
+        let sessions = LedgerAgentSessions()
+        sessions.bind(ledger: UUID(), storage: MemoryStore().storage)
+        try await ask(sessions, "十月吃饭花了多少")
+        try await ask(sessions, "那上周呢")
+        let conversation = sessions.current
+        conversation.nameSession { _ in "十月餐饮" }
+        try await waitFor { conversation.generatedTitle != nil }
+
+        let name = await conversation.retitle { _ in "  十月与上周餐饮对比 " }
+        XCTAssertEqual(name, "十月与上周餐饮对比")
+        XCTAssertFalse(conversation.retitling)
+        XCTAssertEqual(sessions.title(of: conversation), "十月与上周餐饮对比")
+        try await waitFor { sessions.saved.first?.generatedTitle == "十月与上周餐饮对比" }
+
+        // A model that answers nothing leaves the name as it is.
+        let none = await conversation.retitle { _ in " " }
+        XCTAssertNil(none)
+        XCTAssertEqual(sessions.title(of: conversation), "十月与上周餐饮对比")
+    }
+
+    @MainActor
     func testSavingTheShownAutomaticNameKeepsItAutomatic() async throws {
         let sessions = LedgerAgentSessions()
         sessions.bind(ledger: UUID(), storage: MemoryStore().storage)

@@ -134,6 +134,8 @@ private struct LedgerAgentChatScreen: View {
     /// before, given back when the edit is cancelled.
     @State private var editing: UUID?
     @State private var draftBeforeEdit = ""
+    /// The conversation being renamed from the bar's menu.
+    @State private var renaming: LedgerAgentRenameTarget?
     /// A regenerate, edit or switch waiting for the user's word.
     @State private var confirming: BranchConfirmation?
     /// Counts copies, for the haptic.
@@ -212,6 +214,7 @@ private struct LedgerAgentChatScreen: View {
                 })
             }
         }
+        .ledgerAgentRenameAlert($renaming)
         .onChange(of: historyPresented) { _, shown in if shown { composerFocused = false } }
         .fileImporter(isPresented: $choosingFiles, allowedContentTypes: LedgerAgentAttachments.pickerTypes,
                       allowsMultipleSelection: true) { result in
@@ -401,6 +404,63 @@ private struct LedgerAgentChatScreen: View {
         .accessibilityIdentifier(identifier)
     }
 
+    private var moreMenu: some View {
+        Menu {
+            if !conversationIsFresh {
+                // The conversation's name heads the menu, since the page has
+                // no title to show it.
+                Section(sessions.title(of: conversation)) {
+                    Button { retitle() } label: {
+                        Label(conversation.retitling ? "正在生成标题…" : "重新生成标题", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(conversation.retitling || conversation.isRunning || conversation.answerCount == 0
+                              || !settings.hasKey || session.privacyShielded)
+                    .accessibilityIdentifier("ledger-agent-retitle")
+                    Button {
+                        renaming = .init(id: conversation.id, shown: sessions.title(of: conversation))
+                    } label: {
+                        Label("重命名", systemImage: "pencil")
+                    }
+                    .accessibilityIdentifier("ledger-agent-rename")
+                }
+            }
+            Button { settingsPresented = true } label: { Label("助手设置", systemImage: "slider.horizontal.3") }
+                .accessibilityIdentifier("ledger-agent-settings")
+        } label: {
+            Image(systemName: "ellipsis").font(.system(size: 17, weight: .medium))
+                .foregroundStyle(BalancedPalette.ink)
+                .frame(width: 40, height: 40)
+                .background {
+                    if !LedgerGlass.isAvailable { Circle().fill(BalancedPalette.sunken) }
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+        }
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .accessibilityLabel("更多")
+        .accessibilityIdentifier("ledger-agent-more")
+    }
+
+    /// Asks the model for a new name for this conversation; one the user
+    /// typed gives way to it, since they asked for it.
+    private func retitle() {
+        guard settings.hasKey, !session.privacyShielded,
+              let repository = session.localRepository, let key = try? settings.apiKey() else { return }
+        let choice = settings.choice, id = conversation.id
+        Task {
+            let name = await conversation.retitle { history in
+                try await repository.agentSessionTitle(history: history, choice: choice, apiKey: key)
+            }
+            if name != nil {
+                if sessions.customTitle(of: id) != nil { sessions.rename(id, to: "") }
+                LedgerFeedback.success()
+            } else {
+                LedgerFeedback.error()
+            }
+        }
+    }
+
     private var historyButton: some View {
         circleButton("line.3.horizontal", label: "历史对话", identifier: "ledger-agent-history") {
             historyPresented = true
@@ -414,36 +474,22 @@ private struct LedgerAgentChatScreen: View {
         conversation.messages.isEmpty && !conversation.isRunning && conversation.pending == nil
     }
 
-    /// The first button follows the conversation, then settings, then the
-    /// close button when the assistant is a full-screen sheet. A fresh
-    /// conversation has nothing to leave behind, so its first button is the
-    /// app's own amount privacy (the same `toggleAmounts` as every other
-    /// page's eye, not a separate "do not keep this chat" mode); once there
-    /// is something on the page it becomes 新对话, one tap from the
-    /// conversation it replaces.
+    /// Two buttons at most, as FlowDown keeps its bar: 新对话 once there is
+    /// something on the page to leave, and a menu with what is done to this
+    /// conversation (a new name from the model, or one typed) and 助手设置.
+    /// The close button follows when the assistant is a full-screen sheet.
     private var actions: some View {
         HStack(spacing: 0) {
             // The bar's trailing cluster already supplies one glass capsule
             // for its controls, so these are plain buttons inside it.
-            if conversationIsFresh {
-                circleButton(session.amountsVisible ? "eye.slash" : "eye",
-                             label: session.amountsVisible ? "隐藏金额" : "显示金额",
-                             identifier: "ledger-agent-privacy", drawsGlass: false) {
-                    LedgerFeedback.selection()
-                    session.toggleAmounts()
-                }
-                .transition(.scale(scale: 0.6).combined(with: .opacity))
-            } else {
+            if !conversationIsFresh {
                 circleButton("square.and.pencil", label: "新对话", identifier: "ledger-agent-new",
                              drawsGlass: false) {
                     sessions.startNew()
                 }
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
-            circleButton("slider.horizontal.3", label: "助手设置", identifier: "ledger-agent-settings",
-                         drawsGlass: false) {
-                settingsPresented = true
-            }
+            moreMenu
             if let onClose {
                 circleButton("xmark", label: "关闭", identifier: "ledger-agent-close", drawsGlass: false,
                              action: onClose)

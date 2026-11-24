@@ -5804,6 +5804,16 @@
         }
       }
     },
+    "助手设置" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Assistant Settings"
+          }
+        }
+      }
+    },
     "劳务咨询" : {
       "localizations" : {
         "en" : {
@@ -15978,6 +15988,16 @@
         }
       }
     },
+    "正在生成标题…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Generating Title…"
+          }
+        }
+      }
+    },
     "正在生成预览..." : {
       "localizations" : {
         "en" : {
@@ -22734,6 +22754,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Check Save Result Again"
+          }
+        }
+      }
+    },
+    "重新生成标题" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Generate New Title"
           }
         }
       }
