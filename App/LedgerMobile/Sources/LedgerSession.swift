@@ -91,8 +91,12 @@ final class LedgerSession: ObservableObject {
     }
 
     @Published private(set) var phase: Phase
-    @Published private(set) var ledger: LedgerBootstrap?
-    @Published private(set) var localOverviewCategories: LedgerOverviewCategories?
+    @Published private(set) var ledger: LedgerBootstrap? { didSet { overviewGeneration &+= 1 } }
+    @Published private(set) var localOverviewCategories: LedgerOverviewCategories? { didSet { overviewGeneration &+= 1 } }
+    /// Counts changes to what 概览 is drawn from (the ledger and its local
+    /// categories), so the page can tell them from the many other changes
+    /// this object publishes (`OverviewView`).
+    private(set) var overviewGeneration = 0
     @Published private(set) var isLocalOverviewCategoriesLoading = false
     private struct AnalysisCacheKey: Hashable {
         let kind: LedgerAnalysisResourceKind

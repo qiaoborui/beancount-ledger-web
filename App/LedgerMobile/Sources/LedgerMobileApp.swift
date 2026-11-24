@@ -20,6 +20,8 @@ struct LedgerMobileApp: App {
         #if os(iOS)
         // Empty unless built with LEDGER_PERF_PROBE.
         LedgerMotionProbe.shared.start()
+        // Chinese and emoji fallback faces, loaded before the first reply.
+        LedgerFontWarmup.start()
         #endif
         // Opt-in measurement recording must exist before the first ledger work
         // so a cold-start run is captured. Without `--ledger-perf-record` (and

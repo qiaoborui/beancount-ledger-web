@@ -67,6 +67,11 @@ final class LedgerAgentSettings: ObservableObject {
     /// read again as well as saving the first one.
     @Published private var keyGeneration = 0
     private let keyStore: (String) -> ClassificationKeyStore
+    /// Keys read from the keychain, by provider (nil: none saved). Every key
+    /// is written through this object, so it is read once a launch rather
+    /// than on the main thread at every send, where a keychain that was slow
+    /// to answer held up the tap.
+    private var keys: [String: String?] = [:]
     private let lister: LedgerAgentModelLister
 
     /// A starred model. Its title and levels are kept so the chat page can
@@ -104,7 +109,9 @@ final class LedgerAgentSettings: ObservableObject {
         suggestions = defaults.object(forKey: suggestionsKey) as? Bool ?? true
         contextWindows = defaults.dictionary(forKey: contextWindowsKey) as? [String: Int] ?? [:]
         maxOutputs = defaults.dictionary(forKey: maxOutputTokensKey) as? [String: Int] ?? [:]
-        hasKey = (try? keyStore(choice.provider).load()) != nil
+        let key = try? keyStore(choice.provider).load()
+        hasKey = key != nil
+        if let key { keys[choice.provider] = key }
     }
 
     /// Takes the preferences again after a sync restored them on a fresh
@@ -123,7 +130,7 @@ final class LedgerAgentSettings: ObservableObject {
         suggestions = defaults.object(forKey: suggestionsKey) as? Bool ?? true
         contextWindows = defaults.dictionary(forKey: contextWindowsKey) as? [String: Int] ?? [:]
         maxOutputs = defaults.dictionary(forKey: maxOutputTokensKey) as? [String: Int] ?? [:]
-        hasKey = (try? keyStore(choice.provider).load()) != nil
+        hasKey = (try? key(for: choice.provider)) != nil
     }
 
     /// The model's context window as its provider's list gave it, nil when
@@ -269,7 +276,14 @@ final class LedgerAgentSettings: ObservableObject {
     func providerTitle(for provider: String) -> String { catalog.provider(provider)?.title ?? provider }
 
     /// Whether a key for the provider is saved on this device.
-    func hasKey(for provider: String) -> Bool { (try? keyStore(provider).load()) != nil }
+    func hasKey(for provider: String) -> Bool { (try? key(for: provider)) != nil }
+
+    private func key(for provider: String) throws -> String? {
+        if let known = keys[provider] { return known }
+        let key = try keyStore(provider).load()
+        keys[provider] = key
+        return key
+    }
 
     // MARK: Favorites
 
@@ -403,6 +417,7 @@ final class LedgerAgentSettings: ObservableObject {
             throw LedgerAgentError.failed(String(localized: "API Key 格式不正确"))
         }
         try keyStore(choice.provider).save(key)
+        keys[choice.provider] = key
         hasKey = true
         // A list that failed with no key or an older one may answer now.
         quietlyListed.removeAll()
@@ -411,12 +426,13 @@ final class LedgerAgentSettings: ObservableObject {
 
     func removeKey() throws {
         try keyStore(choice.provider).remove()
+        keys[choice.provider] = .some(nil)
         hasKey = false
     }
 
     /// The key for the current provider, read at the start of each turn.
     func apiKey() throws -> String {
-        guard let key = try keyStore(choice.provider).load() else { throw LedgerAgentError.notConfigured }
+        guard let key = try key(for: choice.provider) else { throw LedgerAgentError.notConfigured }
         return key
     }
 
@@ -424,7 +440,7 @@ final class LedgerAgentSettings: ObservableObject {
         self.choice = choice
         defaults.set(try? JSONEncoder().encode(choice), forKey: preferenceKey)
         if choice.isCustom { defaults.set(try? JSONEncoder().encode(choice), forKey: customKey) }
-        hasKey = (try? keyStore(choice.provider).load()) != nil
+        hasKey = (try? key(for: choice.provider)) != nil
     }
 
     static func defaultChoice(in catalog: LedgerAgentCatalog) -> LedgerAgentModelChoice {

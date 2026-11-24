@@ -2,10 +2,55 @@ import SwiftUI
 
 struct OverviewView: View {
     @EnvironmentObject private var session: LedgerSession
+    var isRoot = true
+
+    /// The session publishes far more than the page is drawn from (the
+    /// assistant's state, sync, sheets), and every one of those used to work
+    /// the page out again, spending categories and rankings included, even
+    /// under 账本助手. The page is drawn again only when what it shows changes.
+    var body: some View {
+        OverviewPage(session: session, isRoot: isRoot, inputs: OverviewPage.Inputs(session))
+            .equatable()
+    }
+}
+
+private struct OverviewPage: View, Equatable {
+    /// Read, not observed: `inputs` says when to draw again.
+    let session: LedgerSession
+    var isRoot = true
+    let inputs: Inputs
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var comparisonDetails: OverviewComparisonDetails?
     @State private var customizing = false
-    var isRoot = true
+
+    /// Everything of the session the page shows.
+    struct Inputs: Equatable {
+        let generation: Int
+        let error: String?
+        let sections: [OverviewSection]
+        let isLocal: Bool
+        let amountsVisible: Bool
+        let range: LedgerDateRange
+        let rangeLoading: Bool
+        let categoriesError: String?
+        let today: String
+
+        @MainActor init(_ session: LedgerSession) {
+            generation = session.overviewGeneration
+            error = session.errorMessage
+            sections = session.overviewSections
+            isLocal = session.isLocal
+            amountsVisible = session.amountsVisible
+            range = session.selectedRange
+            rangeLoading = session.isRangeLoading
+            categoriesError = session.localOverviewCategoriesError
+            today = LedgerDateRange.today(now: session.now)
+        }
+    }
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.inputs == rhs.inputs && lhs.isRoot == rhs.isRoot && lhs.session === rhs.session
+    }
 
     var body: some View {
         let labels = TransactionCategoryPresentation.accountLabels(session.ledger?.accounts ?? [])
