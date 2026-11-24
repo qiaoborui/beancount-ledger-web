@@ -680,16 +680,6 @@ private struct LedgerAgentChatScreen: View {
             // A touch on the conversation lets go of a row held open for the
             // model menu.
             .simultaneousGesture(TapGesture().onEnded { if rowPinned { rowPinned = false } })
-            // The empty state lies over the page rather than in it, centred
-            // in the page as it is without the keyboard: in the scroll
-            // content it was centred in the space left above the keyboard,
-            // which moved it with every frame of the keyboard coming up, and
-            // for a frame the content outgrew the page and was scrolled.
-            .overlay {
-                if conversation.messages.isEmpty && !conversation.isRunning {
-                    emptyState.ignoresSafeArea(.keyboard)
-                }
-            }
             .overlay(alignment: .bottomTrailing) {
                 ZStack {
                     if showsJumpButton {
@@ -701,6 +691,18 @@ private struct LedgerAgentChatScreen: View {
                 .ledgerAnimation(LedgerMotion.disclose, value: showsJumpButton)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+            // The empty state lies over the page rather than in it, above
+            // the composer as it rests and out of the keyboard's way: in the
+            // scroll content it was centred in the space left above the
+            // keyboard and moved with every frame of it; laid over the inner
+            // page it was squeezed between the bar and the raised composer.
+            .overlay {
+                if conversation.messages.isEmpty && !conversation.isRunning {
+                    emptyState
+                        .padding(.bottom, Self.emptyStateClearance)
+                        .ignoresSafeArea(.keyboard)
+                }
+            }
             // Bills and screenshots can also be dragged in from Photos, Files
             // or another window (iPad, or the Mac build).
             .onDrop(of: Self.dropTypes, isTargeted: $dropTargeted) { providers in
@@ -1024,6 +1026,8 @@ private struct LedgerAgentChatScreen: View {
     private static let dropTypes: [UTType] = [.image, .fileURL]
 
     private static let bottomID = "ledger-agent-bottom"
+    /// The composer's height at rest, which the empty state keeps clear of.
+    private static let emptyStateClearance: CGFloat = 120
 
     /// A recap is written when the user comes back after this long.
     private static let recapAfterAbsence: TimeInterval = 10 * 60
