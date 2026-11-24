@@ -24,6 +24,8 @@ final class LedgerColorThemeRenderingTests: XCTestCase {
 
     func testSwitchRepaintsAnAlreadyRenderedPage() async throws {
         let window = try makeWindow(Root())
+        // The light values, whatever appearance the simulator is left in.
+        window.overrideUserInterfaceStyle = .light
         defer { window.isHidden = true }
 
         try await assertPage(window, equals: 0xFBFAF8, "paper")

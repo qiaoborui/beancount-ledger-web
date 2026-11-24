@@ -281,7 +281,7 @@ final class LedgerAgentTimelineTests: XCTestCase {
             return .init(ok: true, reply: "共 812 元。", steps: steps,
                          usage: .init(input: 900, output: 100, contextTokens: 1000, contextWindow: 4000))
         })
-        for _ in 0..<200 where conversation.live?.usage == nil { try await Task.sleep(nanoseconds: 2_000_000) }
+        for _ in 0..<1000 where conversation.live?.usage == nil { try await Task.sleep(nanoseconds: 2_000_000) }
         XCTAssertEqual(conversation.live?.text, "共 812 元。")
         XCTAssertEqual(conversation.live?.steps.map(\.kind), [.thinking, .tool, .text])
         XCTAssertEqual(conversation.usage?.fraction, 0.25)
@@ -296,21 +296,26 @@ final class LedgerAgentTimelineTests: XCTestCase {
     }
 
     @MainActor
-    func testTextDeltasArePublishedAtMostEveryInterval() async throws {
+    func testABurstOfTextIsWrittenOnEvenlyAndInFull() async throws {
         let conversation = LedgerAgentConversation()
         let gate = Gate()
-        var published = 0
-        let watch = conversation.$live.sink { _ in published += 1 }
+        var lengths: [Int] = []
+        let watch = conversation.$live.sink { lengths.append($0?.text.count ?? 0) }
         defer { watch.cancel() }
         conversation.send("长回答", reporting: { _, _, _, report in
-            for _ in 0..<40 { report(.live(.textDelta("字"))) }
+            // One burst, as a model's deltas often arrive.
+            report(.live(.textDelta(String(repeating: "字", count: 40))))
             await gate.wait()
             return .init(ok: true, reply: String(repeating: "字", count: 40))
         })
-        for _ in 0..<200 where conversation.live?.text.count != 40 { try await Task.sleep(nanoseconds: 5_000_000) }
+        for _ in 0..<1000 where conversation.live?.text.count != 40 { try await Task.sleep(nanoseconds: 2_000_000) }
         XCTAssertEqual(conversation.live?.text, String(repeating: "字", count: 40))
-        // The first delta at once, the rest folded into a few later redraws.
-        XCTAssertLessThan(published, 10)
+        // Written on over several frames, a few characters each, never
+        // backwards, rather than drawn as one jump.
+        let shown = lengths.filter { $0 > 0 }
+        XCTAssertGreaterThan(shown.count, 5)
+        XCTAssertLessThan(shown.first ?? 40, 10)
+        XCTAssertEqual(shown, shown.sorted())
         await gate.open()
         try await waitUntilIdle(conversation)
     }
@@ -336,7 +341,7 @@ final class LedgerAgentTimelineTests: XCTestCase {
             return .init(ok: false, reply: "十月餐饮共", cancelled: true, transcript: "stopped-transcript",
                          steps: stoppedSteps, usage: .init(contextTokens: 300, contextWindow: 1000), stopReason: "aborted")
         })
-        for _ in 0..<200 where conversation.live?.text != "十月餐饮共" { try await Task.sleep(nanoseconds: 2_000_000) }
+        for _ in 0..<1000 where conversation.live?.text != "十月餐饮共" { try await Task.sleep(nanoseconds: 2_000_000) }
         conversation.stop()
 
         // At once: the partial stays, marked stopped, and nothing runs.
@@ -371,7 +376,7 @@ final class LedgerAgentTimelineTests: XCTestCase {
             return .init(ok: false, reply: "我查一下。", cancelled: true, transcript: "stopped-transcript",
                          steps: [.init(kind: .text, text: "我查一下。")], stopReason: "aborted")
         })
-        for _ in 0..<200 where conversation.live == nil { try await Task.sleep(nanoseconds: 2_000_000) }
+        for _ in 0..<1000 where conversation.live == nil { try await Task.sleep(nanoseconds: 2_000_000) }
         conversation.stop()
         XCTAssertEqual(conversation.messages.map(\.text), ["十月餐饮"])
         for _ in 0..<200 where conversation.transcript == nil { try await Task.sleep(nanoseconds: 2_000_000) }
@@ -385,7 +390,7 @@ final class LedgerAgentTimelineTests: XCTestCase {
             while !Task.isCancelled { try? await Task.sleep(nanoseconds: 2_000_000) }
             return .init(ok: false, cancelled: true, stopReason: "aborted")
         })
-        for _ in 0..<200 where conversation.live == nil { try await Task.sleep(nanoseconds: 2_000_000) }
+        for _ in 0..<1000 where conversation.live == nil { try await Task.sleep(nanoseconds: 2_000_000) }
         conversation.stop()
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(conversation.messages.map(\.text), ["十月餐饮", "我查一下。", "再查"])
@@ -401,7 +406,7 @@ final class LedgerAgentTimelineTests: XCTestCase {
             while !Task.isCancelled { try? await Task.sleep(nanoseconds: 2_000_000) }
             return .init(ok: false, cancelled: true, stopReason: "aborted")
         })
-        for _ in 0..<200 where conversation.live?.running.isEmpty != false { try await Task.sleep(nanoseconds: 2_000_000) }
+        for _ in 0..<1000 where conversation.live?.running.isEmpty != false { try await Task.sleep(nanoseconds: 2_000_000) }
         conversation.stop()
         let call = try XCTUnwrap(conversation.messages.last?.steps.last?.call)
         XCTAssertEqual(call.interrupted, true)
@@ -423,7 +428,7 @@ final class LedgerAgentTimelineTests: XCTestCase {
             return .init(ok: false, reply: "十月餐饮共 812", cancelled: true, transcript: "stopped-transcript",
                          usage: .init(contextTokens: 300, contextWindow: 1000), stopReason: "aborted")
         })
-        for _ in 0..<200 where conversation.live?.text != "十月餐饮共" { try await Task.sleep(nanoseconds: 2_000_000) }
+        for _ in 0..<1000 where conversation.live?.text != "十月餐饮共" { try await Task.sleep(nanoseconds: 2_000_000) }
         conversation.stop()
 
         // The next question gives up waiting and answers on its own.
@@ -465,7 +470,7 @@ final class LedgerAgentTimelineTests: XCTestCase {
             while !Task.isCancelled { try? await Task.sleep(nanoseconds: 2_000_000) }
             return .init(ok: false, cancelled: true)
         })
-        for _ in 0..<200 where conversation.live == nil { try await Task.sleep(nanoseconds: 2_000_000) }
+        for _ in 0..<1000 where conversation.live == nil { try await Task.sleep(nanoseconds: 2_000_000) }
         conversation.stop()
         try await Task.sleep(nanoseconds: 30_000_000)
 
@@ -544,6 +549,32 @@ final class LedgerAgentTimelineTests: XCTestCase {
         // The root closed but the fence not yet: no placeholder.
         let whole = head + "{\"type\":\"note\",\"text\":\"一\"}]}"
         XCTAssertEqual(LedgerAgentReplyText.segments(whole, ending: .streaming), [.prose("看："), .visual(first)])
+    }
+
+    func testStreamingTailClosesItsOpenInlineMarks() {
+        func close(_ text: String) -> String { LedgerAgentReplyText.closingInlineMarks(text) }
+        XCTAssertEqual(close("共 **812"), "共 **812**")
+        XCTAssertEqual(close("共 **812*"), "共 **812**")
+        // Nothing after the mark yet: it is left out rather than drawn bare.
+        XCTAssertEqual(close("共 **"), "共 ")
+        XCTAssertEqual(close("共 *"), "共 ")
+        XCTAssertEqual(close("用 `"), "用 ")
+        XCTAssertEqual(close("用 `bean-check"), "用 `bean-check`")
+        XCTAssertEqual(close("**合计 `Expenses:Food"), "**合计 `Expenses:Food`**")
+        // Closed marks, marks inside code and escaped stars stay as written.
+        XCTAssertEqual(close("**粗** 和 `a**b`"), "**粗** 和 `a**b`")
+        XCTAssertEqual(close("**粗**"), "**粗**")
+        XCTAssertEqual(close("5 \\** 3"), "5 \\** 3")
+
+        XCTAssertEqual(LedgerAgentReplyText.segments("十月：\n\n共 **812", ending: .streaming),
+                       [.prose("十月："), .prose("共 **812**")])
+        XCTAssertEqual(LedgerAgentReplyText.segments("- 餐饮 **812", ending: .streaming),
+                       [.list(ordered: false, items: [.init(marker: "•", text: "餐饮 **812**", depth: 0)])])
+        // A finished or stopped reply is drawn as written.
+        XCTAssertEqual(LedgerAgentReplyText.segments("共 **812"), [.prose("共 **812")])
+        XCTAssertEqual(LedgerAgentReplyText.segments("共 **812", ending: .stopped), [.prose("共 **812")])
+        // Inside an open fence nothing is touched.
+        XCTAssertEqual(LedgerAgentReplyText.segments("```\nx **", ending: .streaming), [.code("x **")])
     }
 
     // MARK: Helpers

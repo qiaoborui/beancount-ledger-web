@@ -274,7 +274,7 @@ final class LedgerAgentBranchesTests: XCTestCase {
             while !Task.isCancelled { try? await Task.sleep(nanoseconds: 2_000_000) }
             throw CancellationError()
         })
-        for _ in 0..<200 where conversation.live?.text != "部分" { try await Task.sleep(nanoseconds: 2_000_000) }
+        for _ in 0..<1000 where conversation.live?.text != "部分" { try await Task.sleep(nanoseconds: 2_000_000) }
         conversation.stop()
         XCTAssertEqual(conversation.messages[2].outsideTranscript, true)
         conversation.stopSettleTimeout = 0.05
@@ -379,7 +379,7 @@ final class LedgerAgentBranchesTests: XCTestCase {
             while !Task.isCancelled { try? await Task.sleep(nanoseconds: 2_000_000) }
             throw CancellationError()
         })
-        for _ in 0..<200 where conversation.live?.text != "正在改" { try await Task.sleep(nanoseconds: 2_000_000) }
+        for _ in 0..<1000 where conversation.live?.text != "正在改" { try await Task.sleep(nanoseconds: 2_000_000) }
         conversation.stop()
         for _ in 0..<200 where conversation.saved()?.unwrittenChange != true { try await Task.sleep(nanoseconds: 2_000_000) }
         let left = try XCTUnwrap(conversation.messages.last?.id)
@@ -488,7 +488,7 @@ final class LedgerAgentBranchesTests: XCTestCase {
             while !Task.isCancelled { try? await Task.sleep(nanoseconds: 2_000_000) }
             throw CancellationError()
         })
-        for _ in 0..<200 where conversation.live?.text != "正在改" { try await Task.sleep(nanoseconds: 2_000_000) }
+        for _ in 0..<1000 where conversation.live?.text != "正在改" { try await Task.sleep(nanoseconds: 2_000_000) }
         conversation.stop()
         for _ in 0..<200 where conversation.saved()?.unwrittenChange != true { try await Task.sleep(nanoseconds: 2_000_000) }
 

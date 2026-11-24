@@ -640,7 +640,7 @@ struct LedgerSetupView: View {
     private var running: some View {
         VStack(alignment: .leading, spacing: 10) {
             if !conversation.live.text.isEmpty {
-                LedgerAgentStreamingReply(text: conversation.live.text)
+                LedgerAgentStreamingReply(text: conversation.live.text, reveals: true)
             }
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small).tint(BalancedPalette.meta)

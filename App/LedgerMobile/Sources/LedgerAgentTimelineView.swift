@@ -79,7 +79,8 @@ struct LedgerAgentLiveTimeline: View {
             if !texts.isEmpty {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(texts, id: \.self) { index in
-                        LedgerAgentStreamingReply(text: turn.steps[index].text, streaming: index == turn.steps.indices.last)
+                        LedgerAgentStreamingReply(text: turn.steps[index].text, streaming: index == turn.steps.indices.last,
+                                                  reveals: true)
                             .transition(following ? AnyTransition.opacity : AnyTransition.opacity.combined(with: .offset(y: 6)))
                     }
                 }
@@ -112,6 +113,10 @@ struct LedgerAgentLiveTimeline: View {
     private var activityLine: some View {
         Text(activity ?? " ").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             .lineLimit(1).truncationMode(.tail)
+            // Another call, or the turn going back to thinking, crossfades;
+            // the reasoning's own line moving on as it streams does not.
+            .contentTransition(.opacity)
+            .ledgerAnimation(.easeInOut(duration: 0.2), value: activityKey)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, 12)
             .accessibilityHidden(activity == nil)
@@ -138,6 +143,15 @@ struct LedgerAgentLiveTimeline: View {
     }
 
     private var activity: String? { turn.activity?.text }
+
+    /// What kind of thing the activity line is saying, for its crossfade.
+    private var activityKey: String {
+        switch turn.activity {
+        case let .tool(title, others)?: return "tool|\(title)|\(others)"
+        case .thinking?: return "thinking"
+        case nil: return ""
+        }
+    }
 
     private static var leaveHint: String { String(localized: "可以离开这一页或切到后台，答完会通知你") }
     private static var slowHint: String { String(localized: "模型这一步比较慢。网络不好时可以点停止，再发一次。") }
@@ -177,8 +191,13 @@ struct LedgerAgentProcessLine: View {
                         }
                     }
                     .frame(width: 16)
+                    // The running count and time roll rather than snap, and a
+                    // band of light sweeps the line while the turn works.
                     Text(summary).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                         .lineLimit(1).truncationMode(.tail)
+                        .contentTransition(.numericText())
+                        .ledgerAnimation(LedgerMotion.value, value: summary)
+                        .modifier(LedgerAgentShimmer(active: isLive))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(BalancedPalette.edge)
@@ -211,6 +230,111 @@ struct LedgerAgentProcessLine: View {
                 .overlay(alignment: .leading) { BalancedPalette.ruleStrong.frame(width: 1) }
                 .padding(.leading, 8)
                 .ledgerAnimation(LedgerMotion.disclose, value: indices.count)
+            }
+        }
+    }
+}
+
+/// A band of light sweeping across a line whose work is under way, as
+/// FlowDown's thinking title does: the text rests a little dimmed and the
+/// band brightens it as it passes, sized to the text rather than the row so
+/// it never spends most of its sweep on empty space. Off under Reduce
+/// Motion and in UI test runs, where the line simply stays as it is.
+private struct LedgerAgentShimmer: ViewModifier {
+    let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private static let period: TimeInterval = 1.6
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if active && !reduceMotion && LedgerMotion.allowsAmbientMotion {
+            content.mask {
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: false)) { context in
+                    let phase = context.date.timeIntervalSinceReferenceDate
+                        .truncatingRemainder(dividingBy: Self.period) / Self.period
+                    GeometryReader { proxy in
+                        let band = max(proxy.size.width * 0.45, 48)
+                        ZStack(alignment: .leading) {
+                            Color.black.opacity(0.5)
+                            LinearGradient(colors: [.black.opacity(0), .black, .black.opacity(0)],
+                                           startPoint: .leading, endPoint: .trailing)
+                                .frame(width: band)
+                                .offset(x: -band + CGFloat(phase) * (proxy.size.width + band))
+                        }
+                    }
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// Fades a streaming block's new text in, a glyph at a time, as FlowDown's
+/// replies do (`LedgerAgentRevealStore` keeps when each glyph appeared).
+/// iOS 18 draws it through a `TextRenderer`; before that, under Reduce
+/// Motion, in UI test runs, or once the reply is saved, text simply shows.
+struct LedgerAgentRevealText: ViewModifier {
+    let text: String
+    let active: Bool
+    @State private var store = LedgerAgentRevealStore()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            if active && !reduceMotion && LedgerMotion.allowsAmbientMotion {
+                let now = Date.timeIntervalSinceReferenceDate
+                let _ = store.note(text, now: now)
+                // Ticks only while something may still be fading.
+                TimelineView(.animation(minimumInterval: 1.0 / 60, paused: store.isSettled(now: now))) { context in
+                    content.textRenderer(LedgerAgentRevealRenderer(store: store,
+                                                                   tick: context.date.timeIntervalSinceReferenceDate))
+                }
+            } else {
+                content
+            }
+        } else {
+            content
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct LedgerAgentRevealRenderer: TextRenderer {
+    let store: LedgerAgentRevealStore
+    /// The frame being drawn; a new one redraws the fade.
+    let tick: TimeInterval
+
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        var glyphs = 0
+        for line in layout {
+            for run in line { glyphs += run.count }
+        }
+        let now = Date.timeIntervalSinceReferenceDate
+        let appeared = store.appearances(glyphs: glyphs, now: now)
+        func opacity(_ index: Int) -> Double {
+            index < appeared.count ? LedgerAgentRevealStore.opacity(appeared: appeared[index], now: now) : 1
+        }
+        var index = 0
+        for line in layout {
+            for run in line {
+                // Times grow along the text: a run whose last glyph is whole
+                // is whole, and is drawn in one go.
+                if run.isEmpty || opacity(index + run.count - 1) >= 1 {
+                    context.draw(run)
+                    index += run.count
+                    continue
+                }
+                for glyph in run {
+                    let alpha = opacity(index)
+                    index += 1
+                    if alpha >= 1 {
+                        context.draw(glyph)
+                    } else if alpha > 0 {
+                        var faded = context
+                        faded.opacity = alpha
+                        faded.draw(glyph)
+                    }
+                }
             }
         }
     }
@@ -386,11 +510,14 @@ struct LedgerAgentToolRow: View {
 struct LedgerAgentStreamingReply: View {
     let text: String
     var streaming = true
+    /// New text fades in (`LedgerAgentRevealText`): the live turn's text,
+    /// never a saved answer's.
+    var reveals = false
     var onAsk: (String) -> Void = { _ in }
 
     var body: some View {
         ForEach(Array(LedgerAgentReplyText.segments(text, ending: streaming ? .streaming : .finished).enumerated()), id: \.offset) { _, segment in
-            LedgerAgentReplyBlock(segment: segment, onAsk: onAsk)
+            LedgerAgentReplyBlock(segment: segment, revealsNewText: reveals, onAsk: onAsk)
         }
     }
 }
