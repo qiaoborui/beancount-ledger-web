@@ -93,6 +93,10 @@ struct TerminalPageChrome: ViewModifier {
     var showsTitle = true
     /// The bar's leading control when there is no title.
     var leadingActions: AnyView? = nil
+    /// A title of the page's own centred in a bar without the page title
+    /// (`showsTitle` false), as FlowDown centres a conversation's name
+    /// between its two buttons.
+    var centerTitle: AnyView? = nil
 
     private var titleLabel: some View {
         Text(compactTitle ?? title)
@@ -225,6 +229,15 @@ struct TerminalPageChrome: ViewModifier {
                                 leadingActions
                                 Spacer(minLength: 4)
                                 trailingCluster
+                            }
+                            .overlay {
+                                if let centerTitle {
+                                    BalancedPushedBarLayout(spacing: 8) {
+                                        Color.clear.frame(width: 44, height: 1)
+                                        centerTitle
+                                        Color.clear.frame(width: 96, height: 1)
+                                    }
+                                }
                             }
                         } else if isRoot {
                             HStack(spacing: 8) {
@@ -401,8 +414,8 @@ extension View {
 }
 
 extension View {
-    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, showsTimeRange: Bool = false, showsSync: Bool = true, actions: AnyView? = nil, balanced: Bool = false, titleAction: TerminalTitleAction? = nil, showsTitle: Bool = true, leadingActions: AnyView? = nil) -> some View {
-        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions, showsTimeRange: showsTimeRange, showsSync: showsSync, balanced: balanced, titleAction: titleAction, showsTitle: showsTitle, leadingActions: leadingActions))
+    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, showsTimeRange: Bool = false, showsSync: Bool = true, actions: AnyView? = nil, balanced: Bool = false, titleAction: TerminalTitleAction? = nil, showsTitle: Bool = true, leadingActions: AnyView? = nil, centerTitle: AnyView? = nil) -> some View {
+        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions, showsTimeRange: showsTimeRange, showsSync: showsSync, balanced: balanced, titleAction: titleAction, showsTitle: showsTitle, leadingActions: leadingActions, centerTitle: centerTitle))
     }
 }
 

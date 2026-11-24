@@ -97,7 +97,7 @@ struct LedgerAgentLiveTimeline: View {
             }
             .frame(minHeight: turnHeight, alignment: .top)
             if turn.compacting {
-                Text("正在压缩较早的对话…").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                Text("正在压缩较早的对话…").balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.meta)
                     .frame(maxWidth: .infinity)
             }
             footer
@@ -116,7 +116,7 @@ struct LedgerAgentLiveTimeline: View {
                 Text(Self.leaveHint).opacity(slow ? 0 : 1)
                 Text(Self.slowHint).opacity(slow ? 1 : 0)
             }
-            .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+            .balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.meta)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("正在回答")
             .accessibilityValue([activity, slow ? Self.slowHint : Self.leaveHint].compactMap { $0 }.joined(separator: "，"))
@@ -170,7 +170,7 @@ struct LedgerAgentRoundView: View, Equatable {
                 followPause?.pause()
                 withLedgerAnimation(LedgerMotion.disclose) { toggled.toggle() }
             } label: {
-                Text(title).balancedFont(size: 15).foregroundStyle(BalancedPalette.meta)
+                Text(title).balancedFont(size: 15).foregroundStyle(LedgerAgentPalette.meta)
                     .lineLimit(1).truncationMode(.tail)
                     // `正在思考…` settling into `思考了 2 秒` crossfades.
                     .contentTransition(.opacity)
@@ -219,12 +219,12 @@ struct LedgerAgentThought: View {
                     withLedgerAnimation(LedgerMotion.disclose) { open = true }
                 } label: {
                     HStack(spacing: 4) {
-                        Text(LedgerAgentRound.lastLine(text)).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                        Text(LedgerAgentRound.lastLine(text)).balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.meta)
                             .lineLimit(1).truncationMode(.tail)
                             .contentTransition(.opacity)
                             .ledgerAnimation(.easeInOut(duration: 0.25), value: LedgerAgentRound.lastLine(text))
                         Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(BalancedPalette.meta)
+                            .foregroundStyle(LedgerAgentPalette.meta)
                     }
                     .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
                     .contentShape(Rectangle())
@@ -234,7 +234,7 @@ struct LedgerAgentThought: View {
                 .accessibilityHint("展开思考")
                 .accessibilityIdentifier("ledger-agent-thinking")
             } else {
-                Text(text).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                Text(text).balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.meta)
                     .lineSpacing(3)
                     .textSelection(.enabled)
                     .modifier(LedgerAgentRevealText(text: text, active: reveals && !folded))
@@ -378,25 +378,25 @@ struct LedgerAgentToolRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         if !compact { status.frame(width: 14) }
                         Text(call.title).balancedFont(size: compact ? 13 : 13.5)
-                            .foregroundStyle(compact ? BalancedPalette.meta : BalancedPalette.secondary)
+                            .foregroundStyle(compact ? LedgerAgentPalette.meta : LedgerAgentPalette.secondary)
                             .lineLimit(open ? nil : compact ? 1 : 2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if call.interrupted == true {
-                            Text("已停止").balancedMono(size: 11).foregroundStyle(BalancedPalette.meta)
+                            Text("已停止").balancedMono(size: 11).foregroundStyle(LedgerAgentPalette.meta)
                         } else if compact, !open {
                             if call.isError {
-                                Text("失败").balancedMono(size: 11).foregroundStyle(BalancedPalette.expense)
+                                Text("失败").balancedMono(size: 11).foregroundStyle(LedgerAgentPalette.expense)
                             }
                         } else if let duration = Self.duration(call) {
-                            Text(duration).balancedMono(size: 11).foregroundStyle(BalancedPalette.meta)
+                            Text(duration).balancedMono(size: 11).foregroundStyle(LedgerAgentPalette.meta)
                         } else if call.isError {
-                            Text("失败").balancedMono(size: 11).foregroundStyle(BalancedPalette.expense)
+                            Text("失败").balancedMono(size: 11).foregroundStyle(LedgerAgentPalette.expense)
                         }
                     }
                     .frame(minHeight: compact ? 24 : 28)
                     if !compact, !open, !isRunning, let result = Self.result(call) {
                         Text(result.text).balancedMono(size: 11)
-                            .foregroundStyle(result.isError ? BalancedPalette.expense : BalancedPalette.meta)
+                            .foregroundStyle(result.isError ? LedgerAgentPalette.expense : LedgerAgentPalette.meta)
                             .lineLimit(Self.closedLines)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.leading, 22)
@@ -417,25 +417,25 @@ struct LedgerAgentToolRow: View {
 
     @ViewBuilder private var status: some View {
         if isRunning {
-            ProgressView().controlSize(.mini).tint(BalancedPalette.meta)
+            ProgressView().controlSize(.mini).tint(LedgerAgentPalette.meta)
         } else if call.interrupted == true {
-            Image(systemName: "minus").font(.system(size: 10, weight: .semibold)).foregroundStyle(BalancedPalette.meta)
+            Image(systemName: "minus").font(.system(size: 10, weight: .semibold)).foregroundStyle(LedgerAgentPalette.meta)
         } else if call.isError {
-            Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(BalancedPalette.expense)
+            Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(LedgerAgentPalette.expense)
         } else {
-            Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(BalancedPalette.meta)
+            Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold)).foregroundStyle(LedgerAgentPalette.meta)
         }
     }
 
     private var details: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let source = call.source ?? call.argumentsText {
-                Text(source).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.secondary)
+                Text(source).balancedMono(size: 11.5).foregroundStyle(LedgerAgentPalette.secondary)
                     .textSelection(.enabled)
             }
             if let result = Self.result(call) {
                 Text(result.text).balancedMono(size: 11)
-                    .foregroundStyle(result.isError ? BalancedPalette.expense : BalancedPalette.meta)
+                    .foregroundStyle(result.isError ? LedgerAgentPalette.expense : LedgerAgentPalette.meta)
                     .textSelection(.enabled)
             }
         }
@@ -514,11 +514,11 @@ struct LedgerAgentContextMeter: View {
         if let fraction = usage.fraction {
             let percent = Int((fraction * 100).rounded())
             // From the percent shown, so "80%" is never drawn in the calm tint.
-            let tint = percent >= Self.warningPercent ? BalancedPalette.expense : BalancedPalette.meta
+            let tint = percent >= Self.warningPercent ? LedgerAgentPalette.expense : LedgerAgentPalette.meta
             Button { detailPresented = true } label: {
                 HStack(spacing: 4) {
                     ZStack {
-                        Circle().stroke(BalancedPalette.meta.opacity(0.2), lineWidth: 2)
+                        Circle().stroke(LedgerAgentPalette.meta.opacity(0.2), lineWidth: 2)
                         Circle().trim(from: 0, to: fraction)
                             .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                             .rotationEffect(.degrees(-90))
@@ -536,7 +536,7 @@ struct LedgerAgentContextMeter: View {
             .accessibilityIdentifier("ledger-agent-context-meter")
             .popover(isPresented: $detailPresented) {
                 Text("上下文已用 \(percent)% · \(usage.contextTokens.formatted()) / \(usage.contextWindow.formatted()) tokens")
-                    .balancedFont(size: 13).foregroundStyle(BalancedPalette.ink)
+                    .balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.ink)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .presentationCompactAdaptation(.popover)
