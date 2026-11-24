@@ -491,9 +491,6 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     /// sidebar is open. It follows `isPresented`, never the finger: a drag
     /// only moves the page sideways until it commits, as FlowDown's does.
     @State private var carded = false
-    /// The screen's safe area without the keyboard, which the card takes
-    /// over from the page while it is drawn back.
-    @State private var screenInsets = EdgeInsets()
 
     private static let overShape = UnevenRoundedRectangle(bottomTrailingRadius: 28, topTrailingRadius: 28,
                                                           style: .continuous)
@@ -526,29 +523,18 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     /// Anything of the drawer is on screen.
     private var isOut: Bool { drawn || reveal > 0.5 || isPresented }
     private var cardedPage: Bool { pushes && carded }
-    /// The page takes over the screen's insets itself: only while the
-    /// drawer is out on a phone.
-    private var takesInsets: Bool { pushes && isOut }
 
     func body(content: Content) -> some View {
         ZStack(alignment: .topLeading) {
             content
                 .accessibilityHidden(isPresented)
                 .environment(\.ledgerAgentDrawerOpen, isPresented)
-                // FlowDown's card: the page lays itself out again inside the
-                // safe area less 20pt at the top and the bottom, with 28pt
-                // corners and a light shadow. The page owns the whole screen
-                // here and is given its safe area back by hand, so that while
-                // it is drawn back that area becomes the card's margin.
-                // Only while the drawer is out (the keyboard is down then):
-                // with the page at rest it keeps the system's safe area, so
-                // the keyboard and the screen's own insets never pass
-                // through this measuring, which fed back into the page's
-                // layout while the keyboard moved.
-                .safeAreaPadding(.top, takesInsets ? (cardedPage ? 0 : screenInsets.top) : 0)
-                .safeAreaPadding(.bottom, takesInsets ? (cardedPage ? 0 : screenInsets.bottom) : 0)
-                .padding(.top, takesInsets && cardedPage ? screenInsets.top + Self.cardInset : 0)
-                .padding(.bottom, takesInsets && cardedPage ? screenInsets.bottom + Self.cardInset : 0)
+                // FlowDown's card: the page lays itself out again 20pt inside
+                // the safe area at the top and the bottom. Only a padding:
+                // the safe area itself is left to the system, since taking
+                // it over by hand fed back into the page's layout and hung
+                // the app.
+                .padding(.vertical, cardedPage ? Self.cardInset : 0)
                 // The card's outline is drawn over the page rather than cut
                 // out of it: a clip left the page's scroll view, a UIKit
                 // view, with square corners and its edge effect showing
@@ -556,13 +542,12 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                 // painted in the drawer's ground, with the shadow on top.
                 .overlay {
                     if pushes && isOut {
-                        LedgerAgentCardFrame(radius: Self.cardRadius)
+                        LedgerAgentCardFrame(radius: cardedPage ? Self.cardRadius : 0)
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                     }
                 }
                 .overlay { if isOut { cover } }
-                .ignoresSafeArea(takesInsets ? .container : [], edges: .vertical)
                 .background {
                     LedgerAgentDrawerPan(
                         mode: !(width > 0) ? .off : isPresented ? .closes : (edgeOpens ? .opens : .off),
@@ -573,13 +558,6 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
             if loaded {
                 drawer.zIndex(pushes ? -1 : 1)
             }
-        }
-        // The window's own safe area, which never includes the keyboard.
-        .background {
-            LedgerWindowInsetsReader { insets in
-                if insets != screenInsets { screenInsets = insets }
-            }
-            .allowsHitTesting(false)
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: openTicks)
         .onChange(of: isPresented) { _, shown in
@@ -853,44 +831,6 @@ private struct LedgerAgentCardFrame: UIViewRepresentable {
         override func didMoveToWindow() {
             super.didMoveToWindow()
             setNeedsLayout()
-        }
-    }
-}
-
-/// Reports the window's safe area insets, which leave the keyboard out.
-private struct LedgerWindowInsetsReader: UIViewRepresentable {
-    var onChange: (EdgeInsets) -> Void
-
-    func makeUIView(context: Context) -> ReaderView {
-        let view = ReaderView()
-        view.isUserInteractionEnabled = false
-        return view
-    }
-
-    func updateUIView(_ view: ReaderView, context: Context) {
-        view.onChange = onChange
-    }
-
-    final class ReaderView: UIView {
-        var onChange: ((EdgeInsets) -> Void)?
-        private var last: UIEdgeInsets?
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            report()
-        }
-
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            report()
-        }
-
-        private func report() {
-            guard let insets = window?.safeAreaInsets, insets != last else { return }
-            last = insets
-            let edges = EdgeInsets(top: insets.top, leading: insets.left, bottom: insets.bottom, trailing: insets.right)
-            // Out of the layout pass that reported it.
-            DispatchQueue.main.async { [weak self] in self?.onChange?(edges) }
         }
     }
 }
