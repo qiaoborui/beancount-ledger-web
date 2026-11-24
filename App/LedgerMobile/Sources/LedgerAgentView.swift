@@ -2315,14 +2315,20 @@ struct LedgerAgentReplyBlock: View {
                                weight: BalancedSerifWeight = .regular,
                                size: CGFloat = BalancedReading.size,
                                relativeTo: Font.TextStyle = .body) -> AttributedString {
-        let text = LedgerAgentReplyText.encodingLedgerLinks(text)
-        var string = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(text)
+        // A streaming reply redraws every frame, but only its last block
+        // changes; the blocks before it come from here instead of being
+        // parsed and set again.
+        let key = "\(serif)|\(weight)|\(size)|\(relativeTo)|\(text)"
+        if let cached = LedgerAgentInlineCache.entries[key] { return cached }
+        let markdown = LedgerAgentReplyText.encodingLedgerLinks(text)
+        var string = (try? AttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(markdown)
         for run in string.runs where run.link != nil {
             string[run.range].underlineStyle = .single
         }
-        guard serif else { return string }
-        return BalancedReading.serifified(string, weight: weight, size: size, relativeTo: relativeTo)
+        if serif { string = BalancedReading.serifified(string, weight: weight, size: size, relativeTo: relativeTo) }
+        LedgerAgentInlineCache.store(string, for: key)
+        return string
     }
 
     /// Amount columns align right so their digits line up.
@@ -2333,6 +2339,20 @@ struct LedgerAgentReplyBlock: View {
 
     private static func isAmount(_ cell: String) -> Bool {
         cell.replacingOccurrences(of: "*", with: "").range(of: #"^[-+¥$€£]?\s?-?[\d,]+(\.\d+)?\s?([A-Z]{3}|元|%)?$"#, options: .regularExpression) != nil
+    }
+}
+
+/// Inline Markdown already set for a reply block, by its text and face.
+/// Fonts in it scale with Dynamic Type when drawn, so an entry never goes
+/// stale; the cache only ever holds the last few hundred.
+@MainActor
+private enum LedgerAgentInlineCache {
+    private(set) static var entries: [String: AttributedString] = [:]
+    private static let limit = 400
+
+    static func store(_ string: AttributedString, for key: String) {
+        if entries.count >= limit { entries.removeAll(keepingCapacity: true) }
+        entries[key] = string
     }
 }
 

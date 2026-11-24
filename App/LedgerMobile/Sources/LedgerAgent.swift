@@ -1361,8 +1361,9 @@ final class LedgerAgentConversation: ObservableObject {
     /// What the running turn is doing now; nil before its first event.
     @Published private(set) var step: LedgerAgentStep?
     /// The running turn as it streams in; nil before its first streamed
-    /// event, and from cores that do not stream. Text arrives at most every
-    /// `liveInterval`, so a fast model does not redraw the page per token.
+    /// event, and from cores that do not stream. Text is let out evenly a
+    /// frame at a time (`LedgerAgentStreamPacer`), so a burst from the model
+    /// writes on steadily instead of landing as one jump.
     @Published private(set) var live: LedgerAgentLiveTurn?
     /// How full the model's context was at the latest turn, for the meter.
     @Published private(set) var usage: LedgerAgentUsage?
@@ -1432,11 +1433,13 @@ final class LedgerAgentConversation: ObservableObject {
     /// Reads the App settings a turn sends and writes the sections it changed;
     /// nil leaves the settings tools off, as in a test or a preview.
     var appSettings: LedgerAgentAppSettingsHost?
-    /// Every streamed event so far; `live` is this as last published.
+    /// Every streamed event so far; `live` trails it by what the pacer
+    /// still holds, at most `LedgerAgentStreamPacer.drainWindow`.
     private var liveDraft: LedgerAgentLiveTurn?
-    private var livePublishedAt: Date?
-    private var liveFlush: Task<Void, Never>?
-    static let liveInterval: TimeInterval = 0.08
+    /// The events received but not yet drawn, in order.
+    private var livePacer = LedgerAgentStreamPacer()
+    /// Lets the pacer's next frame out while it holds anything.
+    private var livePump: Task<Void, Never>?
 
     /// A turn the user stopped whose native loop has not returned yet. It
     /// still brings back the authoritative partial reply and a transcript
@@ -2177,9 +2180,10 @@ final class LedgerAgentConversation: ObservableObject {
         lifecycle?.turnStepped(step, count: stepCount)
     }
 
-    /// Folds a streamed event into the running turn. Text and reasoning
-    /// deltas are published at most every `liveInterval`; anything else at
-    /// once, with whatever text it follows.
+    /// Folds a streamed event into the running turn. `liveDraft` takes it
+    /// at once, since a stop keeps everything received; the page gets it
+    /// through the pacer, which lets text out evenly and every other event
+    /// in its place after the text before it.
     private func receive(_ event: LedgerAgentLiveEvent) {
         var turn = liveDraft ?? LedgerAgentLiveTurn()
         turn.apply(event)
@@ -2187,32 +2191,43 @@ final class LedgerAgentConversation: ObservableObject {
         if case let .usage(usage) = event, usage.fraction != nil { self.usage = usage }
         // The stream is not quiet; the live footer's slow hint counts from here.
         stepSince = Date()
-        switch event {
-        case .textDelta, .thinkingDelta:
-            let wait = Self.liveInterval - Date().timeIntervalSince(livePublishedAt ?? .distantPast)
-            guard wait > 0 else { return publishLive() }
-            guard liveFlush == nil else { return }
-            liveFlush = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
-                guard !Task.isCancelled else { return }
-                self?.publishLive()
+        livePacer.enqueue(event)
+        guard livePump == nil else { return }
+        // The first frame goes out at once; the pump lets out the rest.
+        releaseLiveFrame()
+        guard !livePacer.isEmpty else { return }
+        livePump = Task { [weak self] in
+            while !Task.isCancelled {
+                let interval = self?.liveFrameInterval ?? 0
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                guard !Task.isCancelled, let self else { return }
+                self.releaseLiveFrame()
+                if self.livePacer.isEmpty {
+                    self.livePump = nil
+                    return
+                }
             }
-        default:
-            publishLive()
         }
     }
 
-    private func publishLive() {
-        liveFlush?.cancel()
-        liveFlush = nil
-        livePublishedAt = Date()
-        live = liveDraft
+    private var liveFrameInterval: TimeInterval {
+        LedgerAgentStreamPacer.frameInterval(shownCharacters: live?.text.count ?? 0)
+    }
+
+    /// Draws one frame of what the pacer holds.
+    private func releaseLiveFrame() {
+        let frames = LedgerAgentStreamPacer.drainWindow / liveFrameInterval
+        let events = livePacer.release(frames: frames)
+        guard !events.isEmpty else { return }
+        var shown = live ?? LedgerAgentLiveTurn()
+        for event in events { shown.apply(event) }
+        live = shown
     }
 
     private func clearLive() {
-        liveFlush?.cancel()
-        liveFlush = nil
-        livePublishedAt = nil
+        livePump?.cancel()
+        livePump = nil
+        livePacer = LedgerAgentStreamPacer()
         liveDraft = nil
         live = nil
     }
@@ -2922,7 +2937,79 @@ enum LedgerAgentReplyText {
             }
         }
         flush(unclosed: true)
+        // Mid-stream, an inline mark opened but not yet closed would show
+        // as a bare `**` or backtick and then snap into bold or code when
+        // its partner arrives; the tail is drawn as if it had.
+        if ending == .streaming, !inCode, let last = segments.last {
+            segments[segments.count - 1] = closingTail(last)
+        }
         return segments
+    }
+
+    private static func closingTail(_ segment: Segment) -> Segment {
+        switch segment {
+        case let .prose(text): return .prose(closingInlineMarks(text))
+        case let .heading(level, text): return .heading(level: level, text: closingInlineMarks(text))
+        case let .quote(text): return .quote(closingInlineMarks(text))
+        case .list(let ordered, var items) where !items.isEmpty:
+            items[items.count - 1].text = closingInlineMarks(items[items.count - 1].text)
+            return .list(ordered: ordered, items: items)
+        default: return segment
+        }
+    }
+
+    /// Text still being written with its open `**` and code span closed.
+    /// A mark with nothing after it yet is left out instead, as is a lone
+    /// trailing `*`, most likely the first half of a `**` still arriving.
+    static func closingInlineMarks(_ text: String) -> String {
+        var characters = Array(text)
+        var codeRun = 0
+        var codeOpenedAt = 0
+        var strongOpenedAt: Int?
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            if character == "\\", codeRun == 0 {
+                index += 2
+                continue
+            }
+            guard character == "`" || character == "*" else {
+                index += 1
+                continue
+            }
+            var end = index
+            while end < characters.count, characters[end] == character { end += 1 }
+            let run = end - index
+            if character == "`" {
+                if codeRun == 0 {
+                    codeRun = run
+                    codeOpenedAt = index
+                } else if run == codeRun {
+                    codeRun = 0
+                }
+            } else if codeRun == 0, run >= 2 {
+                strongOpenedAt = strongOpenedAt == nil ? index : nil
+            }
+            index = end
+        }
+        var suffix = ""
+        if codeRun > 0 {
+            if codeOpenedAt + codeRun == characters.count {
+                characters.removeLast(codeRun)
+            } else {
+                suffix += String(repeating: "`", count: codeRun)
+            }
+        } else if characters.last == "*", characters.dropLast().last != "*" {
+            characters.removeLast()
+        }
+        if let opened = strongOpenedAt {
+            if suffix.isEmpty, characters[opened...].allSatisfy({ $0 == "*" }) {
+                characters.removeSubrange(opened...)
+            } else {
+                suffix += "**"
+            }
+        }
+        return String(characters) + suffix
     }
 
     private static func blocks(_ lines: [Substring]) -> [Segment] {
