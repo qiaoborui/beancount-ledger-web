@@ -442,7 +442,7 @@ private final class LedgerAgentDrawerMotion {
     /// under the page rather than lying still.
     static let parallax: CGFloat = 50
     /// How much the page shrinks into a card at the drawer fully out.
-    static let cardShrink: CGFloat = 0.1
+    static let cardShrink: CGFloat = 0.08
 
     func began(from: CGFloat, to: CGFloat, velocity: CGFloat) {
         self.from = from
@@ -527,7 +527,10 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     /// drawer (regular), at the drawer fully out.
     private var veilStrength: CGFloat {
         guard pushes else { return colorScheme == .dark ? 0.45 : 0.2 }
-        return colorScheme == .dark ? 0.4 : 0.08
+        // FlowDown leaves its chat card undimmed: the card and its shadow
+        // are enough to tell it from the sidebar, and a grey card is what
+        // made the page look like a second, muddier layer.
+        return 0
     }
     /// Compact width pushes the page aside; regular width slides the drawer
     /// over it, since the system navigation bar there would not move.
@@ -541,21 +544,21 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
             content
                 .accessibilityHidden(isPresented)
                 .overlay { if isOut { cover } }
-                // Compact width: the page draws back into a floating card,
-                // as FlowDown's chat does beside its sidebar, with a shadow
-                // from a plain shape behind it so the page itself is never
-                // drawn offscreen.
-                .scaleEffect(pushes ? 1 - LedgerAgentDrawerMotion.cardShrink * progress : 1, anchor: .leading)
+                // Compact width: the page draws back into one floating card,
+                // as FlowDown's chat does beside its sidebar. The shadow is
+                // a plain shape behind the page, and the page, its corners
+                // and the shadow scale as one, from one anchor, so they stay
+                // one card instead of drifting apart into layers.
                 .background {
                     if pushes && isOut {
                         RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous)
                             .fill(BalancedPalette.page)
-                            .shadow(color: .black.opacity(0.12 * progress), radius: 16, x: 0, y: 0)
-                            .scaleEffect(1 - LedgerAgentDrawerMotion.cardShrink * progress, anchor: .leading)
+                            .shadow(color: .black.opacity(0.1 * progress), radius: 8, x: 0, y: 0)
                             .ignoresSafeArea()
                             .allowsHitTesting(false)
                     }
                 }
+                .scaleEffect(pushes ? 1 - LedgerAgentDrawerMotion.cardShrink * progress : 1, anchor: .leading)
                 .background {
                     LedgerAgentDrawerPan(
                         mode: !(width > 0) ? .off : isPresented ? .closes : (edgeOpens ? .opens : .off),
