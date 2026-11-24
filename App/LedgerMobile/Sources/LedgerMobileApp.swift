@@ -17,6 +17,10 @@ struct LedgerMobileApp: App {
         // As early as possible: a crash during launch or the first ledger read
         // then still has the launch breadcrumb and the version in its report.
         LedgerCrashLog.shared.install()
+        #if os(iOS)
+        // Empty unless built with LEDGER_PERF_PROBE.
+        LedgerMotionProbe.shared.start()
+        #endif
         // Opt-in measurement recording must exist before the first ledger work
         // so a cold-start run is captured. Without `--ledger-perf-record` (and
         // without a stored opt-in) this changes nothing.

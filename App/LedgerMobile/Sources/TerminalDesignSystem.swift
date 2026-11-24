@@ -75,6 +75,10 @@ struct TerminalTitleAction {
 struct TerminalPageChrome: ViewModifier {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    /// Set inside 账本助手's drawer card: the page draws its own bar in a
+    /// regular width too, since the system bar would not move with the card.
+    @Environment(\.ledgerChromeDrawsOwnBar) private var drawsOwnBar
+    private var systemBar: Bool { horizontalSizeClass == .regular && !drawsOwnBar }
     var isRoot = true
     @EnvironmentObject private var session: LedgerSession
     let title: String
@@ -193,13 +197,13 @@ struct TerminalPageChrome: ViewModifier {
             .navigationTitle(showsTitle ? title : "")
             .navigationBarTitleDisplayMode(.inline)
             .background {
-                if !isRoot && horizontalSizeClass != .regular {
+                if !isRoot && !systemBar {
                     TerminalBackGestureBridge().frame(width: 0, height: 0)
                 }
             }
-            .toolbar(horizontalSizeClass == .regular ? .visible : .hidden, for: .navigationBar)
+            .toolbar(systemBar ? .visible : .hidden, for: .navigationBar)
             .toolbar {
-                if horizontalSizeClass == .regular {
+                if systemBar {
                     if !showsTitle, let leadingActions {
                         ToolbarItem(placement: .topBarLeading) { leadingActions }
                     }
@@ -214,7 +218,7 @@ struct TerminalPageChrome: ViewModifier {
             }
             .ledgerSoftTopEdge()
             .ledgerGlassTopBar {
-                if horizontalSizeClass != .regular {
+                if !systemBar {
                     // `.appbar` (styles.css): `padding: 4px var(--pad) 10px`
                     // with `--pad: 20px`, so a root title sits at x=20. `.back`
                     // is a 44×44 hit target with `margin-left: -8px`, pulling

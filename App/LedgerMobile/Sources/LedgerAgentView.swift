@@ -25,12 +25,39 @@ struct LedgerAgentView: View {
     /// Shared, so a turn keeps going when this page closes or the app leaves
     /// the screen; `LedgerAgentBackgroundRun` holds it while it runs there.
     @ObservedObject private var sessions = LedgerAgentSessions.shared
+    @ObservedObject private var settings = LedgerAgentSettings.shared
+    /// The history drawer, moved by UIKit (`LedgerAgentDrawerShell`).
+    @StateObject private var drawer = LedgerAgentDrawerState()
 
     var body: some View {
-        LedgerAgentChatScreen(isRoot: isRoot, onClose: onClose, conversation: sessions.current)
-            .id(sessions.current.id)
-            // Capsule buttons and round cards, to sit with the glass bars.
-            .balancedRoundedControls()
+        // History is a drawer beside the page, not a sheet, and the page
+        // with its bar and dock moves into a card beside it. A drag from the
+        // leading edge opens it on a root page; a pushed one leaves that
+        // edge to the system's back swipe, as does a page pushed from it.
+        LedgerAgentDrawerShell(state: drawer, edgeOpens: isRoot && settings.isReady && drawer.route == nil) {
+            LedgerAgentChatScreen(isRoot: isRoot, onClose: onClose, conversation: sessions.current, drawer: drawer)
+                .id(sessions.current.id)
+                // Capsule buttons and round cards, to sit with the glass bars.
+                .balancedRoundedControls()
+        } drawer: { closings in
+            LedgerAgentHistoryView(sharesText: session.amountsVisible, closings: closings, actions: drawer.actions)
+        }
+        // The controller lays the page and the drawer out over the whole
+        // screen and lets the page meet the keyboard itself, so the
+        // keyboard never resizes the shell.
+        .ignoresSafeArea()
+        // The page draws its own glass bar inside the card.
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(item: $drawer.route) { route in
+            drawerPage(route)
+                // This page hides the system bar, so the pages pushed from
+                // its drawer draw the same glass bar rather than bringing
+                // the system one in and out under a back swipe.
+                .environment(\.ledgerBarlessPush, true)
+        }
+        // A page pushed from the drawer now covers it: it closes where it
+        // cannot be seen, so a swipe back lands on the conversation.
+        .onDisappear { if drawer.isPresented { drawer.close(animated: false) } }
             // The lock and privacy cover hide this page; the conversations
             // stay, so a turn sent before leaving the app still lands here.
             // Another ledger has its own history.
@@ -65,6 +92,29 @@ struct LedgerAgentView: View {
             }
     }
 
+    /// A place picked in the drawer, on this page's stack.
+    @ViewBuilder private func drawerPage(_ route: LedgerAgentDrawerRoute) -> some View {
+        switch route {
+        case .terminal: LedgerLinuxTerminalScreen()
+        case .files: LedgerLinuxFilesView(path: "/root")
+        case .skills: LedgerAgentSkillsView()
+        case .memory: LedgerAgentMemoryView()
+        case .automations:
+            LedgerAutomationView(onOpen: { run, reloadingDraft in
+                drawer.route = nil
+                Task { await LedgerAutomationCenter.shared.open(run, reloadingDraft: reloadingDraft) }
+            })
+        case .artifacts:
+            LedgerAgentArtifactsView(onRevise: { artifact in
+                drawer.route = nil
+                drawer.revise(artifact)
+            }, onAsk: { question in
+                drawer.route = nil
+                drawer.ask(question)
+            })
+        }
+    }
+
     private func takeSharedFiles() async {
         guard session.localRepository != nil, sessions.queuedShare == nil else { return }
         let waiting = await Task.detached(priority: .userInitiated) {
@@ -91,16 +141,14 @@ private struct LedgerAgentChatScreen: View {
     var isRoot: Bool
     var onClose: (() -> Void)?
     @ObservedObject var conversation: LedgerAgentConversation
+    /// Not observed: opening and closing the drawer redraws nothing here.
+    let drawer: LedgerAgentDrawerState
     @EnvironmentObject private var session: LedgerSession
     @ObservedObject private var settings = LedgerAgentSettings.shared
     @ObservedObject private var sessions = LedgerAgentSessions.shared
     @ObservedObject private var starters = LedgerAgentStarters.shared
     @State private var draft = ""
-    @State private var historyPresented = false
     @State private var memoryPresented = false
-    /// A place picked at the top of the history drawer, pushed on this
-    /// page's stack.
-    @State private var drawerRoute: LedgerAgentDrawerRoute?
     /// When the app last left the screen, for a recap on a long absence.
     @State private var awaySince: Date?
     @State private var settingsPresented = false
@@ -195,26 +243,7 @@ private struct LedgerAgentChatScreen: View {
             NavigationStack { LedgerAgentMemoryView() }
                 .ledgerPrivacyProtectedSheet()
         }
-        // History is a drawer beside the page, not a sheet. It is applied
-        // after the chrome so the top bar and the dock move with the page.
-        // A drag from the leading edge opens it on a root page; a pushed one
-        // leaves that edge to the system's back swipe.
-        .ledgerAgentHistoryDrawer(isPresented: $historyPresented,
-                                  // Not under a page pushed from the drawer:
-                                  // its back swipe is the system's alone.
-                                  edgeOpens: isRoot && settings.isReady && drawerRoute == nil,
-                                  sharesText: session.amountsVisible,
-                                  openSettings: { settingsPresented = true },
-                                  openRoute: { drawerRoute = $0 })
-        .navigationDestination(item: $drawerRoute) { route in
-            drawerPage(route)
-                // This page hides the system bar, so the pages pushed from
-                // its drawer draw the same glass bar rather than bringing
-                // the system one in and out under a back swipe.
-                .environment(\.ledgerBarlessPush, true)
-        }
         .ledgerAgentRenameAlert($renaming)
-        .onChange(of: historyPresented) { _, shown in if shown { composerFocused = false } }
         .fileImporter(isPresented: $choosingFiles, allowedContentTypes: LedgerAgentAttachments.pickerTypes,
                       allowsMultipleSelection: true) { result in
             switch result {
@@ -250,6 +279,9 @@ private struct LedgerAgentChatScreen: View {
         // An edit belongs to its conversation.
         .onChange(of: conversation.id) { _, _ in cancelEditing() }
         .onAppear {
+            drawer.openSettings = { settingsPresented = true }
+            drawer.revise = { revise($0) }
+            drawer.ask = { ask($0) }
             conversation.isOnScreen = true
             LedgerAgentBackgroundRun.shared.conversationSeen()
             resumeIfInterrupted()
@@ -475,7 +507,7 @@ private struct LedgerAgentChatScreen: View {
 
     private var historyButton: some View {
         circleButton("sidebar.left", label: "历史对话", identifier: "ledger-agent-history") {
-            historyPresented = true
+            drawer.open()
         }
     }
 
@@ -501,29 +533,6 @@ private struct LedgerAgentChatScreen: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: conversationIsFresh)
-    }
-
-    /// A place picked in the drawer, on this page's stack.
-    @ViewBuilder private func drawerPage(_ route: LedgerAgentDrawerRoute) -> some View {
-        switch route {
-        case .terminal: LedgerLinuxTerminalScreen()
-        case .files: LedgerLinuxFilesView(path: "/root")
-        case .skills: LedgerAgentSkillsView()
-        case .memory: LedgerAgentMemoryView()
-        case .automations:
-            LedgerAutomationView(onOpen: { run, reloadingDraft in
-                drawerRoute = nil
-                Task { await LedgerAutomationCenter.shared.open(run, reloadingDraft: reloadingDraft) }
-            })
-        case .artifacts:
-            LedgerAgentArtifactsView(onRevise: { artifact in
-                drawerRoute = nil
-                revise(artifact)
-            }, onAsk: { question in
-                drawerRoute = nil
-                ask(question)
-            })
-        }
     }
 
     // MARK: Conversation
@@ -614,7 +623,7 @@ private struct LedgerAgentChatScreen: View {
                         .onDisappear {
                             // A page pushed over this one hides the anchor
                             // without the conversation moving.
-                            if drawerRoute == nil, isAtBottom { isAtBottom = false }
+                            if drawer.route == nil, isAtBottom { isAtBottom = false }
                         }
                 }
                 .padding(.horizontal, 20)
@@ -1895,11 +1904,9 @@ private struct LedgerAgentChatScreen: View {
 /// corners, to sit with the glass), never a bubble with a tail.
 /// Files sent with it are listed above the text.
 /// The conversation's name, centred in the bar as FlowDown sets it: 17pt
-/// semibold in the label colour. It blurs away while the history drawer is
-/// out, since the page is then a card set aside.
+/// semibold in the label colour.
 private struct LedgerAgentBarTitle: View {
     let text: String
-    @Environment(\.ledgerAgentDrawerOpen) private var drawerOpen
 
     var body: some View {
         Text(text)
@@ -1908,9 +1915,6 @@ private struct LedgerAgentBarTitle: View {
             .lineLimit(1)
             .truncationMode(.tail)
             .contentTransition(.opacity)
-            .blur(radius: drawerOpen ? 6 : 0)
-            .opacity(drawerOpen ? 0.4 : 1)
-            .animation(.interpolatingSpring(duration: 0.5, bounce: 0.1), value: drawerOpen)
             .animation(.easeInOut(duration: 0.25), value: text)
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("ledger-agent-title")

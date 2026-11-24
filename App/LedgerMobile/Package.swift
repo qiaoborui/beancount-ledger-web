@@ -102,6 +102,7 @@ let package = Package(
                 "TransactionReceiptRenderingTests.swift",
                 "LedgerColorThemeRenderingTests.swift",
                 "LedgerMarkTests.swift",
+                "LedgerAgentDrawerShellTests.swift",
             ]
         ),
     ]
