@@ -28,8 +28,9 @@ enum LedgerAgentPalette {
     /// The drawer's ground, from the page colour at the top to this at the
     /// bottom: FlowDown's sidebar lies on a soft wash of colour (its blurred
     /// background texture) rather than on the page.
+    /// Plain, without FlowDown's blue wash: the page colour throughout.
     static let groundTopUI = dynamic(light: 0xFFFFFF, dark: 0x242424)
-    static let groundBottomUI = dynamic(light: 0xD6EEF5, dark: 0x1B2A30)
+    static let groundBottomUI = dynamic(light: 0xFFFFFF, dark: 0x242424)
     static var ground: LinearGradient {
         LinearGradient(colors: [Color(uiColor: groundTopUI), Color(uiColor: groundBottomUI)],
                        startPoint: .top, endPoint: .bottom)
@@ -37,10 +38,10 @@ enum LedgerAgentPalette {
 
     /// FlowDown's `AccentColor`.
     static let accent = Color(uiColor: UIColor(red: 65 / 255, green: 190 / 255, blue: 171 / 255, alpha: 1))
-    /// The user's bubble: FlowDown's accent at 10% to 15%, top to bottom.
+    /// The user's bubble: FlowDown's shape, in a neutral grey rather than
+    /// its teal.
     static var bubble: LinearGradient {
-        LinearGradient(colors: [accent.opacity(0.10), accent.opacity(0.15)],
-                       startPoint: UnitPoint(x: 0.6, y: 0), endPoint: UnitPoint(x: 0.4, y: 1))
+        LinearGradient(colors: [sunken, sunken], startPoint: .top, endPoint: .bottom)
     }
 
     static let income = BalancedPalette.income

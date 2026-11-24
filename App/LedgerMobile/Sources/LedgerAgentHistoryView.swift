@@ -218,10 +218,10 @@ struct LedgerAgentHistoryView: View {
         .listRowSeparator(.hidden)
         // The conversation on screen sits on a sunken block, inset 14pt
         // from the drawer's edges like Claude's selected row.
-        // FlowDown's selected row: a rounded pill tinted with its accent.
+        // The selected row: a rounded pill, as FlowDown's.
         .listRowBackground(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(item.id == sessions.current.id ? LedgerAgentPalette.accent.opacity(0.12) : Color.clear)
+                .fill(item.id == sessions.current.id ? LedgerAgentHistoryDrawer.selectedFill : Color.clear)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 1)
         )
@@ -607,7 +607,7 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                     // As wide as the screen and then some: the page's rounded
                     // corners and a spring's last point past the open
                     // position show this ground, never what lies behind it.
-                    Rectangle().fill(LedgerAgentPalette.ground)
+                    Rectangle().fill(Self.fill)
                         .frame(width: max(pageWidth, width) + 60)
                         .ignoresSafeArea()
                 } else {
@@ -819,19 +819,16 @@ private struct LedgerAgentCardFrame: UIViewRepresentable {
             let card = UIBezierPath(roundedRect: bounds, cornerRadius: radius)
             let outside = UIBezierPath(rect: bounds.insetBy(dx: -Self.reach, dy: -Self.reach))
             outside.append(card)
-            // The ground's wash runs down the screen, not the card, so the
-            // margin matches the drawer's ground beside it.
-            let screen = window?.bounds ?? bounds
-            let top = window.map { convert(CGPoint.zero, to: $0).y } ?? 0
-            ground.frame = CGRect(x: -Self.reach, y: -top, width: Self.reach * 2 + bounds.width,
-                                  height: max(screen.height, bounds.height))
+            // Only the card's own column, above it, below it and in its
+            // corners: the drawer lies to its left and must stay in view.
+            ground.frame = CGRect(x: 0, y: -Self.reach, width: bounds.width + Self.reach,
+                                  height: bounds.height + Self.reach * 2)
             ground.colors = [LedgerAgentPalette.groundTopUI, LedgerAgentPalette.groundBottomUI]
                 .map { $0.resolvedColor(with: traitCollection).cgColor }
             // The mask is in the ground's own coordinates.
-            let shift = CGAffineTransform(translationX: Self.reach, y: top)
-            let maskPath = UIBezierPath(rect: CGRect(x: 0, y: 0, width: ground.frame.width,
-                                                     height: ground.frame.height))
-            maskPath.append(UIBezierPath(roundedRect: bounds.applying(shift), cornerRadius: radius))
+            let maskPath = UIBezierPath(rect: CGRect(origin: .zero, size: ground.frame.size))
+            maskPath.append(UIBezierPath(roundedRect: bounds.offsetBy(dx: 0, dy: Self.reach),
+                                         cornerRadius: radius))
             groundMask.frame = CGRect(origin: .zero, size: ground.frame.size)
             groundMask.path = maskPath.cgPath
             shadow.frame = bounds

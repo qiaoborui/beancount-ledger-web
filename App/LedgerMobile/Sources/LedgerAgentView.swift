@@ -1925,14 +1925,13 @@ private struct LedgerAgentQuestion: View {
                     .lineSpacing(4)
                     .textSelection(.enabled)
             }
-            // FlowDown's bubble: 12pt padding and corners on its accent
-            // at 10% to 15%.
+            // FlowDown's bubble: 12pt padding and corners, in grey.
             .padding(12)
             .background(LedgerAgentPalette.bubble)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
                 if isEditing {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(LedgerAgentPalette.accent, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(LedgerAgentPalette.ruleStrong, lineWidth: 1)
                 }
             }
         }
