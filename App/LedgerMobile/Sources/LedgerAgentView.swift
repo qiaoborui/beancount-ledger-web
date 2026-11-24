@@ -34,7 +34,8 @@ struct LedgerAgentView: View {
         // with its bar and dock moves into a card beside it. A drag from the
         // leading edge opens it on a root page; a pushed one leaves that
         // edge to the system's back swipe, as does a page pushed from it.
-        LedgerAgentDrawerShell(state: drawer, edgeOpens: isRoot && settings.isReady && drawer.route == nil) {
+        LedgerAgentDrawerShell(state: drawer, edgeOpens: isRoot && settings.isReady && drawer.route == nil,
+                               drawerKey: session.amountsVisible) {
             LedgerAgentChatScreen(isRoot: isRoot, onClose: onClose, conversation: sessions.current, drawer: drawer)
                 .id(sessions.current.id)
                 // Capsule buttons and round cards, to sit with the glass bars.

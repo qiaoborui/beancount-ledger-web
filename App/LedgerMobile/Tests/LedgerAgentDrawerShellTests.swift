@@ -42,7 +42,7 @@ final class LedgerAgentDrawerShellTests: XCTestCase {
         let window = UIWindow(windowScene: scene)
         let controller = LedgerAgentDrawerController()
         let probe = Probe()
-        controller.makeDrawer = { _ in AnyView(Color.gray) }
+        controller.updateDrawer(key: 0) { _ in AnyView(Color.gray) }
         controller.setPage(AnyView(Page(probe: probe)))
         controller.edgeOpens = true
         window.rootViewController = controller

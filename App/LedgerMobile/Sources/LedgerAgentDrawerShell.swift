@@ -23,6 +23,9 @@ struct LedgerAgentDrawerShell<Page: View, Drawer: View>: UIViewControllerReprese
     let state: LedgerAgentDrawerState
     /// A drag to the right opens the drawer: a root page, nothing pushed.
     var edgeOpens: Bool
+    /// What the drawer's content is built from besides the number of times
+    /// it closed; the drawer is drawn again only when this changes.
+    var drawerKey: AnyHashable = 0
     @ViewBuilder var page: () -> Page
     /// The drawer's content, given how many times it has gone all the way in.
     var drawer: (Int) -> Drawer
@@ -46,8 +49,9 @@ struct LedgerAgentDrawerShell<Page: View, Drawer: View>: UIViewControllerReprese
             // the stack around this controller cannot move with the card.
             .environment(\.ledgerChromeDrawsOwnBar, true)
             .environment(\.self, environment)))
-        controller.makeDrawer = { closings in AnyView(drawer(closings).environment(\.self, environment)) }
-        controller.refreshDrawer()
+        controller.updateDrawer(key: drawerKey) { closings in
+            AnyView(drawer(closings).environment(\.self, environment))
+        }
     }
 
     static func dismantleUIViewController(_ controller: LedgerAgentDrawerController, coordinator: ()) {
@@ -82,6 +86,25 @@ final class LedgerAgentDrawerState: ObservableObject {
     func close(animated: Bool = true) { controller?.setOpen(false, animated: animated) }
 }
 
+/// What the drawer's hosting controller shows. Its content is redrawn when
+/// the drawer has closed (to put a search away) or its key changed, never
+/// for an open or a close.
+@MainActor
+private final class LedgerAgentDrawerFeed: ObservableObject {
+    var make: (Int) -> AnyView = { _ in AnyView(EmptyView()) }
+    var key: AnyHashable?
+    @Published var closings = 0
+    @Published var insets = EdgeInsets()
+}
+
+private struct LedgerAgentDrawerHostView: View {
+    @ObservedObject var feed: LedgerAgentDrawerFeed
+
+    var body: some View {
+        feed.make(feed.closings).safeAreaPadding(feed.insets)
+    }
+}
+
 private struct LedgerChromeDrawsOwnBarKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -104,7 +127,6 @@ final class LedgerAgentDrawerController: UIViewController, UIGestureRecognizerDe
     var edgeOpens = false {
         didSet { updatePan() }
     }
-    var makeDrawer: ((Int) -> AnyView)?
     private(set) var isOpen = false
 
     /// FlowDown's numbers: the card's corners, its distance from the safe
@@ -149,6 +171,8 @@ final class LedgerAgentDrawerController: UIViewController, UIGestureRecognizerDe
     private var carded: CGFloat = 0
     private var animator: UIViewPropertyAnimator?
     private var closings = 0
+    private let drawerFeed = LedgerAgentDrawerFeed()
+    private var preloaded = false
     private var dragBase: CGFloat = 0
     private var committed = false
     private var touchDown: CGPoint?
@@ -191,6 +215,15 @@ final class LedgerAgentDrawerController: UIViewController, UIGestureRecognizerDe
         pan.maximumNumberOfTouches = 1
         view.addGestureRecognizer(pan)
         updatePan()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !preloaded else { return }
+        preloaded = true
+        // Once the page has settled, so the drawer's first build never lands
+        // on the page's own first frames.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.loadDrawer() }
     }
 
     override func viewDidLayoutSubviews() {
@@ -239,33 +272,36 @@ final class LedgerAgentDrawerController: UIViewController, UIGestureRecognizerDe
         pageHost.rootView = AnyView(page.safeAreaPadding(Self.edgeInsets(view.safeAreaInsets)))
     }
 
-    func refreshDrawer() {
-        guard let drawerHost, let makeDrawer else { return }
-        drawerHost.rootView = drawerContent(makeDrawer(closings))
-    }
-
-    private func drawerContent(_ content: AnyView) -> AnyView {
-        var insets = view.safeAreaInsets
-        insets.right = 0
-        return AnyView(content.safeAreaPadding(Self.edgeInsets(insets)))
+    /// The drawer's content for the next time it is drawn, and whether
+    /// that is now: only when `key` changed.
+    func updateDrawer(key: AnyHashable, make: @escaping (Int) -> AnyView) {
+        drawerFeed.make = make
+        if drawerFeed.key != key {
+            drawerFeed.key = key
+            drawerFeed.objectWillChange.send()
+        }
     }
 
     private func applySafeArea() {
         guard appliedSafeArea != view.safeAreaInsets else { return }
         appliedSafeArea = view.safeAreaInsets
         setPage(pageContent)
-        refreshDrawer()
+        var insets = view.safeAreaInsets
+        insets.right = 0
+        drawerFeed.insets = Self.edgeInsets(insets)
     }
 
     private static func edgeInsets(_ insets: UIEdgeInsets) -> EdgeInsets {
         EdgeInsets(top: insets.top, leading: insets.left, bottom: insets.bottom, trailing: insets.right)
     }
 
-    /// The drawer's list is built the first time it starts to come out and
-    /// then stays, hidden while the drawer is in.
+    /// The drawer's list is built once, soon after the page appears or when
+    /// the drawer first starts to come out, and then stays under the card:
+    /// building it on the first open, and drawing it again each time it
+    /// came back from hidden, were the hitches at the start of an open.
     private func loadDrawer() {
-        guard drawerHost == nil, let makeDrawer else { return }
-        let host = UIHostingController(rootView: drawerContent(makeDrawer(closings)))
+        guard drawerHost == nil else { return }
+        let host = UIHostingController(rootView: AnyView(LedgerAgentDrawerHostView(feed: drawerFeed)))
         host.safeAreaRegions = .keyboard
         host.view.backgroundColor = .clear
         addChild(host)
@@ -352,7 +388,6 @@ final class LedgerAgentDrawerController: UIViewController, UIGestureRecognizerDe
     private func settleVisibility() {
         let out = isOpen || offset > 0.5 || animator != nil
         ground.isHidden = !(out && pushes)
-        drawerHost?.view.isHidden = !out
         veil.isHidden = !isOpen
         pageHost.view.accessibilityElementsHidden = isOpen
         drawerHost?.view.accessibilityElementsHidden = !isOpen
@@ -449,7 +484,7 @@ final class LedgerAgentDrawerController: UIViewController, UIGestureRecognizerDe
         if !isOpen {
             // Out of sight now: a search in it is put away.
             closings += 1
-            refreshDrawer()
+            drawerFeed.closings = closings
         }
     }
 
@@ -485,7 +520,6 @@ final class LedgerAgentDrawerController: UIViewController, UIGestureRecognizerDe
             committed = false
             view.endEditing(true)
             ground.isHidden = !pushes
-            drawerHost?.view.isHidden = false
             dragged(dx)
         case .changed:
             dragged(dx)
