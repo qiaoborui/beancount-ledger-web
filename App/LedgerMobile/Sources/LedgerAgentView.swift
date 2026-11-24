@@ -140,6 +140,12 @@ private struct LedgerAgentChatScreen: View {
     @State private var confirming: BranchConfirmation?
     /// Counts copies, for the haptic.
     @State private var copies = 0
+    /// What has already run on this screen's first appearance. The screen
+    /// appears again each time a page pushed over it is swiped away, and
+    /// redoing the work then (a keychain read, the inbox and crash files, a
+    /// redraw of the whole conversation for the greeting's clock) ran on
+    /// the first frames of the swipe and made it stutter.
+    @State private var firstAppearance = LedgerAgentFirstAppearance()
 
     private struct BookkeepingPrefill: Identifiable {
         let id = UUID()
@@ -163,7 +169,7 @@ private struct LedgerAgentChatScreen: View {
         Group {
             if settings.isReady { chat } else { LedgerAgentIntro { settingsPresented = true } }
         }
-        .background(BalancedPalette.page)
+        .background(LedgerAgentPalette.page)
         // No heading over a conversation: the bar is a row of round buttons,
         // the way the assistant reads as a chat rather than a page. History
         // sits on the left, 新对话 and model settings on the right; a
@@ -171,7 +177,11 @@ private struct LedgerAgentChatScreen: View {
         // the sessions are.
         .terminalPageChrome(String(localized: "账本助手"), isRoot: isRoot, showsSync: false,
                             actions: AnyView(actions), balanced: true, showsTitle: false,
-                            leadingActions: settings.isReady ? AnyView(historyButton) : nil)
+                            leadingActions: settings.isReady ? AnyView(historyButton) : nil,
+                            centerTitle: settings.isReady
+                                ? AnyView(LedgerAgentBarTitle(text: conversationIsFresh
+                                    ? String(localized: "新对话") : sessions.title(of: conversation)))
+                                : nil)
         .sheet(isPresented: $settingsPresented) {
             NavigationStack { LedgerAgentSettingsView() }
                 .ledgerPrivacyProtectedSheet()
@@ -189,30 +199,19 @@ private struct LedgerAgentChatScreen: View {
         // after the chrome so the top bar and the dock move with the page.
         // A drag from the leading edge opens it on a root page; a pushed one
         // leaves that edge to the system's back swipe.
-        .ledgerAgentHistoryDrawer(isPresented: $historyPresented, edgeOpens: isRoot && settings.isReady,
+        .ledgerAgentHistoryDrawer(isPresented: $historyPresented,
+                                  // Not under a page pushed from the drawer:
+                                  // its back swipe is the system's alone.
+                                  edgeOpens: isRoot && settings.isReady && drawerRoute == nil,
                                   sharesText: session.amountsVisible,
                                   openSettings: { settingsPresented = true },
                                   openRoute: { drawerRoute = $0 })
         .navigationDestination(item: $drawerRoute) { route in
-            switch route {
-            case .terminal: LedgerLinuxTerminalScreen()
-            case .files: LedgerLinuxFilesView(path: "/root")
-            case .skills: LedgerAgentSkillsView()
-            case .memory: LedgerAgentMemoryView()
-            case .automations:
-                LedgerAutomationView(onOpen: { run, reloadingDraft in
-                    drawerRoute = nil
-                    Task { await LedgerAutomationCenter.shared.open(run, reloadingDraft: reloadingDraft) }
-                })
-            case .artifacts:
-                LedgerAgentArtifactsView(onRevise: { artifact in
-                    drawerRoute = nil
-                    revise(artifact)
-                }, onAsk: { question in
-                    drawerRoute = nil
-                    ask(question)
-                })
-            }
+            drawerPage(route)
+                // This page hides the system bar, so the pages pushed from
+                // its drawer draw the same glass bar rather than bringing
+                // the system one in and out under a back swipe.
+                .environment(\.ledgerBarlessPush, true)
         }
         .ledgerAgentRenameAlert($renaming)
         .onChange(of: historyPresented) { _, shown in if shown { composerFocused = false } }
@@ -254,7 +253,10 @@ private struct LedgerAgentChatScreen: View {
             conversation.isOnScreen = true
             LedgerAgentBackgroundRun.shared.conversationSeen()
             resumeIfInterrupted()
-            greetingNow = Date()
+            // Only past a minute: the greeting reads the hour, and a new
+            // value redraws the whole page.
+            let now = Date()
+            if now.timeIntervalSince(greetingNow) >= 60 { greetingNow = now }
         }
         .onDisappear { conversation.isOnScreen = false }
         // A turn the system cut short goes on by itself once the user is
@@ -278,6 +280,8 @@ private struct LedgerAgentChatScreen: View {
         // and an empty one offers fresh suggestions — unless they are hidden,
         // in which case fetching them would be a model call nobody reads.
         .task(id: conversation.id) {
+            guard firstAppearance.conversation != conversation.id else { return }
+            firstAppearance.conversation = conversation.id
             if conversation.restored { recapIfWanted() }
             if conversation.messages.isEmpty, settings.suggestions { refreshStarters() }
             // Answers that landed while another conversation was on screen
@@ -306,11 +310,17 @@ private struct LedgerAgentChatScreen: View {
             if case .failed(.interrupted, _) = phase { resumeIfInterrupted() }
         }
         .task {
+            guard !firstAppearance.readCrashReport else { return }
+            firstAppearance.readCrashReport = true
             guard crashReport == nil, let repository = session.localRepository else { return }
             crashReport = LedgerAgentCrashReport.take(
                 runtimeRoot: repository.workspace.rootDirectory.appendingPathComponent("runtime"))
         }
-        .task { refreshInbox() }
+        .task {
+            guard !firstAppearance.readInbox else { return }
+            firstAppearance.readInbox = true
+            refreshInbox()
+        }
         .onChange(of: sessions.queuedQuestion) { _, _ in sendQueuedQuestion() }
         .onAppear { sendQueuedQuestion() }
         .onChange(of: sessions.queuedShare) { _, _ in receiveSharedFiles() }
@@ -365,11 +375,11 @@ private struct LedgerAgentChatScreen: View {
     /// Shown once after the native core aborted the app during a turn.
     private func crashBand(_ report: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("上次回答时 App 意外退出").balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.expense)
+            Text("上次回答时 App 意外退出").balancedFont(size: 15, weight: .medium).foregroundStyle(LedgerAgentPalette.expense)
             Text("下面是设备端引擎留下的诊断信息，不含 API Key。复制后发给开发者可以定位原因。")
-                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                .balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.meta)
             ScrollView {
-                Text(report).balancedMono(size: 11).foregroundStyle(BalancedPalette.secondary)
+                Text(report).balancedMono(size: 11).foregroundStyle(LedgerAgentPalette.secondary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -390,10 +400,10 @@ private struct LedgerAgentChatScreen: View {
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage).font(.system(size: 17, weight: .medium))
-                .foregroundStyle(BalancedPalette.ink)
+                .foregroundStyle(LedgerAgentPalette.ink)
                 .frame(width: 40, height: 40)
                 .background {
-                    if !LedgerGlass.isAvailable { Circle().fill(BalancedPalette.sunken) }
+                    if !LedgerGlass.isAvailable { Circle().fill(LedgerAgentPalette.sunken) }
                 }
                 .modifier(LedgerAgentCircleGlass(draws: drawsGlass))
                 .frame(width: 44, height: 44)
@@ -406,10 +416,12 @@ private struct LedgerAgentChatScreen: View {
 
     private var moreMenu: some View {
         Menu {
+            // FlowDown's title menu: a new conversation first, then what is
+            // done to this one.
             if !conversationIsFresh {
-                // The conversation's name heads the menu, since the page has
-                // no title to show it.
-                Section(sessions.title(of: conversation)) {
+                Button { sessions.startNew() } label: { Label("新对话", systemImage: "square.and.pencil") }
+                    .accessibilityIdentifier("ledger-agent-new")
+                Section {
                     Button { retitle() } label: {
                         Label(conversation.retitling ? "正在生成标题…" : "重新生成标题", systemImage: "arrow.clockwise")
                     }
@@ -427,11 +439,11 @@ private struct LedgerAgentChatScreen: View {
             Button { settingsPresented = true } label: { Label("助手设置", systemImage: "slider.horizontal.3") }
                 .accessibilityIdentifier("ledger-agent-settings")
         } label: {
-            Image(systemName: "ellipsis").font(.system(size: 17, weight: .medium))
-                .foregroundStyle(BalancedPalette.ink)
+            Image(systemName: "chevron.down").font(.system(size: 17, weight: .medium))
+                .foregroundStyle(LedgerAgentPalette.ink)
                 .frame(width: 40, height: 40)
                 .background {
-                    if !LedgerGlass.isAvailable { Circle().fill(BalancedPalette.sunken) }
+                    if !LedgerGlass.isAvailable { Circle().fill(LedgerAgentPalette.sunken) }
                 }
                 .frame(width: 44, height: 44)
                 .contentShape(Circle())
@@ -462,7 +474,7 @@ private struct LedgerAgentChatScreen: View {
     }
 
     private var historyButton: some View {
-        circleButton("line.3.horizontal", label: "历史对话", identifier: "ledger-agent-history") {
+        circleButton("sidebar.left", label: "历史对话", identifier: "ledger-agent-history") {
             historyPresented = true
         }
     }
@@ -482,13 +494,6 @@ private struct LedgerAgentChatScreen: View {
         HStack(spacing: 0) {
             // The bar's trailing cluster already supplies one glass capsule
             // for its controls, so these are plain buttons inside it.
-            if !conversationIsFresh {
-                circleButton("square.and.pencil", label: "新对话", identifier: "ledger-agent-new",
-                             drawsGlass: false) {
-                    sessions.startNew()
-                }
-                .transition(.scale(scale: 0.6).combined(with: .opacity))
-            }
             moreMenu
             if let onClose {
                 circleButton("xmark", label: "关闭", identifier: "ledger-agent-close", drawsGlass: false,
@@ -496,6 +501,29 @@ private struct LedgerAgentChatScreen: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: conversationIsFresh)
+    }
+
+    /// A place picked in the drawer, on this page's stack.
+    @ViewBuilder private func drawerPage(_ route: LedgerAgentDrawerRoute) -> some View {
+        switch route {
+        case .terminal: LedgerLinuxTerminalScreen()
+        case .files: LedgerLinuxFilesView(path: "/root")
+        case .skills: LedgerAgentSkillsView()
+        case .memory: LedgerAgentMemoryView()
+        case .automations:
+            LedgerAutomationView(onOpen: { run, reloadingDraft in
+                drawerRoute = nil
+                Task { await LedgerAutomationCenter.shared.open(run, reloadingDraft: reloadingDraft) }
+            })
+        case .artifacts:
+            LedgerAgentArtifactsView(onRevise: { artifact in
+                drawerRoute = nil
+                revise(artifact)
+            }, onAsk: { question in
+                drawerRoute = nil
+                ask(question)
+            })
+        }
     }
 
     // MARK: Conversation
@@ -521,13 +549,6 @@ private struct LedgerAgentChatScreen: View {
     /// Before iOS 18, the measures `contentOverflows` is worked out from.
     @State private var contentHeight: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
-    /// The height the conversation rests in, so the empty state can sit in
-    /// the middle of the page rather than at its top. Kept in an observed
-    /// box only the empty state reads: it changes on every frame of the
-    /// keyboard coming up or going down, and as screen state it redrew the
-    /// whole page, every message of a long conversation included, each of
-    /// those frames, which is what made the keyboard stutter.
-    @State private var restingHeight = LedgerAgentRestingHeight()
     /// When the empty state last read the clock for its greeting.
     @State private var greetingNow = Date()
 
@@ -541,7 +562,6 @@ private struct LedgerAgentChatScreen: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
                     if let crashReport { crashBand(crashReport) }
-                    if conversation.messages.isEmpty && !conversation.isRunning { emptyState }
                     ForEach(conversation.messages) { message in
                         switch message.role {
                         case .user: question(message)
@@ -549,10 +569,10 @@ private struct LedgerAgentChatScreen: View {
                         }
                     }
                     if let notice = conversation.restoredNotice {
-                        Text(notice).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                        Text(notice).balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.secondary)
                             .padding(.horizontal, 14).padding(.vertical, 10)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: LedgerRound.inset, style: .continuous))
+                            .background(LedgerAgentPalette.sunken, in: RoundedRectangle(cornerRadius: LedgerRound.inset, style: .continuous))
                             .accessibilityIdentifier("ledger-agent-restored-notice")
                     }
                     if let pending = conversation.pending {
@@ -562,7 +582,7 @@ private struct LedgerAgentChatScreen: View {
                               conversation.messages.last(where: { $0.role == .assistant })?.write == nil {
                         // Written without a record to undo it by.
                         Label(String(localized: "已写入账本 · \(written.files.count) 个文件"), systemImage: "checkmark")
-                            .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                            .balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.meta)
                     }
                     if !conversation.isRunning, conversation.answerCount >= LedgerAgentRecap.minimumAnswers || conversation.recap != nil {
                         LedgerAgentRecapCard(recap: conversation.recap, isCurrent: conversation.recapIsCurrent,
@@ -582,13 +602,20 @@ private struct LedgerAgentChatScreen: View {
                     }
                     Color.clear.frame(height: 1).id(Self.bottomID)
                         .onAppear {
-                            isAtBottom = true
+                            // Each write redraws the page; the anchor comes
+                            // back on screen too when a pushed page is
+                            // swiped away, with nothing changed.
+                            if !isAtBottom { isAtBottom = true }
                             // Reached without the reader moving the page (it
                             // opened here, or content shrank onto it); a
                             // scroll they are making decides when it ends.
-                            if !readerScrolling { following = true }
+                            if !readerScrolling, !following { following = true }
                         }
-                        .onDisappear { isAtBottom = false }
+                        .onDisappear {
+                            // A page pushed over this one hides the anchor
+                            // without the conversation moving.
+                            if drawerRoute == nil, isAtBottom { isAtBottom = false }
+                        }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
@@ -602,7 +629,6 @@ private struct LedgerAgentChatScreen: View {
             .onGeometryChange(for: CGFloat.self) { geometry in
                 geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom
             } action: { height in
-                restingHeight.value = height
                 if #available(iOS 18.0, *) { return }
                 viewportHeight = height
                 measureFit()
@@ -633,7 +659,7 @@ private struct LedgerAgentChatScreen: View {
             .environment(\.ledgerAgentFollowPause, LedgerAgentFollowPause { following = false })
             .onAppear {
                 // A conversation still answering opens on its reply.
-                guard conversation.isRunning else { return }
+                guard conversation.isRunning, !following else { return }
                 following = true
                 // Once, before the page has measured whether it overflows; a
                 // single scroll does not bounce the way one per update did.
@@ -665,6 +691,24 @@ private struct LedgerAgentChatScreen: View {
                 .ledgerAnimation(LedgerMotion.disclose, value: showsJumpButton)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+            // The empty state lies over the page rather than in it, above
+            // the composer as it rests and out of the keyboard's way: in the
+            // scroll content it was centred in the space left above the
+            // keyboard and moved with every frame of it; laid over the inner
+            // page it was squeezed between the bar and the raised composer.
+            .overlay {
+                if conversation.messages.isEmpty && !conversation.isRunning {
+                    // It stays where it is and fades while the keyboard is
+                    // up, rather than moving with the keyboard or lying
+                    // under the raised composer.
+                    emptyState
+                        .padding(.bottom, Self.emptyStateClearance)
+                        .ignoresSafeArea(.keyboard)
+                        .opacity(composerFocused ? 0 : 1)
+                        .allowsHitTesting(!composerFocused)
+                        .animation(.easeOut(duration: 0.2), value: composerFocused)
+                }
+            }
             // Bills and screenshots can also be dragged in from Photos, Files
             // or another window (iPad, or the Mac build).
             .onDrop(of: Self.dropTypes, isTargeted: $dropTargeted) { providers in
@@ -758,7 +802,7 @@ private struct LedgerAgentChatScreen: View {
                 if editing != message.id, !conversation.isRunning {
                     Button { startEditing(message) } label: {
                         Image(systemName: "pencil").font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(BalancedPalette.meta)
+                            .foregroundStyle(LedgerAgentPalette.meta)
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                     }
@@ -772,7 +816,7 @@ private struct LedgerAgentChatScreen: View {
                 if earlierAnswers > 0, !conversation.isRunning {
                     Button { perform(.latestAnswer(message.id)) } label: {
                         Label("回到之前的回答", systemImage: "arrow.uturn.backward")
-                            .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                            .balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.secondary)
                             .frame(minHeight: 32)
                             .contentShape(Rectangle())
                     }
@@ -799,7 +843,7 @@ private struct LedgerAgentChatScreen: View {
 
     private func actionIcon(_ systemImage: String) -> some View {
         Image(systemName: systemImage).font(.system(size: 13, weight: .medium))
-            .foregroundStyle(BalancedPalette.meta)
+            .foregroundStyle(LedgerAgentPalette.meta)
             .frame(width: 40, height: 36)
             .contentShape(Rectangle())
     }
@@ -912,13 +956,13 @@ private struct LedgerAgentChatScreen: View {
             Text("·").accessibilityHidden(true)
             Button("取消") { cancelEditing() }
                 .buttonStyle(.plain)
-                .foregroundStyle(BalancedPalette.ink)
+                .foregroundStyle(LedgerAgentPalette.ink)
                 .frame(minHeight: 28)
                 .contentShape(Rectangle())
                 .accessibilityLabel("取消编辑")
                 .accessibilityIdentifier("ledger-agent-edit-cancel")
         }
-        .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+        .balancedFont(size: 12).foregroundStyle(LedgerAgentPalette.meta)
         .padding(.horizontal, 6)
         .accessibilityIdentifier("ledger-agent-edit-banner")
     }
@@ -945,17 +989,24 @@ private struct LedgerAgentChatScreen: View {
 
     private func jumpToBottom(_ proxy: ScrollViewProxy) -> some View {
         Button {
+            let flinging = readerScrolling
             following = true
             readerScrolling = false
-            scrollToBottom(proxy)
+            if flinging {
+                // The page is still coasting: a jump without an animation
+                // stops it where an animated one would be fought by it.
+                proxy.scrollTo(Self.bottomID, anchor: .bottom)
+            } else {
+                scrollToBottom(proxy)
+            }
         } label: {
             Image(systemName: "arrow.down").font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(BalancedPalette.ink)
+                .foregroundStyle(LedgerAgentPalette.ink)
                 .frame(width: 40, height: 40)
                 // Glass on iOS 26; a page-coloured disc with a rule before.
                 .background {
                     if !LedgerGlass.isAvailable {
-                        Circle().fill(BalancedPalette.page).overlay(Circle().stroke(BalancedPalette.rule, lineWidth: 1))
+                        Circle().fill(LedgerAgentPalette.page).overlay(Circle().stroke(LedgerAgentPalette.rule, lineWidth: 1))
                     }
                 }
                 .ledgerGlassControl()
@@ -963,6 +1014,10 @@ private struct LedgerAgentChatScreen: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        // A view of its own under the button, so a touch there is not
+        // taken by the scroll view: while the page coasts, the scroll view
+        // caught the tap to stop itself and the button never saw it.
+        .background(LedgerTouchFloor().frame(width: 44, height: 44))
         .accessibilityLabel("回到底部")
         .accessibilityIdentifier("ledger-agent-jump-bottom")
     }
@@ -977,6 +1032,8 @@ private struct LedgerAgentChatScreen: View {
     private static let dropTypes: [UTType] = [.image, .fileURL]
 
     private static let bottomID = "ledger-agent-bottom"
+    /// The composer's height at rest, which the empty state keeps clear of.
+    private static let emptyStateClearance: CGFloat = 120
 
     /// A recap is written when the user comes back after this long.
     private static let recapAfterAbsence: TimeInterval = 10 * 60
@@ -1002,23 +1059,23 @@ private struct LedgerAgentChatScreen: View {
                 // The reading serif, as claude.ai sets its replies: Source
                 // Serif 4 for Latin, Songti SC for Chinese.
                 .font(BalancedReading.font(.regular, size: 30, relativeTo: .title))
-                .foregroundStyle(BalancedPalette.secondary)
+                .foregroundStyle(LedgerAgentPalette.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
             Text("今天想查点什么？").balancedFont(size: 15)
-                .foregroundStyle(BalancedPalette.meta)
+                .foregroundStyle(LedgerAgentPalette.meta)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
             if settings.suggestions, settings.assists || !starters.suggestions.isEmpty {
                 HStack(spacing: 4) {
                     Text("试试").balancedFont(size: 12.5, weight: .medium)
-                        .foregroundStyle(BalancedPalette.meta)
+                        .foregroundStyle(LedgerAgentPalette.meta)
                     if starters.loading {
                         ProgressView().controlSize(.mini)
                     } else if settings.assists {
                         Button { refreshStarters(force: true) } label: {
                             Image(systemName: "arrow.clockwise").font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(BalancedPalette.meta)
+                                .foregroundStyle(LedgerAgentPalette.meta)
                                 .frame(width: 32, height: 28)
                                 .contentShape(Rectangle())
                         }
@@ -1031,19 +1088,22 @@ private struct LedgerAgentChatScreen: View {
                 ForEach(starters.suggestions, id: \.self) { suggestion in
                     Button { send(suggestion) } label: {
                         Text(suggestion)
-                            .balancedFont(size: 14.5).foregroundStyle(BalancedPalette.ink)
+                            .balancedFont(size: 14.5).foregroundStyle(LedgerAgentPalette.ink)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 16).padding(.vertical, 9)
-                            .background(Capsule().fill(BalancedPalette.sunken))
+                            .background(Capsule().fill(LedgerAgentPalette.sunken))
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .modifier(LedgerAgentRestingFrame(height: restingHeight, less: 52))
-        .padding(.vertical, 16)
+        .padding(.horizontal, 20)
+        // Centred a little above the middle of the page, as before.
+        .padding(.top, 28)
+        .padding(.bottom, 76)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// The empty state's greeting. Only the hour matters, and only the user's
@@ -1063,8 +1123,8 @@ private struct LedgerAgentChatScreen: View {
     private func failure(_ error: LedgerAgentError, question: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(error.headline)
-                .balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.expense)
-            Text(failureDetail(error)).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
+                .balancedFont(size: 15, weight: .medium).foregroundStyle(LedgerAgentPalette.expense)
+            Text(failureDetail(error)).balancedFont(size: 13.5).foregroundStyle(LedgerAgentPalette.secondary)
                 .textSelection(.enabled)
             HStack(spacing: 10) {
                 if case .invalidKey = error {
@@ -1136,7 +1196,7 @@ private struct LedgerAgentChatScreen: View {
         VStack(spacing: 8) {
             if sessions.busyElsewhere {
                 Text("另一个对话正在回答，答完后才能在这里提问")
-                    .balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                    .balancedFont(size: 12).foregroundStyle(LedgerAgentPalette.meta)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 6)
             }
@@ -1152,7 +1212,7 @@ private struct LedgerAgentChatScreen: View {
                             // send button sends it as it is.
                             Button { draft = ghost; composerFocused = true } label: {
                                 Image(systemName: "text.insert").font(.system(size: 14, weight: .medium))
-                                    .foregroundStyle(BalancedPalette.meta)
+                                    .foregroundStyle(LedgerAgentPalette.meta)
                                     .frame(width: 32, height: 40)
                                     .contentShape(Rectangle())
                             }
@@ -1232,7 +1292,7 @@ private struct LedgerAgentChatScreen: View {
 
     private var composerField: some View {
         TextField(text: $draft, prompt: Text(ghost ?? placeholder)
-            .foregroundStyle(ghost == nil ? BalancedPalette.meta : BalancedPalette.edge), axis: .vertical) {
+            .foregroundStyle(ghost == nil ? LedgerAgentPalette.meta : LedgerAgentPalette.edge), axis: .vertical) {
             Text(placeholder)
         }
             .balancedFont(size: 15)
@@ -1267,9 +1327,9 @@ private struct LedgerAgentChatScreen: View {
         } label: {
             Image(systemName: conversation.isRunning ? "stop.fill" : "arrow.up")
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(BalancedPalette.page)
+                .foregroundStyle(LedgerAgentPalette.page)
                 .frame(width: 40, height: 40)
-                .background(Circle().fill(BalancedPalette.ink))
+                .background(Circle().fill(LedgerAgentPalette.ink))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -1418,7 +1478,7 @@ private struct LedgerAgentChatScreen: View {
     /// lost to the decision.
     private var voiceButton: some View {
         Image(systemName: "mic").font(.system(size: 16, weight: .medium))
-            .foregroundStyle(BalancedPalette.secondary)
+            .foregroundStyle(LedgerAgentPalette.secondary)
             .frame(width: 36, height: 40)
             .contentShape(Rectangle())
             .opacity(sessions.busyElsewhere ? 0.38 : 1)
@@ -1501,7 +1561,7 @@ private struct LedgerAgentChatScreen: View {
             voice.dismissFailure()
         } label: {
             Label(failure.message, systemImage: "mic.slash")
-                .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.expense)
+                .balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.expense)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
@@ -1535,7 +1595,7 @@ private struct LedgerAgentChatScreen: View {
             // Inside the dock, at its bottom leading corner, so it stays on
             // the same row as the send circle however tall the dock grows.
             Image(systemName: "plus").font(.system(size: 19, weight: .medium))
-                .foregroundStyle(BalancedPalette.ink)
+                .foregroundStyle(LedgerAgentPalette.ink)
                 .frame(width: 40, height: 40)
                 .contentShape(Circle())
         }
@@ -1555,7 +1615,7 @@ private struct LedgerAgentChatScreen: View {
                 if attaching {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.small)
-                        Text("正在读取附件…").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        Text("正在读取附件…").balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.meta)
                     }
                     .padding(.horizontal, 10)
                     .frame(height: 44)
@@ -1563,7 +1623,7 @@ private struct LedgerAgentChatScreen: View {
                 if let attachError {
                     Button { self.attachError = nil } label: {
                         Label(attachError, systemImage: "exclamationmark.circle")
-                            .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.expense)
+                            .balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.expense)
                             .lineLimit(2)
                             .frame(maxWidth: 260, alignment: .leading)
                     }
@@ -1582,16 +1642,16 @@ private struct LedgerAgentChatScreen: View {
             Image(systemName: "photo.badge.plus").font(.system(size: 24, weight: .medium))
             Text("松开以添加图片或账单").balancedFont(size: 14, weight: .medium)
         }
-        .foregroundStyle(BalancedPalette.ink)
+        .foregroundStyle(LedgerAgentPalette.ink)
         .padding(.horizontal, 24)
         .padding(.vertical, 20)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(BalancedPalette.edge, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                .strokeBorder(LedgerAgentPalette.edge, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(BalancedPalette.page.opacity(0.6))
+        .background(LedgerAgentPalette.page.opacity(0.6))
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .transition(.opacity)
@@ -1834,6 +1894,29 @@ private struct LedgerAgentChatScreen: View {
 /// A question: right-aligned in a soft sunken bubble (20pt continuous
 /// corners, to sit with the glass), never a bubble with a tail.
 /// Files sent with it are listed above the text.
+/// The conversation's name, centred in the bar as FlowDown sets it: 17pt
+/// semibold in the label colour. It blurs away while the history drawer is
+/// out, since the page is then a card set aside.
+private struct LedgerAgentBarTitle: View {
+    let text: String
+    @Environment(\.ledgerAgentDrawerOpen) private var drawerOpen
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(LedgerAgentPalette.ink)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .contentTransition(.opacity)
+            .blur(radius: drawerOpen ? 6 : 0)
+            .opacity(drawerOpen ? 0.4 : 1)
+            .animation(.interpolatingSpring(duration: 0.5, bounce: 0.1), value: drawerOpen)
+            .animation(.easeInOut(duration: 0.25), value: text)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("ledger-agent-title")
+    }
+}
+
 private struct LedgerAgentQuestion: View {
     let text: String
     var attachments: [String] = []
@@ -1845,20 +1928,20 @@ private struct LedgerAgentQuestion: View {
             VStack(alignment: .trailing, spacing: 6) {
                 ForEach(Array(attachments.enumerated()), id: \.offset) { _, name in
                     Label(name, systemImage: LedgerAgentAttachments.kind(of: name) == .image ? "photo" : "doc")
-                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                        .balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.secondary)
                         .lineLimit(1).truncationMode(.middle)
                 }
-                Text(text).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
+                Text(text).balancedFont(size: 15).foregroundStyle(LedgerAgentPalette.ink)
                     .lineSpacing(4)
                     .textSelection(.enabled)
             }
-            .padding(.horizontal, 15)
-            .padding(.vertical, 10)
-            .background(BalancedPalette.sunken)
-            .clipShape(RoundedRectangle(cornerRadius: LedgerRound.bubble, style: .continuous))
+            // FlowDown's bubble: 12pt padding and corners, in grey.
+            .padding(12)
+            .background(LedgerAgentPalette.bubble)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
                 if isEditing {
-                    RoundedRectangle(cornerRadius: LedgerRound.bubble, style: .continuous).stroke(BalancedPalette.ruleStrong, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(LedgerAgentPalette.ruleStrong, lineWidth: 1)
                 }
             }
         }
@@ -1876,7 +1959,7 @@ private struct LedgerAgentVersionSwitch: View {
         HStack(spacing: 0) {
             step(-1, systemImage: "chevron.left", label: "上一个版本")
                 .disabled(!enabled || index == 0)
-            Text(verbatim: "\(index + 1)/\(count)").balancedMono(size: 12).foregroundStyle(BalancedPalette.secondary)
+            Text(verbatim: "\(index + 1)/\(count)").balancedMono(size: 12).foregroundStyle(LedgerAgentPalette.secondary)
                 .monospacedDigit()
                 .accessibilityHidden(true)
             step(1, systemImage: "chevron.right", label: "下一个版本")
@@ -1888,7 +1971,7 @@ private struct LedgerAgentVersionSwitch: View {
     private func step(_ offset: Int, systemImage: String, label: LocalizedStringKey) -> some View {
         Button { onStep(offset) } label: {
             Image(systemName: systemImage).font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(BalancedPalette.meta)
+                .foregroundStyle(LedgerAgentPalette.meta)
                 .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
@@ -1907,16 +1990,16 @@ private struct LedgerAgentAttachmentChip: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: symbol).font(.system(size: 14)).foregroundStyle(BalancedPalette.secondary)
+            Image(systemName: symbol).font(.system(size: 14)).foregroundStyle(LedgerAgentPalette.secondary)
             VStack(alignment: .leading, spacing: 1) {
-                Text(name).balancedFont(size: 13).foregroundStyle(BalancedPalette.ink)
+                Text(name).balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.ink)
                     .lineLimit(1).truncationMode(.middle)
-                Text(detail).balancedFont(size: 11).foregroundStyle(BalancedPalette.meta).lineLimit(1)
+                Text(detail).balancedFont(size: 11).foregroundStyle(LedgerAgentPalette.meta).lineLimit(1)
             }
             .frame(maxWidth: 180, alignment: .leading)
             Button(action: onRemove) {
                 Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(BalancedPalette.meta)
+                    .foregroundStyle(LedgerAgentPalette.meta)
                     .frame(width: 28, height: 28)
                     .contentShape(Rectangle())
             }
@@ -1926,7 +2009,7 @@ private struct LedgerAgentAttachmentChip: View {
         .padding(.leading, 14)
         .padding(.trailing, 4)
         .frame(minHeight: 44)
-        .background(BalancedPalette.sunken)
+        .background(LedgerAgentPalette.sunken)
         .clipShape(Capsule())
     }
 }
@@ -1988,7 +2071,7 @@ private struct LedgerAgentAnswer: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if message.compacted {
-                Text("已压缩较早的对话，以便继续").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                Text("已压缩较早的对话，以便继续").balancedFont(size: 12).foregroundStyle(LedgerAgentPalette.meta)
                     .frame(maxWidth: .infinity)
                     .accessibilityIdentifier("ledger-agent-compacted")
             }
@@ -2005,7 +2088,7 @@ private struct LedgerAgentAnswer: View, Equatable {
                 LedgerAgentReplyBlock(segment: segment, onAsk: onAsk)
             }
             if message.stopped {
-                Text("已停止").balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                Text("已停止").balancedFont(size: 12).foregroundStyle(LedgerAgentPalette.meta)
                     .accessibilityIdentifier("ledger-agent-stopped")
             }
             if let ask = message.ask, asksNow { choices(ask) }
@@ -2021,7 +2104,7 @@ private struct LedgerAgentAnswer: View, Equatable {
             if message.rememberedMemory {
                 Button(action: onMemory) {
                     Label("已更新记忆", systemImage: "brain")
-                        .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                        .balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.secondary)
                         .frame(minHeight: 32)
                         .contentShape(Rectangle())
                 }
@@ -2029,7 +2112,7 @@ private struct LedgerAgentAnswer: View, Equatable {
                 .accessibilityHint("查看和编辑记忆")
                 .accessibilityIdentifier("ledger-agent-memory-updated")
             }
-            if let footer { Text(footer).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta) }
+            if let footer { Text(footer).balancedFont(size: 12).foregroundStyle(LedgerAgentPalette.meta) }
         }
     }
 
@@ -2046,10 +2129,10 @@ private struct LedgerAgentAnswer: View, Equatable {
             HStack(spacing: 8) {
                 if write.undoneAt != nil {
                     Label(String(localized: "已撤销这次写入 · \(write.files.count) 个文件"), systemImage: "arrow.uturn.backward")
-                        .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                        .balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.meta)
                 } else {
                     Label(String(localized: "已写入账本 · \(write.files.count) 个文件"), systemImage: "checkmark")
-                        .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                        .balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.meta)
                     Spacer(minLength: 8)
                     Button(action: onUndo) {
                         if undoing { ProgressView().controlSize(.small) } else { Text("撤销") }
@@ -2060,7 +2143,7 @@ private struct LedgerAgentAnswer: View, Equatable {
                 }
             }
             if let undoFailure {
-                Text(undoFailure).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.expense)
+                Text(undoFailure).balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.expense)
                     .textSelection(.enabled)
             }
         }
@@ -2073,14 +2156,14 @@ private struct LedgerAgentAnswer: View, Equatable {
                 withAnimation(.snappy(duration: 0.2)) { toolsExpanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
-                    Text(toolsSummary).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                    Text(toolsSummary).balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.meta)
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(BalancedPalette.edge)
+                        .foregroundStyle(LedgerAgentPalette.edge)
                         .rotationEffect(.degrees(toolsExpanded ? 180 : 0))
                 }
                 .padding(.horizontal, 12)
                 .frame(minHeight: 30)
-                .background(Capsule().fill(BalancedPalette.sunken))
+                .background(Capsule().fill(LedgerAgentPalette.sunken))
                 .contentShape(Capsule())
                 .frame(minHeight: 44)
             }
@@ -2091,26 +2174,26 @@ private struct LedgerAgentAnswer: View, Equatable {
                     ForEach(Array(message.toolCalls.enumerated()), id: \.offset) { _, call in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(alignment: .firstTextBaseline) {
-                                Text(call.title).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
+                                Text(call.title).balancedFont(size: 13.5).foregroundStyle(LedgerAgentPalette.secondary)
                                     .lineLimit(2)
                                 Spacer(minLength: 8)
                                 Text(call.isError ? String(localized: "失败") : call.name)
                                     .balancedMono(size: 11)
-                                    .foregroundStyle(call.isError ? BalancedPalette.expense : BalancedPalette.meta)
+                                    .foregroundStyle(call.isError ? LedgerAgentPalette.expense : LedgerAgentPalette.meta)
                             }
                             if let source = call.source {
-                                Text(source).balancedMono(size: 11.5).foregroundStyle(BalancedPalette.secondary)
+                                Text(source).balancedMono(size: 11.5).foregroundStyle(LedgerAgentPalette.secondary)
                                     .textSelection(.enabled)
                                     .padding(.top, 2)
                             }
                         }
                         .padding(.vertical, 8)
-                        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                        .overlay(alignment: .bottom) { LedgerAgentPalette.rule.frame(height: 1) }
                     }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 2)
-                .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: LedgerRound.inset, style: .continuous))
+                .background(LedgerAgentPalette.sunken, in: RoundedRectangle(cornerRadius: LedgerRound.inset, style: .continuous))
             }
         }
     }
@@ -2140,7 +2223,7 @@ private struct LedgerAgentChangeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text(title).balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                Text(title).balancedFont(size: 15, weight: .medium).foregroundStyle(LedgerAgentPalette.ink)
                 Spacer(minLength: 12)
                 if let review = pending.review { counts(review.added, review.removed) }
             }
@@ -2203,15 +2286,15 @@ private struct LedgerAgentChangeCard: View {
 
     private var noteColor: Color {
         switch pending.status {
-        case .invalid, .conflict, .failed: BalancedPalette.expense
-        default: BalancedPalette.meta
+        case .invalid, .conflict, .failed: LedgerAgentPalette.expense
+        default: LedgerAgentPalette.meta
         }
     }
 
     private func counts(_ added: Int, _ removed: Int) -> some View {
         HStack(spacing: 6) {
-            if added > 0 { Text(verbatim: "+\(added)").foregroundStyle(BalancedPalette.income) }
-            if removed > 0 { Text(verbatim: "−\(removed)").foregroundStyle(BalancedPalette.expense) }
+            if added > 0 { Text(verbatim: "+\(added)").foregroundStyle(LedgerAgentPalette.income) }
+            if removed > 0 { Text(verbatim: "−\(removed)").foregroundStyle(LedgerAgentPalette.expense) }
         }
         .balancedMono(size: 12)
     }
@@ -2225,18 +2308,18 @@ private struct LedgerAgentChangeCard: View {
                 }
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(file.path).balancedMono(size: 12).foregroundStyle(BalancedPalette.secondary)
+                    Text(file.path).balancedMono(size: 12).foregroundStyle(LedgerAgentPalette.secondary)
                         .lineLimit(1).truncationMode(.middle)
                     switch file.change {
-                    case .added: Text("新文件").balancedFont(size: 11.5).foregroundStyle(BalancedPalette.meta)
-                    case .removed: Text("删除").balancedFont(size: 11.5).foregroundStyle(BalancedPalette.expense)
+                    case .added: Text("新文件").balancedFont(size: 11.5).foregroundStyle(LedgerAgentPalette.meta)
+                    case .removed: Text("删除").balancedFont(size: 11.5).foregroundStyle(LedgerAgentPalette.expense)
                     case .modified: EmptyView()
                     }
                     Spacer(minLength: 8)
                     counts(file.added, file.removed)
                     if !single {
                         Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(BalancedPalette.edge)
+                            .foregroundStyle(LedgerAgentPalette.edge)
                             .rotationEffect(.degrees(open ? 180 : 0))
                     }
                 }
@@ -2249,7 +2332,7 @@ private struct LedgerAgentChangeCard: View {
             if open { diff(file) }
         }
         .padding(.vertical, 4)
-        .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+        .overlay(alignment: .bottom) { LedgerAgentPalette.rule.frame(height: 1) }
     }
 
     private func diff(_ file: LedgerAgentFileDiff) -> some View {
@@ -2257,10 +2340,10 @@ private struct LedgerAgentChangeCard: View {
             VStack(alignment: .leading, spacing: 1) {
                 ForEach(Array(file.lines.enumerated()), id: \.offset) { _, line in
                     switch line.kind {
-                    case .context: Text(verbatim: "  " + line.text).foregroundStyle(BalancedPalette.meta)
-                    case .added: Text(verbatim: "+ " + line.text).foregroundStyle(BalancedPalette.income)
-                    case .removed: Text(verbatim: "- " + line.text).foregroundStyle(BalancedPalette.expense)
-                    case .gap: Text(verbatim: "  … " + line.text).foregroundStyle(BalancedPalette.edge)
+                    case .context: Text(verbatim: "  " + line.text).foregroundStyle(LedgerAgentPalette.meta)
+                    case .added: Text(verbatim: "+ " + line.text).foregroundStyle(LedgerAgentPalette.income)
+                    case .removed: Text(verbatim: "- " + line.text).foregroundStyle(LedgerAgentPalette.expense)
+                    case .gap: Text(verbatim: "  … " + line.text).foregroundStyle(LedgerAgentPalette.edge)
                     }
                 }
             }
@@ -2271,7 +2354,7 @@ private struct LedgerAgentChangeCard: View {
             .padding(.vertical, 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(LedgerAgentPalette.sunken, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .padding(.bottom, 8)
     }
 }
@@ -2297,7 +2380,7 @@ struct LedgerAgentReplyBlock: View, Equatable {
             let size: CGFloat = level == 1 ? 20 : level == 2 ? 18 : 16.5
             Text(Self.inline(text, serif: true, weight: .semibold, size: size, relativeTo: .headline))
                 .font(BalancedReading.font(.semibold, size: size, relativeTo: .headline))
-                .foregroundStyle(BalancedPalette.ink)
+                .foregroundStyle(LedgerAgentPalette.ink)
                 .textSelection(.enabled)
                 .modifier(LedgerAgentRevealText(text: text, active: revealsNewText))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -2310,7 +2393,7 @@ struct LedgerAgentReplyBlock: View, Equatable {
                         Text(item.marker)
                             .balancedFont(size: BalancedReading.size, weight: item.marker.hasSuffix(".") ? .medium : .regular)
                             .monospacedDigit()
-                            .foregroundStyle(BalancedPalette.meta)
+                            .foregroundStyle(LedgerAgentPalette.meta)
                             .frame(minWidth: 14, alignment: .trailing)
                         prose(item.text)
                     }
@@ -2318,35 +2401,35 @@ struct LedgerAgentReplyBlock: View, Equatable {
                 }
             }
         case let .quote(text):
-            prose(text, color: BalancedPalette.secondary)
+            prose(text, color: LedgerAgentPalette.secondary)
                 .padding(.leading, 12)
-                .overlay(alignment: .leading) { BalancedPalette.ruleStrong.frame(width: 2) }
+                .overlay(alignment: .leading) { LedgerAgentPalette.ruleStrong.frame(width: 2) }
         case let .table(header, rows):
             ScrollView(.horizontal, showsIndicators: false) {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 0) {
                     GridRow {
                         ForEach(Array(header.enumerated()), id: \.offset) { column, cell in
-                            Text(Self.inline(cell)).balancedFont(size: 13, weight: .medium).foregroundStyle(BalancedPalette.meta)
+                            Text(Self.inline(cell)).balancedFont(size: 13, weight: .medium).foregroundStyle(LedgerAgentPalette.meta)
                                 .padding(.vertical, 6)
                                 .gridColumnAlignment(Self.isAmountColumn(column, rows) ? .trailing : .leading)
                         }
                     }
-                    BalancedPalette.ruleStrong.frame(height: 1).gridCellUnsizedAxes(.horizontal)
+                    LedgerAgentPalette.ruleStrong.frame(height: 1).gridCellUnsizedAxes(.horizontal)
                     ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                         GridRow {
                             ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                                Text(Self.inline(cell)).balancedFont(size: 14).monospacedDigit().foregroundStyle(BalancedPalette.ink)
+                                Text(Self.inline(cell)).balancedFont(size: 14).monospacedDigit().foregroundStyle(LedgerAgentPalette.ink)
                                     .padding(.vertical, 7)
                             }
                         }
-                        BalancedPalette.rule.frame(height: 1).gridCellUnsizedAxes(.horizontal)
+                        LedgerAgentPalette.rule.frame(height: 1).gridCellUnsizedAxes(.horizontal)
                     }
                 }
                 .textSelection(.enabled)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         case .rule:
-            BalancedPalette.rule.frame(height: 1).padding(.vertical, 4)
+            LedgerAgentPalette.rule.frame(height: 1).padding(.vertical, 4)
         case let .code(code):
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -2356,7 +2439,7 @@ struct LedgerAgentReplyBlock: View, Equatable {
                         copies += 1
                     } label: {
                         Label("复制", systemImage: "doc.on.doc").balancedFont(size: 12)
-                            .foregroundStyle(BalancedPalette.meta)
+                            .foregroundStyle(LedgerAgentPalette.meta)
                             .frame(minHeight: 28)
                             .contentShape(Rectangle())
                     }
@@ -2365,7 +2448,7 @@ struct LedgerAgentReplyBlock: View, Equatable {
                     .accessibilityIdentifier("ledger-agent-code-copy")
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
-                    Text(code).balancedMono(size: 12.5).foregroundStyle(BalancedPalette.ink)
+                    Text(code).balancedMono(size: 12.5).foregroundStyle(LedgerAgentPalette.ink)
                         .textSelection(.enabled)
                         .fixedSize()
                 }
@@ -2386,7 +2469,7 @@ struct LedgerAgentReplyBlock: View, Equatable {
         }
     }
 
-    private func prose(_ text: String, color: Color = BalancedPalette.ink) -> some View {
+    private func prose(_ text: String, color: Color = LedgerAgentPalette.ink) -> some View {
         Text(Self.inline(text, serif: true)).font(BalancedReading.font()).foregroundStyle(color)
             .lineSpacing(BalancedReading.lineSpacing)
             .textSelection(.enabled)
@@ -2456,27 +2539,27 @@ private struct LedgerAgentRunning: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            ProgressView().controlSize(.small).tint(BalancedPalette.meta).padding(.top, 2)
+            ProgressView().controlSize(.small).tint(LedgerAgentPalette.meta).padding(.top, 2)
             TimelineView(.periodic(from: since, by: 1)) { context in
                 let elapsed = Int(context.date.timeIntervalSince(since).rounded(.down))
                 let quiet = context.date.timeIntervalSince(stepSince)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(step?.title ?? String(localized: "正在准备")).balancedFont(size: 15).foregroundStyle(BalancedPalette.ink)
+                        Text(step?.title ?? String(localized: "正在准备")).balancedFont(size: 15).foregroundStyle(LedgerAgentPalette.ink)
                             .lineLimit(1)
-                        Text("\(max(elapsed, 0)) 秒").balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                        Text("\(max(elapsed, 0)) 秒").balancedMono(size: 11.5).foregroundStyle(LedgerAgentPalette.meta)
                     }
                     // Which step, and how long this one has been going, so a
                     // slow model reads as slow rather than stuck.
                     if steps > 0 {
                         Text("第 \(steps) 步 · 这一步 \(max(Int(quiet.rounded(.down)), 0)) 秒")
-                            .balancedMono(size: 11.5).foregroundStyle(BalancedPalette.meta)
+                            .balancedMono(size: 11.5).foregroundStyle(LedgerAgentPalette.meta)
                     }
                     if quiet >= Self.slowAfter {
                         Text("模型这一步比较慢。网络不好时可以点停止，再发一次。")
-                            .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.secondary)
+                            .balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.secondary)
                     } else {
-                        Text("可以离开这一页或切到后台，答完会通知你").balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        Text("可以离开这一页或切到后台，答完会通知你").balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.meta)
                     }
                 }
             }
@@ -2484,6 +2567,41 @@ private struct LedgerAgentRunning: View {
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("ledger-agent-running")
     }
+}
+
+/// Whether the app opens on 账本助手.
+enum LedgerAgentLaunch {
+    static let storageKey = "ledger.agent.opensAtLaunch"
+
+    /// A UI test or preview fixture launch, which expects the tabs.
+    static var isFixture: Bool {
+        ProcessInfo.processInfo.arguments.contains {
+            $0.hasPrefix("--safe-") || $0.hasPrefix("--local-") || $0.hasPrefix("--initial-tab=")
+        }
+    }
+}
+
+/// What a chat screen has done on its first appearance, kept in a box so
+/// marking it never redraws the screen.
+@MainActor
+final class LedgerAgentFirstAppearance {
+    var conversation: UUID?
+    var readCrashReport = false
+    var readInbox = false
+}
+
+/// A plain view that takes touches, under a control floating over a scroll
+/// view. Without one the nearest UIKit view under the finger is the scroll
+/// view, which keeps a touch for itself while it is moving.
+struct LedgerTouchFloor: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = true
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
 }
 
 /// Turns following off when the reader scrolls up and back on when they
@@ -2544,7 +2662,7 @@ private struct LedgerAgentScrollTracking: ViewModifier {
                     let bottom = geometry.contentSize.height + geometry.contentInsets.bottom - Self.pageHeight(geometry)
                     return Position(offset: geometry.contentOffset.y, toBottom: bottom - geometry.contentOffset.y)
                 } action: { old, new in
-                    toBottom = new.toBottom
+                    if toBottom != new.toBottom { toBottom = new.toBottom }
                     // Moving up and away from the bottom by any means other
                     // than a drag (the status bar, VoiceOver, a pointer) is
                     // reading back too. The app's own scrolls only go down,
@@ -2631,22 +2749,22 @@ private struct LedgerAgentIntro: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("用对话查询账本").balancedFont(size: 24, weight: .semibold).foregroundStyle(BalancedPalette.ink)
+                Text("用对话查询账本").balancedFont(size: 24, weight: .semibold).foregroundStyle(LedgerAgentPalette.ink)
                     .padding(.top, 24)
                 Text("问收支、余额或某一笔流水。助手在本机读取账本，再把查询结果发给你选的模型。")
-                    .balancedFont(size: 15).foregroundStyle(BalancedPalette.secondary).lineSpacing(3)
+                    .balancedFont(size: 15).foregroundStyle(LedgerAgentPalette.secondary).lineSpacing(3)
                     .padding(.top, 10)
                 BalancedSectionLabel(text: String(localized: "它能做什么")).padding(.top, 26)
                 ForEach(abilities) { ability in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(ability.title).balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
-                        Text(ability.detail).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                        Text(ability.title).balancedFont(size: 15, weight: .text).foregroundStyle(LedgerAgentPalette.ink)
+                        Text(ability.detail).balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.meta)
                     }
                     .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-                    .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+                    .overlay(alignment: .bottom) { LedgerAgentPalette.rule.frame(height: 1) }
                 }
                 Text("改账时先改一份草稿，校验通过后直接写入，每次都是一个可以撤销的提交；删除文件或大量删改会先请你确认。需要你自己的模型 API Key，费用记在你的模型账户上。")
-                    .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta).lineSpacing(2)
+                    .balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.meta).lineSpacing(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .balancedBand()
                     .padding(.top, 20)
@@ -2679,12 +2797,12 @@ private struct LedgerAgentQuickSwitch: View {
         HStack(spacing: 6) {
             HStack(spacing: 0) {
                 Menu { models } label: {
-                    half(settings.modelTitle, tint: BalancedPalette.ink, leading: 12, trailing: 4)
+                    half(settings.modelTitle, tint: LedgerAgentPalette.ink, leading: 12, trailing: 4)
                 }
                 .accessibilityLabel(String(localized: "模型：\(settings.modelTitle)"))
                 .accessibilityIdentifier("ledger-agent-quick-model")
                 Menu { thinking } label: {
-                    half(settings.effectiveThinking.title, tint: BalancedPalette.meta, leading: 4, trailing: 12)
+                    half(settings.effectiveThinking.title, tint: LedgerAgentPalette.meta, leading: 4, trailing: 12)
                 }
                 // A long model name gives way before the effort does.
                 .layoutPriority(1)
@@ -2693,7 +2811,7 @@ private struct LedgerAgentQuickSwitch: View {
             }
             // A tint rather than the sunken fill, which is what the dock
             // itself is drawn in before iOS 26.
-            .background(Capsule().fill(BalancedPalette.meta.opacity(0.1)))
+            .background(Capsule().fill(LedgerAgentPalette.meta.opacity(0.1)))
             Spacer(minLength: 0)
             if let usage, usage.fraction != nil { LedgerAgentContextMeter(usage: usage) }
         }
@@ -2767,24 +2885,6 @@ private struct LedgerAgentCircleGlass: ViewModifier {
 /// at rest it is a capsule, and it keeps that corner when the second row or
 /// a multi-line draft makes it taller; a true capsule that tall would cut
 /// into the chip and the send circle in its corners.
-/// The page's resting height, observed only by the view that sizes itself
-/// to it.
-@MainActor @Observable
-final class LedgerAgentRestingHeight {
-    var value: CGFloat = 0
-}
-
-/// At least the page's resting height less `less`, content centred, read
-/// here so a change redraws only this.
-private struct LedgerAgentRestingFrame: ViewModifier {
-    let height: LedgerAgentRestingHeight
-    let less: CGFloat
-
-    func body(content: Content) -> some View {
-        content.frame(maxWidth: .infinity, minHeight: max(0, height.value - less), alignment: .center)
-    }
-}
-
 private struct LedgerAgentDock: ViewModifier {
     private static let shape = RoundedRectangle(cornerRadius: LedgerAgentChatScreen.dockHeight / 2, style: .continuous)
 
@@ -2793,8 +2893,8 @@ private struct LedgerAgentDock: ViewModifier {
             content.glassEffect(.regular, in: Self.shape)
         } else {
             content
-                .background(Self.shape.fill(BalancedPalette.sunken))
-                .overlay(Self.shape.stroke(BalancedPalette.rule, lineWidth: 1))
+                .background(Self.shape.fill(LedgerAgentPalette.sunken))
+                .overlay(Self.shape.stroke(LedgerAgentPalette.rule, lineWidth: 1))
         }
     }
 }

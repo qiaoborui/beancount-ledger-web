@@ -75,6 +75,7 @@ let package = Package(
                 "LedgerAgentArtifactViews.swift",
                 "LedgerAgentArtifactHTMLView.swift",
                 "LedgerAgentHistoryView.swift",
+                "LedgerAgentPalette.swift",
                 "LedgerAutomationView.swift",
                 "LedgerAgentTimelineView.swift",
                 "LedgerCrashLogView.swift",

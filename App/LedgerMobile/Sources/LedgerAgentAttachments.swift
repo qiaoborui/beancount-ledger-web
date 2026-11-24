@@ -106,13 +106,14 @@ enum LedgerAgentAttachments {
     static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "heif", "webp", "gif", "bmp", "tif", "tiff"]
 
     /// The types the file picker offers.
-    static var pickerTypes: [UTType] {
+    /// Built once: the chat page asks for it on every redraw.
+    static let pickerTypes: [UTType] = {
         var types: [UTType] = [.commaSeparatedText, .tabSeparatedText, .plainText, .pdf, .image, .spreadsheet]
         for ext in ["xlsx", "xls", "xlsm"] {
             if let type = UTType(filenameExtension: ext) { types.append(type) }
         }
         return types
-    }
+    }()
 
     static func kind(of name: String) -> LedgerAgentAttachment.Kind? {
         let ext = (name as NSString).pathExtension.lowercased()

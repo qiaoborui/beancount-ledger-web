@@ -29,13 +29,9 @@ struct LedgerAutomationView: View {
             tasksSection
             runsSection
         }
-        .navigationTitle("定时任务")
         .terminalNativeChrome()
-        .navigationBarTitleDisplayMode(.inline)
+        .ledgerSubpageChrome(String(localized: "定时任务"), actions: AnyView(newTaskMenu))
         .privacySensitive()
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { newTaskMenu }
-        }
         .refreshable { await center.refresh() }
         .task {
             await center.refresh()
@@ -73,7 +69,10 @@ struct LedgerAutomationView: View {
                 }
             }
         } label: {
-            Image(systemName: "plus")
+            Image(systemName: "plus").font(.system(size: 18))
+                .foregroundStyle(BalancedPalette.ink)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .accessibilityLabel("新建任务")
         .accessibilityIdentifier("ledger-automation-new-task")

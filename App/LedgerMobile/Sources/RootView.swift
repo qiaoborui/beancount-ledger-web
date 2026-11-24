@@ -468,6 +468,10 @@ private struct MainTabView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @State private var moreDestination: LedgerDestination?
+    @AppStorage(LedgerAgentLaunch.storageKey) private var agentOpensAtLaunch = true
+    /// The app has decided once whether to open on 账本助手; a shell rebuilt
+    /// after a lock or a size change does not open it again.
+    @MainActor private static var launchHandled = false
 
     private var selection: Binding<LedgerDestination> {
         Binding(
@@ -625,6 +629,9 @@ private struct MainTabView: View {
             routeAgent(previous: previous)
         }
         .onChange(of: session.agentPresented) { _, _ in routeAgent() }
+        // AI native: the app opens on 账本助手, the way a chat app opens on
+        // its chat. Closing it shows the ledger's tabs underneath.
+        .task { openAgentAtLaunch() }
         .onChange(of: horizontalSizeClass) { _, _ in routeAgent() }
         .onChange(of: session.isLocal) { _, local in
             LedgerCrashLog.shared.updateContext(ledgerMode: local ? "本机" : "远程",
@@ -650,6 +657,18 @@ private struct MainTabView: View {
                 self.moreDestination = nil
             }
         }
+    }
+
+    private func openAgentAtLaunch() {
+        guard !Self.launchHandled else { return }
+        Self.launchHandled = true
+        // Only where the assistant is the full-screen cover; and not when the
+        // launch came with somewhere else to go (a widget, a notification,
+        // a quick entry) or is a UI test fixture.
+        guard agentOpensAtLaunch, agentFloats, horizontalSizeClass != .regular, !session.agentPresented,
+              session.pendingExternalRoute == nil, session.quickEntry == nil, session.reportRequest == nil,
+              !LedgerAgentLaunch.isFixture else { return }
+        session.agentPresented = true
     }
 
     @available(iOS 26.0, *)

@@ -10718,6 +10718,16 @@
         }
       }
     },
+    "打开 App 时进入助手" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open on the assistant"
+          }
+        }
+      }
+    },
     "打开 Ledger 的指定页面。受保护的账本仍需在 App 中解锁。" : {
       "localizations" : {
         "en" : {

@@ -61,18 +61,14 @@ struct LedgerAgentHistoryView: View {
                 if !sessions.saved.isEmpty {
                     note("对话跟着账本存在本机，不进 Git 同步、备份或导出。置顶的对话不会因为数量太多被自动清理。")
                 }
-                // Room for the last line to clear the footer's fade.
-                Color.clear.frame(height: 28)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .accessibilityHidden(true)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .scrollDismissesKeyboard(.immediately)
             .accessibilityIdentifier("ledger-agent-history-list")
-            .safeAreaInset(edge: .bottom, spacing: 0) { footer }
+            // FlowDown's list ends above its footer instead of running
+            // under it.
+            footer
         }
         .privacySensitive()
         // New runs of the scheduled tasks join the history below.
@@ -97,7 +93,7 @@ struct LedgerAgentHistoryView: View {
             if searching {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(BalancedPalette.meta)
+                        .foregroundStyle(LedgerAgentPalette.meta)
                         .accessibilityHidden(true)
                     TextField("搜索标题、问题和回答", text: $query)
                         .balancedFont(size: 15)
@@ -113,20 +109,27 @@ struct LedgerAgentHistoryView: View {
             } else {
                 Text("账本助手")
                     .font(BalancedReading.font(.regular, size: 24, relativeTo: .title))
-                    .foregroundStyle(BalancedPalette.ink)
+                    .foregroundStyle(LedgerAgentPalette.ink)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .accessibilityAddTraits(.isHeader)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .transition(.opacity)
             }
+            // FlowDown's header: the name, and 新对话 as a round floating
+            // button beside it. A search under way puts its close there.
             Button {
-                searching.toggle()
-                if searching { searchFocused = true } else { query = "" }
+                if searching {
+                    searching = false
+                    query = ""
+                } else {
+                    sessions.startNew()
+                    close()
+                }
             } label: {
-                Image(systemName: searching ? "xmark" : "magnifyingglass")
+                Image(systemName: searching ? "xmark" : "square.and.pencil")
                     .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(BalancedPalette.ink)
+                    .foregroundStyle(LedgerAgentPalette.ink)
                     .frame(width: 44, height: 44)
                     .background {
                         if !LedgerGlass.isAvailable { Circle().fill(LedgerAgentHistoryDrawer.selectedFill) }
@@ -135,8 +138,8 @@ struct LedgerAgentHistoryView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(searching ? "关闭搜索" : "搜索")
-            .accessibilityIdentifier("ledger-agent-history-search")
+            .accessibilityLabel(searching ? "关闭搜索" : "新对话")
+            .accessibilityIdentifier(searching ? "ledger-agent-history-search-close" : "ledger-agent-new")
         }
         .animation(.easeInOut(duration: 0.18), value: searching)
         // Claude's sidebar sets its title on the line of the page's round
@@ -154,7 +157,7 @@ struct LedgerAgentHistoryView: View {
     /// rows it heads.
     private func sectionTitle(_ title: LocalizedStringKey) -> some View {
         Text(title)
-            .balancedFont(size: 14).foregroundStyle(BalancedPalette.meta)
+            .balancedFont(size: 14).foregroundStyle(LedgerAgentPalette.meta)
             .accessibilityAddTraits(.isHeader)
             .listRowInsets(EdgeInsets(top: 18, leading: 24, bottom: 6, trailing: 16))
             .listRowSeparator(.hidden)
@@ -164,24 +167,26 @@ struct LedgerAgentHistoryView: View {
     /// A place: its symbol and name, set like a conversation row.
     private func place(_ route: LedgerAgentDrawerRoute) -> some View {
         Button {
-            close()
+            // Pushed over the open drawer, which closes out of sight once
+            // the page covers it (`onDisappear` below): closing it while the
+            // page came in ran two slides at once.
             actions.openRoute(route)
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: route.symbol).font(.system(size: 18, weight: .regular))
-                    .foregroundStyle(BalancedPalette.ink)
+                    .foregroundStyle(LedgerAgentPalette.ink)
                     .frame(width: 26)
                     .accessibilityHidden(true)
-                Text(route.title).balancedFont(size: 17).foregroundStyle(BalancedPalette.ink)
+                Text(route.title).balancedFont(size: 17).foregroundStyle(LedgerAgentPalette.ink)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if route == .automations, automations.unseen > 0 {
                     Text(verbatim: "\(automations.unseen)")
                         .balancedFont(size: 12, weight: .medium)
-                        .foregroundStyle(BalancedPalette.page)
+                        .foregroundStyle(LedgerAgentPalette.page)
                         .padding(.horizontal, 7)
                         .frame(minWidth: 20, minHeight: 20)
-                        .background(Capsule().fill(BalancedPalette.ink))
+                        .background(Capsule().fill(LedgerAgentPalette.ink))
                         .accessibilityLabel("\(automations.unseen) 次新运行")
                 }
             }
@@ -197,7 +202,7 @@ struct LedgerAgentHistoryView: View {
 
     private func note(_ text: LocalizedStringKey) -> some View {
         Text(text)
-            .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+            .balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.meta)
             .listRowInsets(EdgeInsets(top: 14, leading: 24, bottom: 14, trailing: 20))
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
@@ -213,10 +218,11 @@ struct LedgerAgentHistoryView: View {
         .listRowSeparator(.hidden)
         // The conversation on screen sits on a sunken block, inset 14pt
         // from the drawer's edges like Claude's selected row.
+        // The selected row: a rounded pill, as FlowDown's.
         .listRowBackground(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(item.id == sessions.current.id ? LedgerAgentHistoryDrawer.selectedFill : Color.clear)
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 12)
                 .padding(.vertical, 1)
         )
         .accessibilityAddTraits(item.id == sessions.current.id ? .isSelected : [])
@@ -225,7 +231,7 @@ struct LedgerAgentHistoryView: View {
         // deleting is in the menu a long press opens.
         .swipeActions(edge: .leading) {
             Button { sessions.setPinned(item.id, item.pinnedAt == nil) } label: { pinLabel(item) }
-                .tint(BalancedPalette.secondary)
+                .tint(LedgerAgentPalette.secondary)
         }
     }
 
@@ -258,17 +264,17 @@ struct LedgerAgentHistoryView: View {
             // A conversation a scheduled task began shows a clock.
             Image(systemName: item.automationRun == nil ? "bubble.left" : "clock")
                 .font(.system(size: 18, weight: .regular))
-                .foregroundStyle(BalancedPalette.ink)
+                .foregroundStyle(LedgerAgentPalette.ink)
                 .frame(width: 26)
                 .accessibilityHidden(true)
-            Text(item.title).balancedFont(size: 17).foregroundStyle(BalancedPalette.ink)
+            Text(item.title).balancedFont(size: 17).foregroundStyle(LedgerAgentPalette.ink)
                 .lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 4)
             if isRunning(item.id) {
                 ProgressView().controlSize(.small)
                     .accessibilityLabel("正在回答…")
             } else if item.unwrittenChange {
-                Circle().fill(BalancedPalette.secondary).frame(width: 7, height: 7)
+                Circle().fill(LedgerAgentPalette.secondary).frame(width: 7, height: 7)
                     .accessibilityElement()
                     .accessibilityLabel("有未写入的草稿改动")
             }
@@ -279,10 +285,18 @@ struct LedgerAgentHistoryView: View {
 
     // MARK: Footer
 
-    /// At the leading end a round button with the app's mark where Claude
-    /// puts the user's picture: the ledger has no profile, so it holds what
-    /// is left over, 助手设置 and 清空历史. 新对话 is an ink capsule at the
-    /// trailing end. Rows scrolling under the two fade into the page.
+    private func footerSymbol(_ name: String) -> some View {
+        Image(systemName: name).font(.system(size: 18, weight: .regular))
+            .foregroundStyle(LedgerAgentPalette.ink)
+            .frame(width: 32, height: 32)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+    }
+
+    /// FlowDown's footer: settings at the leading end and search at the
+    /// trailing end, two plain 32pt symbols with nothing between them. The
+    /// settings button's menu also holds 清空历史. Rows scrolling under them
+    /// fade into the page.
     private var footer: some View {
         HStack(spacing: 8) {
             Menu {
@@ -296,50 +310,25 @@ struct LedgerAgentHistoryView: View {
                     }
                 }
             } label: {
-                LedgerMarkCanvas(progress: 1)
-                    .frame(width: 32, height: 32)
-                    .frame(width: 48, height: 48)
-                    .background {
-                        if !LedgerGlass.isAvailable {
-                            Circle().fill(LedgerAgentHistoryDrawer.selectedFill)
-                        }
-                    }
-                    .ledgerGlassControl()
-                    .contentShape(Circle())
+                footerSymbol("gearshape")
             }
-            .accessibilityLabel("更多")
+            .accessibilityLabel("设置")
             .accessibilityIdentifier("ledger-agent-history-more")
             Spacer(minLength: 0)
             Button {
-                sessions.startNew()
-                close()
+                searching = true
+                searchFocused = true
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "plus").font(.system(size: 16, weight: .medium))
-                    Text("新对话").balancedFont(size: 16, weight: .medium).lineLimit(1)
-                }
-                .foregroundStyle(BalancedPalette.page)
-                .padding(.leading, 18)
-                .padding(.trailing, 22)
-                .frame(minHeight: 48)
-                .background(Capsule().fill(BalancedPalette.ink))
-                .contentShape(Capsule())
+                footerSymbol("magnifyingglass")
             }
             .buttonStyle(.plain)
-            .accessibilityIdentifier("ledger-agent-new")
+            .disabled(searching)
+            .accessibilityLabel("搜索")
+            .accessibilityIdentifier("ledger-agent-history-search")
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 4)
-        .background {
-            LinearGradient(stops: [.init(color: LedgerAgentHistoryDrawer.fill.opacity(0), location: 0),
-                                   .init(color: LedgerAgentHistoryDrawer.fill.opacity(0.9), location: 0.4),
-                                   .init(color: LedgerAgentHistoryDrawer.fill, location: 1)],
-                           startPoint: .top, endPoint: .bottom)
-                .padding(.top, -24)
-                .ignoresSafeArea(edges: .bottom)
-                .allowsHitTesting(false)
-        }
     }
 }
 
@@ -431,6 +420,9 @@ private final class LedgerAgentDrawerMotion {
     /// The drag in progress went far enough to decide: the drawer is already
     /// on its way, and the rest of that drag moves nothing.
     var committed = false
+    /// The next settle jumps to its place without animating: the drawer
+    /// is out of sight under a pushed page.
+    var instant = false
 
     /// FlowDown's sidebar spring: half a second, damping 0.9.
     static let spring = Spring(duration: 0.5, bounce: 0.1)
@@ -440,9 +432,7 @@ private final class LedgerAgentDrawerMotion {
     static let commitDistance: CGFloat = 100
     /// How far the drawer starts left of its place, so it slides in a little
     /// under the page rather than lying still.
-    static let parallax: CGFloat = 50
-    /// How much the page shrinks into a card at the drawer fully out.
-    static let cardShrink: CGFloat = 0.1
+    static let parallax: CGFloat = 70
 
     func began(from: CGFloat, to: CGFloat, velocity: CGFloat) {
         self.from = from
@@ -497,37 +487,34 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     @State private var drawn = false
     @State private var motion = LedgerAgentDrawerMotion()
     @State private var actions = LedgerAgentDrawerActions()
+    /// The page is drawn back into a card, as FlowDown's chat is while its
+    /// sidebar is open. It follows `isPresented`, never the finger: a drag
+    /// only moves the page sideways until it commits, as FlowDown's does.
+    @State private var carded = false
 
     private static let overShape = UnevenRoundedRectangle(bottomTrailingRadius: 28, topTrailingRadius: 28,
                                                           style: .continuous)
-    /// The radius of the pushed page's leading corners, near the screen's
-    /// own so the card reads as the screen sliding aside.
-    private static let cardRadius: CGFloat = 40
-    /// The drawer's ground, in the colour scheme's own tones: in light mode
-    /// the page colour itself, so the drawer is the app's paper rather than
-    /// a grey panel, and the page lying on it is told apart by a dim; in dark
-    /// mode a step lighter than the page, since a dim on near-black hardly
-    /// shows.
-    static let fill = Color(uiColor: UIColor { traits in
-        let dark = traits.userInterfaceStyle == .dark
-        let tokens = LedgerColorTheme.active.tokens(dark: dark)
-        return UIColor(hex: UInt(dark ? tokens.sunken : tokens.page))
-    })
-    /// The selected row and the search field on that ground: the scheme's
-    /// selected tone by day, and by night its well, since the selected tone
-    /// there is the step the ground already took.
-    static let selectedFill = Color(uiColor: UIColor { traits in
-        let dark = traits.userInterfaceStyle == .dark
-        let tokens = LedgerColorTheme.active.tokens(dark: dark)
-        return UIColor(hex: UInt(dark ? tokens.well : tokens.selected))
-    })
+    /// FlowDown's chat card beside its sidebar: 28pt corners, 20pt in
+    /// from the safe area at the top and the bottom.
+    private static let cardRadius: CGFloat = 28
+    private static let cardInset: CGFloat = 20
+    /// The drawer's ground: FlowDown's page colour, so the sidebar and the
+    /// card are one surface told apart by the card's shadow alone.
+    static let fill = LedgerAgentPalette.page
+    /// The selected row and the search field on that ground.
+    static let selectedFill = LedgerAgentPalette.selected
 
-    private var width: CGFloat { min(pageWidth * 0.8, 400) }
+    /// FlowDown leaves 60pt of the card on screen beside its sidebar on a
+    /// phone; a wider window keeps a drawer of at most 400pt.
+    private var width: CGFloat { pushes ? max(0, pageWidth - 60) : min(pageWidth * 0.8, 400) }
     /// The dim over the pushed page (compact) or the page under the sliding
     /// drawer (regular), at the drawer fully out.
     private var veilStrength: CGFloat {
         guard pushes else { return colorScheme == .dark ? 0.45 : 0.2 }
-        return colorScheme == .dark ? 0.4 : 0.08
+        // FlowDown leaves its chat card undimmed: the card and its shadow
+        // are enough to tell it from the sidebar, and a grey card is what
+        // made the page look like a second, muddier layer.
+        return 0
     }
     /// Compact width pushes the page aside; regular width slides the drawer
     /// over it, since the system navigation bar there would not move.
@@ -535,27 +522,32 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     private var progress: CGFloat { width > 0 ? min(1, max(0, reveal / width)) : 0 }
     /// Anything of the drawer is on screen.
     private var isOut: Bool { drawn || reveal > 0.5 || isPresented }
+    private var cardedPage: Bool { pushes && carded }
 
     func body(content: Content) -> some View {
         ZStack(alignment: .topLeading) {
             content
                 .accessibilityHidden(isPresented)
-                .overlay { if isOut { cover } }
-                // Compact width: the page draws back into a floating card,
-                // as FlowDown's chat does beside its sidebar, with a shadow
-                // from a plain shape behind it so the page itself is never
-                // drawn offscreen.
-                .scaleEffect(pushes ? 1 - LedgerAgentDrawerMotion.cardShrink * progress : 1, anchor: .leading)
-                .background {
-                    if pushes && isOut {
-                        RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous)
-                            .fill(BalancedPalette.page)
-                            .shadow(color: .black.opacity(0.12 * progress), radius: 16, x: 0, y: 0)
-                            .scaleEffect(1 - LedgerAgentDrawerMotion.cardShrink * progress, anchor: .leading)
-                            .ignoresSafeArea()
+                .environment(\.ledgerAgentDrawerOpen, isPresented)
+                // FlowDown's card: the page lays itself out again 20pt inside
+                // the safe area at the top and the bottom. Only a padding:
+                // the safe area itself is left to the system, since taking
+                // it over by hand fed back into the page's layout and hung
+                // the app.
+                .padding(.vertical, cardedPage ? Self.cardInset : 0)
+                // The card's outline is drawn over the page rather than cut
+                // out of it: a clip left the page's scroll view, a UIKit
+                // view, with square corners and its edge effect showing
+                // above the card. Everything outside the rounded card is
+                // painted in the drawer's ground, with the shadow on top.
+                .overlay {
+                    if pushes && (carded || reveal > 0.5) {
+                        LedgerAgentCardFrame(radius: cardedPage ? Self.cardRadius : 0, shadowed: cardedPage)
                             .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                 }
+                .overlay { if isOut { cover } }
                 .background {
                     LedgerAgentDrawerPan(
                         mode: !(width > 0) ? .off : isPresented ? .closes : (edgeOpens ? .opens : .off),
@@ -581,6 +573,13 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
             actions.openSettings = openSettings
             actions.openRoute = openRoute
             if isPresented { settle(speed: 0) }
+        }
+        // A page pushed from the drawer now covers it: it closes where it
+        // cannot be seen, so a swipe back lands on the conversation.
+        .onDisappear {
+            guard isPresented else { return }
+            motion.instant = true
+            isPresented = false
         }
     }
 
@@ -620,7 +619,6 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     private var cover: some View {
         ZStack(alignment: .leading) {
             Color.black.opacity(veilStrength * progress)
-                .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { isPresented = false }
                 .accessibilityElement()
@@ -628,13 +626,6 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                 .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("ledger-agent-history-dismiss")
                 .accessibilityHidden(!isPresented)
-            if pushes {
-                LedgerAgentCardCorners(radius: Self.cardRadius)
-                    .fill(Self.fill)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
         }
     }
 
@@ -711,6 +702,19 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
         let target = isPresented ? width : 0
         let from = motion.presented() ?? reveal
         if isPresented || from > 0.5 { withTransaction(Self.still) { drawn = true } }
+        if motion.instant {
+            motion.instant = false
+            motion.stop()
+            withTransaction(Self.still) {
+                reveal = target
+                carded = isPresented
+                if !isPresented {
+                    drawn = false
+                    closings += 1
+                }
+            }
+            return
+        }
         let distance = target - from
         let animation: Animation
         if reduceMotion {
@@ -723,6 +727,14 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
             let relative = abs(distance) > 1 ? min(12, max(-12, speed / distance)) : 0
             animation = .interpolatingSpring(LedgerAgentDrawerMotion.spring, initialVelocity: relative)
             motion.began(from: from, to: target, velocity: relative * distance)
+        }
+        if carded != isPresented {
+            // The card draws back or fills the screen again on FlowDown's
+            // spring, from rest: the finger's speed is a sideways one.
+            withAnimation(reduceMotion ? .easeInOut(duration: 0.2)
+                                       : .interpolatingSpring(LedgerAgentDrawerMotion.spring)) {
+                carded = isPresented
+            }
         }
         withAnimation(animation, completionCriteria: .removed) {
             reveal = target
@@ -743,24 +755,112 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     }
 }
 
-/// The two leading corners of the pushed page, filled in the drawer's
-/// colour so the page reads as a card with rounded corners.
-private struct LedgerAgentCardCorners: Shape {
+/// What lies outside FlowDown's chat card while the drawer is out: the
+/// drawer's ground, everywhere beyond the card's rounded outline, and the
+/// card's shadow (black at 10%, 8pt) over it, cast from a path and masked
+/// to the outside of the card so it never darkens the page.
+private struct LedgerAgentCardFrame: UIViewRepresentable {
     var radius: CGFloat
+    /// FlowDown casts the card's shadow only while the card is drawn back;
+    /// on a page filling the screen it would draw lines along the safe
+    /// area's edges.
+    var shadowed: Bool
 
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.minY))
-        path.addArc(center: CGPoint(x: rect.minX + radius, y: rect.minY + radius), radius: radius,
-                    startAngle: .degrees(-90), endAngle: .degrees(180), clockwise: true)
-        path.closeSubpath()
-        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - radius))
-        path.addArc(center: CGPoint(x: rect.minX + radius, y: rect.maxY - radius), radius: radius,
-                    startAngle: .degrees(180), endAngle: .degrees(90), clockwise: true)
-        path.closeSubpath()
-        return path
+    func makeUIView(context: Context) -> FrameView { FrameView() }
+
+    func updateUIView(_ view: FrameView, context: Context) {
+        view.radius = radius
+        view.setShadowed(shadowed)
+    }
+
+    final class FrameView: UIView {
+        var radius: CGFloat = 0 { didSet { if radius != oldValue { setNeedsLayout() } } }
+        private let ground = CAGradientLayer()
+        private let groundMask = CAShapeLayer()
+        private let shadow = CALayer()
+        private let shadowMask = CAShapeLayer()
+        /// How far past the card the ground reaches: off every edge of the
+        /// screen, whichever way the card has moved.
+        private static let reach: CGFloat = 3000
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            backgroundColor = .clear
+            clipsToBounds = false
+            groundMask.fillRule = .evenOdd
+            ground.mask = groundMask
+            shadow.shadowColor = UIColor.black.cgColor
+            shadow.shadowOpacity = 0
+            shadow.shadowRadius = 8
+            shadow.shadowOffset = .zero
+            shadowMask.fillRule = .evenOdd
+            shadow.mask = shadowMask
+            layer.addSublayer(ground)
+            layer.addSublayer(shadow)
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        func setShadowed(_ on: Bool) {
+            let opacity: Float = on ? 0.1 : 0
+            guard shadow.shadowOpacity != opacity else { return }
+            // Faded with the card's spring rather than switched.
+            let fade = CABasicAnimation(keyPath: "shadowOpacity")
+            fade.fromValue = shadow.presentation()?.shadowOpacity ?? shadow.shadowOpacity
+            fade.toValue = opacity
+            fade.duration = 0.3
+            shadow.add(fade, forKey: "fade")
+            shadow.shadowOpacity = opacity
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            let card = UIBezierPath(roundedRect: bounds, cornerRadius: radius)
+            let outside = UIBezierPath(rect: bounds.insetBy(dx: -Self.reach, dy: -Self.reach))
+            outside.append(card)
+            // Only the card's own column, above it, below it and in its
+            // corners: the drawer lies to its left and must stay in view.
+            ground.frame = CGRect(x: 0, y: -Self.reach, width: bounds.width + Self.reach,
+                                  height: bounds.height + Self.reach * 2)
+            ground.colors = [LedgerAgentPalette.groundTopUI, LedgerAgentPalette.groundBottomUI]
+                .map { $0.resolvedColor(with: traitCollection).cgColor }
+            // The mask is in the ground's own coordinates.
+            let maskPath = UIBezierPath(rect: CGRect(origin: .zero, size: ground.frame.size))
+            maskPath.append(UIBezierPath(roundedRect: bounds.offsetBy(dx: 0, dy: Self.reach),
+                                         cornerRadius: radius))
+            groundMask.frame = CGRect(origin: .zero, size: ground.frame.size)
+            groundMask.path = maskPath.cgPath
+            shadow.frame = bounds
+            shadow.shadowPath = card.cgPath
+            shadowMask.frame = bounds
+            shadowMask.path = outside.cgPath
+            CATransaction.commit()
+        }
+
+        override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+            super.traitCollectionDidChange(previous)
+            setNeedsLayout()
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            setNeedsLayout()
+        }
+    }
+}
+
+private struct LedgerAgentDrawerOpenKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// The history drawer is out beside the page.
+    var ledgerAgentDrawerOpen: Bool {
+        get { self[LedgerAgentDrawerOpenKey.self] }
+        set { self[LedgerAgentDrawerOpenKey.self] = newValue }
     }
 }
 

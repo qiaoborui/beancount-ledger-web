@@ -12,8 +12,8 @@ import SwiftUI
 /// at 60 fps.
 struct LedgerVoiceStrip: View {
     let levels: LedgerAgentVoiceRecorder.VoiceLevels
-    var bar: Color = BalancedPalette.ink
-    var dot: Color = BalancedPalette.ruleStrong
+    var bar: Color = LedgerAgentPalette.ink
+    var dot: Color = LedgerAgentPalette.ruleStrong
     var height: CGFloat = 24
     /// Bars and the gaps between them, in points.
     var barWidth: CGFloat = 2
@@ -68,7 +68,7 @@ struct LedgerVoiceStrip: View {
 /// The recording timer, ticking from the moment the microphone opened.
 struct LedgerVoiceClock: View {
     let recorder: LedgerAgentVoiceRecorder
-    var color: Color = BalancedPalette.meta
+    var color: Color = LedgerAgentPalette.meta
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.25)) { _ in
@@ -109,7 +109,7 @@ struct LedgerVoiceBar: View {
         HStack(spacing: 8) {
             Button(action: onCancel) {
                 Image(systemName: "xmark").font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(BalancedPalette.secondary)
+                    .foregroundStyle(LedgerAgentPalette.secondary)
                     .frame(width: 36, height: 40)
                     .contentShape(Rectangle())
             }
@@ -131,7 +131,7 @@ struct LedgerVoiceBar: View {
 
             Button(action: onConfirm) {
                 Image(systemName: "checkmark").font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(BalancedPalette.ink)
+                    .foregroundStyle(LedgerAgentPalette.ink)
                     .frame(width: 36, height: 40)
                     .contentShape(Rectangle())
             }

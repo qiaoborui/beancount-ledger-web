@@ -40,8 +40,8 @@ struct LedgerAgentArtifactCard: View {
             LedgerAgentArtifactRowLabel(title: artifact.title, detail: artifact.summary ?? String(localized: "产物 · 点开查看"))
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(BalancedPalette.rule, lineWidth: 1))
+                .background(LedgerAgentPalette.sunken, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(LedgerAgentPalette.rule, lineWidth: 1))
                 .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -83,8 +83,8 @@ struct LedgerAgentArtifactBuildingCard: View {
             .opacity(dimmed ? 0.55 : 1)
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(BalancedPalette.rule, lineWidth: 1))
+            .background(LedgerAgentPalette.sunken, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(LedgerAgentPalette.rule, lineWidth: 1))
             .onAppear {
                 guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dimmed = true }
@@ -103,21 +103,21 @@ private struct LedgerAgentArtifactRowLabel: View {
         HStack(spacing: 12) {
             Image(systemName: "rectangle.stack")
                 .font(.system(size: 17, weight: .regular))
-                .foregroundStyle(BalancedPalette.secondary)
+                .foregroundStyle(LedgerAgentPalette.secondary)
                 .frame(width: 38, height: 38)
-                .background(BalancedPalette.page, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(BalancedPalette.rule, lineWidth: 1))
+                .background(LedgerAgentPalette.page, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(LedgerAgentPalette.rule, lineWidth: 1))
             VStack(alignment: .leading, spacing: 3) {
-                Text(verbatim: title).balancedFont(size: 15, weight: .semibold).foregroundStyle(BalancedPalette.ink)
+                Text(verbatim: title).balancedFont(size: 15, weight: .semibold).foregroundStyle(LedgerAgentPalette.ink)
                     .lineLimit(2).multilineTextAlignment(.leading)
-                Text(verbatim: detail).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
+                Text(verbatim: detail).balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.meta)
                     .lineLimit(2).multilineTextAlignment(.leading)
             }
             Spacer(minLength: 8)
             if showsChevron {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(BalancedPalette.meta)
+                    .foregroundStyle(LedgerAgentPalette.meta)
             }
         }
     }
@@ -154,13 +154,13 @@ struct LedgerAgentArtifactScreen: View {
     private var heading: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(verbatim: current.title).balancedFont(size: 22, weight: .semibold)
-                .foregroundStyle(BalancedPalette.ink)
+                .foregroundStyle(LedgerAgentPalette.ink)
                 .accessibilityAddTraits(.isHeader)
             if let summary = current.summary {
-                Text(verbatim: summary).balancedFont(size: 13.5).foregroundStyle(BalancedPalette.secondary)
+                Text(verbatim: summary).balancedFont(size: 13.5).foregroundStyle(LedgerAgentPalette.secondary)
             }
             if let caption = versionCaption {
-                Text(verbatim: caption).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                Text(verbatim: caption).balancedFont(size: 12).foregroundStyle(LedgerAgentPalette.meta)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -200,7 +200,7 @@ struct LedgerAgentArtifactScreen: View {
                     }
                 }
             }
-            .background(BalancedPalette.page)
+            .background(LedgerAgentPalette.page)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -304,9 +304,9 @@ struct LedgerAgentArtifactsView: View {
             if loaded && records.isEmpty {
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("还没有产物").balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                        Text("还没有产物").balancedFont(size: 15, weight: .medium).foregroundStyle(LedgerAgentPalette.ink)
                         Text("让助手「做一个 2026 年餐饮支出面板」「生成一份本月账单报告」，做好的页面会存在这里，随时打开、继续修改或用最新数据刷新。")
-                            .balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                            .balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.meta)
                     }
                     .padding(.vertical, 6)
                 }
@@ -316,11 +316,11 @@ struct LedgerAgentArtifactsView: View {
                     if let latest = record.latest, let spec = LedgerAgentArtifactSpec(json: latest.spec) { opened = Opened(spec: spec) }
                 } label: {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(verbatim: record.title).balancedFont(size: 15, weight: .medium).foregroundStyle(BalancedPalette.ink)
+                        Text(verbatim: record.title).balancedFont(size: 15, weight: .medium).foregroundStyle(LedgerAgentPalette.ink)
                         if let summary = record.summary {
-                            Text(verbatim: summary).balancedFont(size: 13).foregroundStyle(BalancedPalette.secondary).lineLimit(2)
+                            Text(verbatim: summary).balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.secondary).lineLimit(2)
                         }
-                        Text(caption(record)).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
+                        Text(caption(record)).balancedFont(size: 12).foregroundStyle(LedgerAgentPalette.meta)
                     }
                     .padding(.vertical, 2)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -333,9 +333,8 @@ struct LedgerAgentArtifactsView: View {
                 .accessibilityIdentifier("ledger-agent-artifact-row")
             }
         }
-        .navigationTitle("产物")
         .terminalNativeChrome()
-        .navigationBarTitleDisplayMode(.inline)
+        .ledgerSubpageChrome(String(localized: "产物"))
         .privacySensitive()
         .task(id: shelf.revision) { await load() }
         .fullScreenCover(item: $opened) { item in

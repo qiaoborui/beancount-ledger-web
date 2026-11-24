@@ -52,17 +52,20 @@ struct LedgerAgentMemoryView: View {
             }
         }
         .font(.subheadline)
-        .navigationTitle("记忆")
         .terminalNativeChrome()
-        .navigationBarTitleDisplayMode(.inline)
-        .privacySensitive()
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("保存") { save(text) }
-                    .disabled(!loaded || text == saved)
-                    .accessibilityIdentifier("ledger-agent-memory-save")
+        .ledgerSubpageChrome(String(localized: "记忆"), actions: AnyView(
+            Button { save(text) } label: {
+                Text("保存").font(.system(size: 16, weight: .semibold))
+                    .padding(.horizontal, 10)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
-        }
+            .buttonStyle(.plain)
+            .foregroundStyle(!loaded || text == saved ? BalancedPalette.meta : BalancedPalette.ink)
+            .disabled(!loaded || text == saved)
+            .accessibilityIdentifier("ledger-agent-memory-save")
+        ))
+        .privacySensitive()
         .confirmationDialog("清空记忆？", isPresented: $confirmingClear, titleVisibility: .visible) {
             Button("清空", role: .destructive) { save("") }
         } message: {

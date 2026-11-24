@@ -93,6 +93,10 @@ struct TerminalPageChrome: ViewModifier {
     var showsTitle = true
     /// The bar's leading control when there is no title.
     var leadingActions: AnyView? = nil
+    /// A title of the page's own centred in a bar without the page title
+    /// (`showsTitle` false), as FlowDown centres a conversation's name
+    /// between its two buttons.
+    var centerTitle: AnyView? = nil
 
     private var titleLabel: some View {
         Text(compactTitle ?? title)
@@ -226,6 +230,15 @@ struct TerminalPageChrome: ViewModifier {
                                 Spacer(minLength: 4)
                                 trailingCluster
                             }
+                            .overlay {
+                                if let centerTitle {
+                                    BalancedPushedBarLayout(spacing: 8) {
+                                        Color.clear.frame(width: 44, height: 1)
+                                        centerTitle
+                                        Color.clear.frame(width: 96, height: 1)
+                                    }
+                                }
+                            }
                         } else if isRoot {
                             HStack(spacing: 8) {
                                 titleText
@@ -348,9 +361,61 @@ private struct TerminalBackGestureBridge: UIViewControllerRepresentable {
 
 }
 
+private struct LedgerBarlessPushKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// The page was pushed from one that hides the system navigation bar
+    /// (账本助手, 更多).
+    var ledgerBarlessPush: Bool {
+        get { self[LedgerBarlessPushKey.self] }
+        set { self[LedgerBarlessPushKey.self] = newValue }
+    }
+}
+
+/// The bar of a page that is pushed from both kinds of page: from one
+/// without the system bar it draws the app's glass bar too, and from one
+/// with it, the system bar. A back swipe between a page that hides the
+/// system bar and one that shows it slides the bar in and out under the
+/// finger and shifts the page beneath it, which is what made those swipes
+/// feel stuck.
+private struct LedgerSubpageChrome: ViewModifier {
+    let title: String
+    let dark: Bool
+    let actions: AnyView?
+    @Environment(\.ledgerBarlessPush) private var barless
+
+    func body(content: Content) -> some View {
+        if barless {
+            content
+                .terminalPageChrome(title, isRoot: false, showsSync: false, actions: actions, balanced: true)
+                .environment(\.colorScheme, dark ? .dark : colorSchemeOutside)
+        } else {
+            content
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarColorScheme(dark ? .dark : nil, for: .navigationBar)
+                .toolbar {
+                    if let actions { ToolbarItem(placement: .primaryAction) { actions } }
+                }
+        }
+    }
+
+    @Environment(\.colorScheme) private var colorSchemeOutside
+}
+
 extension View {
-    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, showsTimeRange: Bool = false, showsSync: Bool = true, actions: AnyView? = nil, balanced: Bool = false, titleAction: TerminalTitleAction? = nil, showsTitle: Bool = true, leadingActions: AnyView? = nil) -> some View {
-        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions, showsTimeRange: showsTimeRange, showsSync: showsSync, balanced: balanced, titleAction: titleAction, showsTitle: showsTitle, leadingActions: leadingActions))
+    /// See `LedgerSubpageChrome`. `dark` keeps the bar dark in either mode,
+    /// for a page that is dark itself.
+    func ledgerSubpageChrome(_ title: String, dark: Bool = false, actions: AnyView? = nil) -> some View {
+        modifier(LedgerSubpageChrome(title: title, dark: dark, actions: actions))
+    }
+}
+
+extension View {
+    func terminalPageChrome(_ title: String, compactTitle: String? = nil, isRoot: Bool = true, showsTimeRange: Bool = false, showsSync: Bool = true, actions: AnyView? = nil, balanced: Bool = false, titleAction: TerminalTitleAction? = nil, showsTitle: Bool = true, leadingActions: AnyView? = nil, centerTitle: AnyView? = nil) -> some View {
+        modifier(TerminalPageChrome(isRoot: isRoot, title: title, compactTitle: compactTitle, actions: actions, showsTimeRange: showsTimeRange, showsSync: showsSync, balanced: balanced, titleAction: titleAction, showsTitle: showsTitle, leadingActions: leadingActions, centerTitle: centerTitle))
     }
 }
 
