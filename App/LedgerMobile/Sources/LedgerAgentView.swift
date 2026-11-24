@@ -537,196 +537,192 @@ private struct LedgerAgentChatScreen: View {
 
     // MARK: Conversation
 
-    /// The 1-pt anchor under the last message is on screen; the jump button
-    /// shows otherwise, except while the page is following a running turn.
-    @State private var isAtBottom = false
-    /// New content scrolls the page down to it. The reader scrolling up or
-    /// opening a tool group or reasoning block turns this off; the page
-    /// coming to rest at the bottom, the jump button or sending a question
-    /// turns it back on. Content growing past the bottom never turns it off,
-    /// so a burst of streamed text or a new tool row cannot leave the page
-    /// stranded above the reply. A screen opens following only when it opens
-    /// at the bottom, so a reopened conversation read from the top is not
-    /// pulled down when its recap arrives.
-    @State private var following = false
-    /// The reader's finger, or a fling or scroll they started, is moving the
-    /// page.
-    @State private var readerScrolling = false
-    /// The conversation is taller than the page. Until it is, the page rests
-    /// at the top and following never scrolls it (`LedgerAgentScrollFit`).
-    @State private var contentOverflows = false
-    /// Before iOS 18, the measures `contentOverflows` is worked out from.
-    @State private var contentHeight: CGFloat = 0
-    @State private var viewportHeight: CGFloat = 0
+    /// The conversation's UIKit list: its jump button and the scrolls the
+    /// page asks of it (`LedgerAgentMessageList`).
+    @StateObject private var listModel = LedgerAgentListModel()
     /// When the empty state last read the clock for its greeting.
     @State private var greetingNow = Date()
 
-    private var showsJumpButton: Bool {
-        // Not while the page is on its way down to a growing reply.
-        !isAtBottom && !conversation.messages.isEmpty && !(following && conversation.isRunning)
+    /// The rows of the conversation, each with what it shows, so the list
+    /// draws again only those that changed.
+    private var listRows: [LedgerAgentListRow] {
+        var rows: [LedgerAgentListRow] = []
+        if let crashReport {
+            rows.append(.init(id: "crash", token: crashReport) { crashBand(crashReport) })
+        }
+        let last = conversation.messages.last?.id
+        for message in conversation.messages {
+            let versions = conversation.versions(of: message.id)
+            switch message.role {
+            case .user:
+                let token = QuestionToken(message: message, editing: editing == message.id,
+                                          running: conversation.isRunning, canStart: canStartVersion,
+                                          canBranch: conversation.canBranch, version: versions.index,
+                                          versions: versions.count,
+                                          earlierAnswers: conversation.answersBeside(message.id))
+                rows.append(.init(id: message.id.uuidString, token: token) { question(message) })
+            case .assistant:
+                let token = AnswerToken(message: message,
+                                        asksNow: message.id == last && !conversation.isRunning && !sessions.busyElsewhere,
+                                        undoing: conversation.undoing == message.id,
+                                        canUndo: conversation.canUndo(message),
+                                        undoFailure: conversation.undoFailure?.message == message.id
+                                            ? conversation.undoFailure?.text : nil,
+                                        undoingSettings: conversation.undoingSettings == message.id,
+                                        canUndoSettings: conversation.canUndoAppSettings(message),
+                                        canStart: canStartVersion, canBranch: conversation.canBranch,
+                                        version: versions.index, versions: versions.count,
+                                        shares: session.amountsVisible)
+                rows.append(.init(id: message.id.uuidString, token: token) { answer(message) })
+            }
+        }
+        if let notice = conversation.restoredNotice {
+            rows.append(.init(id: "notice", token: notice) {
+                Text(notice).balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.secondary)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(LedgerAgentPalette.sunken, in: RoundedRectangle(cornerRadius: LedgerRound.inset, style: .continuous))
+                    .accessibilityIdentifier("ledger-agent-restored-notice")
+            })
+        }
+        if let pending = conversation.pending {
+            let busy = conversation.isRunning
+            rows.append(.init(id: "change", token: ChangeToken(pending: pending, busy: busy)) {
+                LedgerAgentChangeCard(pending: pending, isBusy: busy,
+                                      onWrite: conversation.write, onDiscard: conversation.discard)
+            })
+        } else if let written = conversation.written,
+                  conversation.messages.last(where: { $0.role == .assistant })?.write == nil {
+            // Written without a record to undo it by.
+            rows.append(.init(id: "written", token: written.files.count) {
+                Label(String(localized: "已写入账本 · \(written.files.count) 个文件"), systemImage: "checkmark")
+                    .balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.meta)
+            })
+        }
+        if !conversation.isRunning, conversation.answerCount >= LedgerAgentRecap.minimumAnswers || conversation.recap != nil {
+            let token = RecapToken(recap: conversation.recap, current: conversation.recapIsCurrent,
+                                   working: conversation.recapping, error: conversation.recapError)
+            rows.append(.init(id: "recap", token: token) {
+                LedgerAgentRecapCard(recap: token.recap, isCurrent: token.current,
+                                     isWorking: token.working, error: token.error,
+                                     onSummarize: summarize)
+            })
+        }
+        switch conversation.phase {
+        case .idle: break
+        case let .running(since):
+            // The slot watches the running turn itself; the list follows it
+            // as it grows.
+            let step = conversation.step
+            rows.append(.init(id: "live", token: LiveToken(since: since, step: step)) {
+                LedgerAgentLiveSlot(feed: conversation.liveFeed, conversation: conversation,
+                                    step: step, since: since)
+            })
+        case let .failed(error, question):
+            rows.append(.init(id: "failure", token: FailureToken(error: error, question: question)) {
+                failure(error, question: question)
+            })
+        }
+        return rows
+    }
+
+    private struct QuestionToken: Equatable {
+        let message: LedgerAgentMessage
+        let editing, running, canStart, canBranch: Bool
+        let version, versions, earlierAnswers: Int
+    }
+
+    private struct AnswerToken: Equatable {
+        let message: LedgerAgentMessage
+        let asksNow, undoing, canUndo: Bool
+        let undoFailure: String?
+        let undoingSettings, canUndoSettings, canStart, canBranch: Bool
+        let version, versions: Int
+        let shares: Bool
+    }
+
+    private struct ChangeToken: Equatable {
+        let pending: LedgerAgentPendingEdit
+        let busy: Bool
+    }
+
+    private struct RecapToken: Equatable {
+        let recap: LedgerAgentRecap?
+        let current, working: Bool
+        let error: String?
+    }
+
+    private struct LiveToken: Equatable {
+        let since: Date
+        let step: LedgerAgentStep?
+    }
+
+    private struct FailureToken: Equatable {
+        let error: LedgerAgentError
+        let question: String
     }
 
     private var chat: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
-                    if let crashReport { crashBand(crashReport) }
-                    ForEach(conversation.messages) { message in
-                        switch message.role {
-                        case .user: question(message)
-                        case .assistant: answer(message)
-                        }
-                    }
-                    if let notice = conversation.restoredNotice {
-                        Text(notice).balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.secondary)
-                            .padding(.horizontal, 14).padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(LedgerAgentPalette.sunken, in: RoundedRectangle(cornerRadius: LedgerRound.inset, style: .continuous))
-                            .accessibilityIdentifier("ledger-agent-restored-notice")
-                    }
-                    if let pending = conversation.pending {
-                        LedgerAgentChangeCard(pending: pending, isBusy: conversation.isRunning,
-                                              onWrite: conversation.write, onDiscard: conversation.discard)
-                    } else if let written = conversation.written,
-                              conversation.messages.last(where: { $0.role == .assistant })?.write == nil {
-                        // Written without a record to undo it by.
-                        Label(String(localized: "已写入账本 · \(written.files.count) 个文件"), systemImage: "checkmark")
-                            .balancedFont(size: 13).foregroundStyle(LedgerAgentPalette.meta)
-                    }
-                    if !conversation.isRunning, conversation.answerCount >= LedgerAgentRecap.minimumAnswers || conversation.recap != nil {
-                        LedgerAgentRecapCard(recap: conversation.recap, isCurrent: conversation.recapIsCurrent,
-                                             isWorking: conversation.recapping, error: conversation.recapError,
-                                             onSummarize: summarize)
-                    }
-                    switch conversation.phase {
-                    case .idle: EmptyView()
-                    case let .running(since):
-                        LedgerAgentLiveSlot(feed: conversation.liveFeed, conversation: conversation,
-                                            step: conversation.step, since: since, following: following) {
-                            // The reply growing while it streams is followed
-                            // without an animation per redraw.
-                            if following, contentOverflows { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
-                        }
-                    case let .failed(error, question): failure(error, question: question)
-                    }
-                    Color.clear.frame(height: 1).id(Self.bottomID)
-                        .onAppear {
-                            // Each write redraws the page; the anchor comes
-                            // back on screen too when a pushed page is
-                            // swiped away, with nothing changed.
-                            if !isAtBottom { isAtBottom = true }
-                            // Reached without the reader moving the page (it
-                            // opened here, or content shrank onto it); a
-                            // scroll they are making decides when it ends.
-                            if !readerScrolling, !following { following = true }
-                        }
-                        .onDisappear {
-                            // A page pushed over this one hides the anchor
-                            // without the conversation moving.
-                            if drawer.route == nil, isAtBottom { isAtBottom = false }
-                        }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                    if #available(iOS 18.0, *) { return }
-                    contentHeight = height
-                    measureFit()
-                }
+        // The safe area here is the bar above and the composer (with the
+        // keyboard) below; the list runs under both and keeps its content
+        // clear of them with insets.
+        GeometryReader { proxy in
+            LedgerAgentMessageList(rows: listRows, insets: proxy.safeAreaInsets,
+                                   running: conversation.isRunning, model: listModel) {
+                // A touch on the conversation lets go of a row held open for
+                // the model menu.
+                if rowPinned { rowPinned = false }
             }
-            .onGeometryChange(for: CGFloat.self) { geometry in
-                geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom
-            } action: { height in
-                if #available(iOS 18.0, *) { return }
-                viewportHeight = height
-                measureFit()
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .modifier(LedgerAgentScrollTracking(following: $following, scrolling: $readerScrolling,
-                                                overflows: $contentOverflows, isAtBottom: isAtBottom) {
-                // Rows, text and charts take their height after the update
-                // that added them; follow that too while a turn runs.
-                if conversation.isRunning { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
-            })
-            // The conversation just outgrew the page: bring the bottom into
-            // view once, from where it rested at the top.
-            .onChange(of: contentOverflows) { _, overflows in
-                if overflows, following { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
-            }
-            .onChange(of: conversation.messages.count) { _, _ in
-                // Another version on screen: nothing was asked or answered,
-                // and the user stays by the switch they tapped.
-                guard !conversation.replacedByVersionChange else { return }
-                let last = conversation.messages.last?.role
-                // The question the user just sent is always shown.
-                follow(proxy, force: last == .user)
-                if last == .assistant, conversation.messages.last?.stopped == false { announceAnswer() }
-            }
-            // Opening a tool group or reasoning block is reading back: the
-            // rows it shows stay where they were tapped.
-            .environment(\.ledgerAgentFollowPause, LedgerAgentFollowPause { following = false })
-            .onAppear {
-                // A conversation still answering opens on its reply.
-                guard conversation.isRunning, !following else { return }
-                following = true
-                // Once, before the page has measured whether it overflows; a
-                // single scroll does not bounce the way one per update did.
-                DispatchQueue.main.async { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
-            }
-            .onChange(of: conversation.pending) { _, _ in follow(proxy) }
-            .onChange(of: conversation.recap) { _, _ in follow(proxy) }
-            .onChange(of: conversation.phase) { _, phase in
-                if case let .failed(_, question) = phase, draft.isEmpty { draft = question }
-                if case .running = phase {
-                    // A question just sent follows its reply again.
-                    following = true
-                    follow(proxy, force: true)
-                } else {
-                    follow(proxy)
-                }
-            }
-            // A touch on the conversation lets go of a row held open for the
-            // model menu.
-            .simultaneousGesture(TapGesture().onEnded { if rowPinned { rowPinned = false } })
-            .overlay(alignment: .bottomTrailing) {
-                ZStack {
-                    if showsJumpButton {
-                        jumpToBottom(proxy).transition(.opacity)
-                    }
-                }
+            .ignoresSafeArea()
+        }
+        .onChange(of: conversation.messages.count) { _, _ in
+            // Another version on screen: nothing was asked or answered,
+            // and the user stays by the switch they tapped.
+            guard !conversation.replacedByVersionChange else { return }
+            let last = conversation.messages.last?.role
+            // The question the user just sent is always shown.
+            listModel.follow(force: last == .user)
+            if last == .assistant, conversation.messages.last?.stopped == false { announceAnswer() }
+        }
+        .onChange(of: conversation.pending) { _, _ in listModel.follow() }
+        .onChange(of: conversation.recap) { _, _ in listModel.follow() }
+        .onChange(of: conversation.phase) { _, phase in
+            if case let .failed(_, question) = phase, draft.isEmpty { draft = question }
+            // A question just sent follows its reply again.
+            if case .running = phase { listModel.follow(force: true) } else { listModel.follow() }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            LedgerAgentJumpButton(model: listModel)
                 .padding(.trailing, 16)
                 .padding(.bottom, 10)
-                .ledgerAnimation(LedgerMotion.disclose, value: showsJumpButton)
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-            // The empty state lies over the page rather than in it, above
-            // the composer as it rests and out of the keyboard's way: in the
-            // scroll content it was centred in the space left above the
-            // keyboard and moved with every frame of it; laid over the inner
-            // page it was squeezed between the bar and the raised composer.
-            .overlay {
-                if conversation.messages.isEmpty && !conversation.isRunning {
-                    // It stays where it is and fades while the keyboard is
-                    // up, rather than moving with the keyboard or lying
-                    // under the raised composer.
-                    emptyState
-                        .padding(.bottom, Self.emptyStateClearance)
-                        .ignoresSafeArea(.keyboard)
-                        .opacity(composerFocused ? 0 : 1)
-                        .allowsHitTesting(!composerFocused)
-                        .animation(.easeOut(duration: 0.2), value: composerFocused)
-                }
-            }
-            // Bills and screenshots can also be dragged in from Photos, Files
-            // or another window (iPad, or the Mac build).
-            .onDrop(of: Self.dropTypes, isTargeted: $dropTargeted) { providers in
-                guard !providers.isEmpty else { return false }
-                attachDropped(providers)
-                return true
-            }
-            .overlay { if dropTargeted { dropHint } }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        // The empty state lies over the page rather than in it, above
+        // the composer as it rests and out of the keyboard's way: in the
+        // scroll content it was centred in the space left above the
+        // keyboard and moved with every frame of it; laid over the inner
+        // page it was squeezed between the bar and the raised composer.
+        .overlay {
+            if conversation.messages.isEmpty && !conversation.isRunning {
+                // It stays where it is and fades while the keyboard is
+                // up, rather than moving with the keyboard or lying
+                // under the raised composer.
+                emptyState
+                    .padding(.bottom, Self.emptyStateClearance)
+                    .ignoresSafeArea(.keyboard)
+                    .opacity(composerFocused ? 0 : 1)
+                    .allowsHitTesting(!composerFocused)
+                    .animation(.easeOut(duration: 0.2), value: composerFocused)
+            }
+        }
+        // Bills and screenshots can also be dragged in from Photos, Files
+        // or another window (iPad, or the Mac build).
+        .onDrop(of: Self.dropTypes, isTargeted: $dropTargeted) { providers in
+            guard !providers.isEmpty else { return false }
+            attachDropped(providers)
+            return true
+        }
+        .overlay { if dropTargeted { dropHint } }
     }
 
     private func answer(_ message: LedgerAgentMessage) -> some View {
@@ -976,61 +972,6 @@ private struct LedgerAgentChatScreen: View {
         .accessibilityIdentifier("ledger-agent-edit-banner")
     }
 
-    private func follow(_ proxy: ScrollViewProxy, force: Bool = false) {
-        // Content that fits already shows its bottom; scrolling it would
-        // only shift the page and spring it back.
-        guard force || following, contentOverflows else { return }
-        scrollToBottom(proxy)
-    }
-
-    /// Before iOS 18 the page has no scroll geometry, so whether the content
-    /// fits is measured from its frame; from iOS 18 `LedgerAgentScrollTracking`
-    /// reads it off the scroll view.
-    private func measureFit() {
-        let overflows = LedgerAgentScrollFit.overflows(contentHeight: Double(contentHeight),
-                                                       viewportHeight: Double(viewportHeight))
-        if overflows != contentOverflows { contentOverflows = overflows }
-    }
-
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        withLedgerAnimation(.snappy) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
-    }
-
-    private func jumpToBottom(_ proxy: ScrollViewProxy) -> some View {
-        Button {
-            let flinging = readerScrolling
-            following = true
-            readerScrolling = false
-            if flinging {
-                // The page is still coasting: a jump without an animation
-                // stops it where an animated one would be fought by it.
-                proxy.scrollTo(Self.bottomID, anchor: .bottom)
-            } else {
-                scrollToBottom(proxy)
-            }
-        } label: {
-            Image(systemName: "arrow.down").font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(LedgerAgentPalette.ink)
-                .frame(width: 40, height: 40)
-                // Glass on iOS 26; a page-coloured disc with a rule before.
-                .background {
-                    if !LedgerGlass.isAvailable {
-                        Circle().fill(LedgerAgentPalette.page).overlay(Circle().stroke(LedgerAgentPalette.rule, lineWidth: 1))
-                    }
-                }
-                .ledgerGlassControl()
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        // A view of its own under the button, so a touch there is not
-        // taken by the scroll view: while the page coasts, the scroll view
-        // caught the tap to stop itself and the button never saw it.
-        .background(LedgerTouchFloor().frame(width: 44, height: 44))
-        .accessibilityLabel("回到底部")
-        .accessibilityIdentifier("ledger-agent-jump-bottom")
-    }
-
     /// VoiceOver hears that the answer landed while the user is on this
     /// screen; elsewhere the notification says so.
     private func announceAnswer() {
@@ -1040,7 +981,6 @@ private struct LedgerAgentChatScreen: View {
 
     private static let dropTypes: [UTType] = [.image, .fileURL]
 
-    private static let bottomID = "ledger-agent-bottom"
     /// The composer's height at rest, which the empty state keeps clear of.
     private static let emptyStateClearance: CGFloat = 120
 
@@ -2028,19 +1968,14 @@ private struct LedgerAgentLiveSlot: View {
     let conversation: LedgerAgentConversation
     let step: LedgerAgentStep?
     let since: Date
-    var following = false
-    let onGrow: () -> Void
 
     var body: some View {
         let stepSince = conversation.stepSince ?? since
-        Group {
-            if let live = feed.turn, !live.isEmpty || live.compacting {
-                LedgerAgentLiveTimeline(turn: live, since: since, quietSince: stepSince, following: following)
-            } else {
-                LedgerAgentRunning(step: step, steps: conversation.stepCount, since: since, stepSince: stepSince)
-            }
+        if let live = feed.turn, !live.isEmpty || live.compacting {
+            LedgerAgentLiveTimeline(turn: live, since: since, quietSince: stepSince)
+        } else {
+            LedgerAgentRunning(step: step, steps: conversation.stepCount, since: since, stepSince: stepSince)
         }
-        .onChange(of: feed.turn) { _, _ in onGrow() }
     }
 }
 
@@ -2608,125 +2543,40 @@ struct LedgerTouchFloor: UIViewRepresentable {
     func updateUIView(_ view: UIView, context: Context) {}
 }
 
-/// Turns following off when the reader scrolls up and back on when they
-/// leave the page at the bottom. iOS 18 sees the scroll phases and the
-/// real distance to the bottom, and reports content growing while
-/// following; before it, a drag up pauses following until a drag down ends
-/// at the bottom anchor or the anchor comes back on screen.
-private struct LedgerAgentScrollTracking: ViewModifier {
-    @Binding var following: Bool
-    /// The reader is moving the page.
-    @Binding var scrolling: Bool
-    /// The content is taller than the page (iOS 18; the view measures it
-    /// before).
-    @Binding var overflows: Bool
-    /// The bottom anchor is on screen (the only measure before iOS 18).
-    let isAtBottom: Bool
-    /// The content grew while following, past the page's height.
-    let onGrow: () -> Void
+/// Back to the end of the conversation, while the reader is away from it.
+/// It alone watches whether it shows, so scrolling redraws nothing else.
+private struct LedgerAgentJumpButton: View {
+    @ObservedObject var model: LedgerAgentListModel
 
-    /// Within this many points of the bottom still counts as at it.
-    private static let slack: CGFloat = 24
-
-    /// The page's whole height, the parts under the top bar and the composer
-    /// included, which the content insets are measured against.
-    /// `containerSize` and `bounds` leave the insets out (with the keyboard
-    /// up they are a third of the page), so adding the insets to the content
-    /// and comparing with them made a two-line chat "overflow" and left the
-    /// bottom hundreds of points away even when the page was resting on it.
-    @available(iOS 18.0, *)
-    private static func pageHeight(_ geometry: ScrollGeometry) -> CGFloat {
-        geometry.visibleRect.height
-    }
-
-    private struct Position: Equatable {
-        var offset: CGFloat
-        var toBottom: CGFloat
-    }
-
-    private struct Extent: Equatable {
-        var height: CGFloat
-        var overflows: Bool
-    }
-
-    /// How far the page is from its bottom, measured on every move; nil
-    /// until it first moves, when only the anchor says.
-    @State private var toBottom: CGFloat?
-    /// Any scroll is under way: the reader's, or one the system animates
-    /// (a tap on the status bar).
-    @State private var inMotion = false
-    /// The reader has moved the page since it last came to rest.
-    @State private var moved = false
-    @GestureState private var dragging = false
-
-    func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content
-                .onScrollGeometryChange(for: Position.self) { geometry in
-                    let bottom = geometry.contentSize.height + geometry.contentInsets.bottom - Self.pageHeight(geometry)
-                    return Position(offset: geometry.contentOffset.y, toBottom: bottom - geometry.contentOffset.y)
-                } action: { old, new in
-                    if toBottom != new.toBottom { toBottom = new.toBottom }
-                    // Moving up and away from the bottom by any means other
-                    // than a drag (the status bar, VoiceOver, a pointer) is
-                    // reading back too. The app's own scrolls only go down,
-                    // and layout settling at rest is not a scroll.
-                    if inMotion, new.offset < old.offset - 1, new.toBottom > Self.slack { following = false }
-                }
-                .onScrollGeometryChange(for: Extent.self) { geometry in
-                    Extent(height: geometry.contentSize.height,
-                           overflows: LedgerAgentScrollFit.overflows(
-                               contentHeight: Double(geometry.contentSize.height),
-                               topInset: Double(geometry.contentInsets.top),
-                               bottomInset: Double(geometry.contentInsets.bottom),
-                               viewportHeight: Double(Self.pageHeight(geometry))))
-                } action: { old, new in
-                    if new.overflows != overflows { overflows = new.overflows }
-                    // Content that still fits rests at the top: a scroll to
-                    // its bottom only shifts the page and springs it back.
-                    if new.height > old.height, new.overflows, following { onGrow() }
-                }
-                .onScrollPhaseChange { _, phase in
-                    inMotion = phase != .idle
-                    switch phase {
-                    // A finger resting on the page (.tracking), or a tap on a
-                    // control in it, is not reading back.
-                    case .interacting:
-                        moved = true
-                        scrolling = true
-                        following = false
-                    case .decelerating:
-                        moved = true
-                        scrolling = true
-                    case .idle:
-                        scrolling = false
-                        // Where the reader left the page decides; a scroll the
-                        // app animated (.animating) does not count.
-                        if moved {
-                            moved = false
-                            following = toBottom.map { $0 <= Self.slack } ?? isAtBottom
+    var body: some View {
+        ZStack {
+            if model.showsJump {
+                Button { model.jumpToBottom() } label: {
+                    Image(systemName: "arrow.down").font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(LedgerAgentPalette.ink)
+                        .frame(width: 40, height: 40)
+                        // Glass on iOS 26; a page-coloured disc with a rule before.
+                        .background {
+                            if !LedgerGlass.isAvailable {
+                                Circle().fill(LedgerAgentPalette.page)
+                                    .overlay(Circle().stroke(LedgerAgentPalette.rule, lineWidth: 1))
+                            }
                         }
-                    default:
-                        break
-                    }
+                        .ledgerGlassControl()
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
                 }
-        } else {
-            content
-                .simultaneousGesture(DragGesture(minimumDistance: 8)
-                    .updating($dragging) { _, state, _ in state = true }
-                    .onChanged { value in
-                        // A finger moving down the screen scrolls back up.
-                        if value.translation.height > 0 { following = false }
-                    }
-                    .onEnded { value in
-                        // The anchor also counts as shown behind the composer
-                        // or keyboard, so only a drag toward the bottom that
-                        // ends by it resumes.
-                        if isAtBottom, value.translation.height <= 0 { following = true }
-                    })
-                // A cancelled drag never ends, but its state still resets.
-                .onChange(of: dragging) { _, now in scrolling = now }
+                .buttonStyle(.plain)
+                // A view of its own under the button, so a touch there is
+                // not taken by the list: while it coasts, the list caught the
+                // tap to stop itself and the button never saw it.
+                .background(LedgerTouchFloor().frame(width: 44, height: 44))
+                .accessibilityLabel("回到底部")
+                .accessibilityIdentifier("ledger-agent-jump-bottom")
+                .transition(.opacity)
+            }
         }
+        .ledgerAnimation(LedgerMotion.disclose, value: model.showsJump)
     }
 }
 

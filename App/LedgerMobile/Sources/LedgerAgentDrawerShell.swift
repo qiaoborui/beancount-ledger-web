@@ -319,12 +319,15 @@ final class LedgerAgentDrawerController: UIViewController, UIGestureRecognizerDe
             card.layer.shadowRadius = 8 / scale
             drawerHost?.view.transform = CGAffineTransform(
                 translationX: (min(1, max(0, progress)) - 1) * Self.parallax, y: 0)
-            veil.alpha = 0.001
+            // Clear but there: a view under 1% opacity takes no touches.
+            veil.backgroundColor = .clear
+            veil.alpha = 1
         } else {
             card.transform = .identity
             clip.layer.cornerRadius = 0
             drawerHost?.view.transform = CGAffineTransform(translationX: offset - drawerWidth, y: 0)
             let strength: CGFloat = traitCollection.userInterfaceStyle == .dark ? 0.45 : 0.2
+            veil.backgroundColor = .black
             veil.alpha = strength * min(1, max(0, progress))
         }
     }
