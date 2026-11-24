@@ -24,6 +24,7 @@ private struct LedgerAgentSettingsRoot: View {
     @ObservedObject private var settings = LedgerAgentSettings.shared
     @ObservedObject private var skills = LedgerAgentSkillSettings.shared
     @ObservedObject private var sync = LedgerAgentCloudSync.shared
+    @AppStorage(LedgerAgentStepsDisplay.storageKey) private var stepsDisplay = LedgerAgentStepsDisplay.standard
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -58,6 +59,17 @@ private struct LedgerAgentSettingsRoot: View {
                 .accessibilityIdentifier("ledger-agent-write-policy")
             } header: { Text("权限") } footer: {
                 Text(settings.writePolicy.detail)
+            }
+            Section {
+                Picker(selection: $stepsDisplay) {
+                    ForEach(LedgerAgentStepsDisplay.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    Text("思考与工具")
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("ledger-agent-steps-display")
+            } header: { Text("显示") } footer: {
+                Text(stepsDisplay.detail)
             }
             Section {
                 NavigationLink {

@@ -196,6 +196,40 @@ final class LedgerAgentTimelineTests: XCTestCase {
                        [.thinking(index: 0), .text(index: 1), .tools(indices: [2, 3])])
     }
 
+    func testFoldedThoughtsShowTheirLatestLineAndTheSettingDefaultsToThat() {
+        XCTAssertEqual(LedgerAgentRound.lastLine("先查十月\n\n  再按商户分组  \n"), "再按商户分组")
+        XCTAssertEqual(LedgerAgentRound.lastLine("一行"), "一行")
+        XCTAssertEqual(LedgerAgentStepsDisplay.standard, .thoughtsFolded)
+        XCTAssertEqual(LedgerAgentStepsDisplay(rawValue: "folded"), .folded)
+        XCTAssertEqual(LedgerAgentStepsDisplay.allCases.map(\.rawValue), ["expanded", "thoughtsFolded", "folded"])
+    }
+
+    func testRoundsHoldReasoningAndCallsBetweenTexts() {
+        let steps: [LedgerAgentStepRecord] = [
+            .init(kind: .thinking, text: "想", durationMs: 1400),
+            .init(kind: .tool, call: .init(name: "run_bql", isError: false)),
+            .init(kind: .text, text: "我查一下。"),
+            .init(kind: .tool, call: .init(name: "run_bql", isError: false)),
+            .init(kind: .tool, call: .init(name: "run_bql", isError: false)),
+            .init(kind: .thinking, text: "再想"),
+            .init(kind: .text, text: "共 812 元。"),
+        ]
+        XCTAssertEqual(LedgerAgentRound.blocks(steps),
+                       [.round(indices: [0, 1]), .text(index: 2), .round(indices: [3, 4, 5])])
+        XCTAssertEqual(LedgerAgentRound.blocks(steps, includesAnswer: true),
+                       [.round(indices: [0, 1]), .text(index: 2), .round(indices: [3, 4, 5]), .text(index: 6)])
+        // A round keeps its id as steps join it.
+        XCTAssertEqual(LedgerAgentRound.blocks(Array(steps.prefix(4)), includesAnswer: true).last?.id, 3)
+        XCTAssertEqual(LedgerAgentRound.blocks(Array(steps.prefix(6)), includesAnswer: true).last?.id, 3)
+
+        XCTAssertEqual(LedgerAgentRound.title(steps, [0, 1]), "思考了 1 秒 · 读取了账本 1 次")
+        // Reasoning without a duration yet, as while it streams.
+        XCTAssertEqual(LedgerAgentRound.title(steps, [3, 4, 5]), "读取了账本 2 次")
+        XCTAssertEqual(LedgerAgentRound.title(steps, [5]), "思考过程")
+        XCTAssertEqual(LedgerAgentRound.title(steps, [3, 4, 5], isActive: true), "正在思考…")
+        XCTAssertEqual(LedgerAgentRound.title(steps, [3, 4, 5], isActive: true, runningTool: true), "正在执行工具…")
+    }
+
     // MARK: Response
 
     func testResponseDecodesStepsUsageAndStopReason() throws {

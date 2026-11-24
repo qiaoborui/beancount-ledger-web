@@ -441,6 +441,101 @@ enum LedgerAgentProcess {
 /// A turn's steps as the timeline draws them: each reasoning block, each run
 /// of adjacent tool calls as one group, and the text between them, in order.
 /// The answer is drawn last by the reply itself, so its text step is left out.
+/// An answer's steps as the page lays them out, after FlowDown: each run of
+/// reasoning and tool calls is a round under its own title, and text the
+/// model wrote between rounds stands between them. Nothing is folded away.
+/// How a turn's rounds show their thinking and calls. Everything open reads
+/// like FlowDown, but a model that thinks at length can push the answer far
+/// down; folding thoughts keeps each to its latest line, and folding
+/// everything leaves only each round's title.
+enum LedgerAgentStepsDisplay: String, CaseIterable, Identifiable, Sendable {
+    case expanded, thoughtsFolded, folded
+
+    static let storageKey = "ledger.agent.stepsDisplay"
+    static let standard: LedgerAgentStepsDisplay = .thoughtsFolded
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .expanded: String(localized: "全部展开")
+        case .thoughtsFolded: String(localized: "收起思考")
+        case .folded: String(localized: "全部收起")
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .expanded: String(localized: "思考和工具调用都完整显示。")
+        case .thoughtsFolded: String(localized: "思考只显示最新一行，点开看全文；工具调用照常显示。")
+        case .folded: String(localized: "每一轮只显示一行标题，点标题展开。")
+        }
+    }
+}
+
+enum LedgerAgentRound {
+    /// A thought's latest non-empty line, what a folded thought shows.
+    static func lastLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty } ?? text
+    }
+
+    enum Block: Equatable, Identifiable, Sendable {
+        case round(indices: [Int])
+        case text(index: Int)
+
+        /// Its first step's index, which a block keeps as later steps join
+        /// it, so the page keeps its view.
+        var id: Int {
+            switch self {
+            case let .round(indices): indices.first ?? -1
+            case let .text(index): index
+            }
+        }
+    }
+
+    /// `includesAnswer` keeps the last text too, for the live turn, which
+    /// draws its reply in place; a saved answer draws it after the blocks.
+    static func blocks(_ steps: [LedgerAgentStepRecord], includesAnswer: Bool = false) -> [Block] {
+        var blocks: [Block] = []
+        for item in LedgerAgentTimelineItem.items(steps, includesAnswer: includesAnswer) {
+            let indices: [Int]
+            switch item {
+            case let .text(index):
+                blocks.append(.text(index: index))
+                continue
+            case let .thinking(index): indices = [index]
+            case let .tools(list): indices = list
+            }
+            if case let .round(held)? = blocks.last {
+                blocks[blocks.count - 1] = .round(indices: held + indices)
+            } else {
+                blocks.append(.round(indices: indices))
+            }
+        }
+        return blocks
+    }
+
+    /// The round's title: what it did (`思考了 3 秒 · 读取了账本 2 次`), or,
+    /// while the live turn is at work on it, `正在执行工具…` when a call
+    /// runs and `正在思考…` otherwise.
+    static func title(_ steps: [LedgerAgentStepRecord], _ indices: [Int], isActive: Bool = false,
+                      runningTool: Bool = false) -> String {
+        if runningTool { return String(localized: "正在执行工具…") }
+        if isActive { return String(localized: "正在思考…") }
+        let own = indices.filter { steps.indices.contains($0) }.map { steps[$0] }
+        var parts: [String] = []
+        let thought = own.filter { $0.kind == .thinking }.compactMap(\.durationMs).reduce(0, +)
+        if thought > 0 {
+            parts.append(String(localized: "思考了 \(max(Int((Double(thought) / 1000).rounded()), 1)) 秒"))
+        }
+        let calls = own.compactMap(\.call)
+        if !calls.isEmpty { parts.append(LedgerAgentProcess.toolSummary(calls)) }
+        return parts.isEmpty ? String(localized: "思考过程") : parts.joined(separator: " · ")
+    }
+}
+
 enum LedgerAgentTimelineItem: Equatable, Identifiable, Sendable {
     case thinking(index: Int)
     case tools(indices: [Int])
