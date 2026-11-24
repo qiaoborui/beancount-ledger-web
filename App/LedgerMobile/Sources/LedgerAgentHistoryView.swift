@@ -541,7 +541,7 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                 // above the card. Everything outside the rounded card is
                 // painted in the drawer's ground, with the shadow on top.
                 .overlay {
-                    if pushes && isOut {
+                    if pushes && (carded || reveal > 0.5) {
                         LedgerAgentCardFrame(radius: cardedPage ? Self.cardRadius : 0, shadowed: cardedPage)
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
