@@ -2,6 +2,7 @@
 import Charts
 import PhotosUI
 import SwiftUI
+import Observation
 import UniformTypeIdentifiers
 
 /// 账本助手 — a conversation over the local ledger. It opens as a chat, not a
@@ -475,8 +476,12 @@ private struct LedgerAgentChatScreen: View {
     @State private var contentHeight: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
     /// The height the conversation rests in, so the empty state can sit in
-    /// the middle of the page rather than at its top.
-    @State private var emptyHeight: CGFloat = 0
+    /// the middle of the page rather than at its top. Kept in an observed
+    /// box only the empty state reads: it changes on every frame of the
+    /// keyboard coming up or going down, and as screen state it redrew the
+    /// whole page, every message of a long conversation included, each of
+    /// those frames, which is what made the keyboard stutter.
+    @State private var restingHeight = LedgerAgentRestingHeight()
     /// When the empty state last read the clock for its greeting.
     @State private var greetingNow = Date()
 
@@ -555,7 +560,7 @@ private struct LedgerAgentChatScreen: View {
             .onGeometryChange(for: CGFloat.self) { geometry in
                 geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom
             } action: { height in
-                emptyHeight = height
+                restingHeight.value = height
                 if #available(iOS 18.0, *) { return }
                 viewportHeight = height
                 measureFit()
@@ -997,7 +1002,7 @@ private struct LedgerAgentChatScreen: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: max(0, emptyHeight - 52), alignment: .center)
+        .modifier(LedgerAgentRestingFrame(height: restingHeight, less: 52))
         .padding(.vertical, 16)
     }
 
@@ -2685,6 +2690,24 @@ private struct LedgerAgentCircleGlass: ViewModifier {
 /// at rest it is a capsule, and it keeps that corner when the second row or
 /// a multi-line draft makes it taller; a true capsule that tall would cut
 /// into the chip and the send circle in its corners.
+/// The page's resting height, observed only by the view that sizes itself
+/// to it.
+@MainActor @Observable
+final class LedgerAgentRestingHeight {
+    var value: CGFloat = 0
+}
+
+/// At least the page's resting height less `less`, content centred, read
+/// here so a change redraws only this.
+private struct LedgerAgentRestingFrame: ViewModifier {
+    let height: LedgerAgentRestingHeight
+    let less: CGFloat
+
+    func body(content: Content) -> some View {
+        content.frame(maxWidth: .infinity, minHeight: max(0, height.value - less), alignment: .center)
+    }
+}
+
 private struct LedgerAgentDock: ViewModifier {
     private static let shape = RoundedRectangle(cornerRadius: LedgerAgentChatScreen.dockHeight / 2, style: .continuous)
 

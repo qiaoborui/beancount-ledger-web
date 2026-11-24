@@ -475,6 +475,13 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     /// Counts the times the drawer has gone all the way in, so the list can
     /// put away a search when it is out of sight.
     @State private var closings = 0
+    /// The drawer is drawn: from the moment it starts to come out until a
+    /// close has come all the way to rest. `reveal` alone cannot say, since
+    /// an animated close sets it to 0 at the start and only the drawing
+    /// moves; going by it took the drawer's ground and the card's corners
+    /// away at once (the drawer faded out over the slide), and the strip
+    /// behind them flashed while the page slid back.
+    @State private var drawn = false
     @State private var motion = LedgerAgentDrawerMotion()
     @State private var actions = LedgerAgentDrawerActions()
 
@@ -514,7 +521,7 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     private var pushes: Bool { sizeClass != .regular }
     private var progress: CGFloat { width > 0 ? min(1, max(0, reveal / width)) : 0 }
     /// Anything of the drawer is on screen.
-    private var isOut: Bool { reveal > 0.5 || isPresented }
+    private var isOut: Bool { drawn || reveal > 0.5 || isPresented }
 
     func body(content: Content) -> some View {
         ZStack(alignment: .topLeading) {
@@ -610,12 +617,11 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
     private func dragBegan() {
         loaded = true
         let base = min(width, max(0, motion.presented() ?? reveal))
+        withTransaction(Self.still) { drawn = true }
         motion.stop()
         motion.dragBase = base
         motion.tickedThisDrag = false
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) { reveal = base }
+        withTransaction(Self.still) { reveal = base }
     }
 
     private func dragChanged(_ dx: CGFloat) {
@@ -649,6 +655,7 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
         if isPresented { loaded = true }
         let target = isPresented ? width : 0
         let from = motion.presented() ?? reveal
+        if isPresented || from > 0.5 { withTransaction(Self.still) { drawn = true } }
         let distance = target - from
         let animation: Animation
         if reduceMotion {
@@ -665,8 +672,19 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
         withAnimation(animation, completionCriteria: .removed) {
             reveal = target
         } completion: {
-            if !isPresented && reveal == 0 { closings += 1 }
+            guard !isPresented && reveal == 0 else { return }
+            closings += 1
+            // At rest now: the drawer and the corners go in one frame,
+            // under the page, rather than fading over the slide.
+            withTransaction(Self.still) { drawn = false }
         }
+    }
+
+    /// A change that is not animated, whatever animation is running.
+    private static var still: Transaction {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        return transaction
     }
 }
 
