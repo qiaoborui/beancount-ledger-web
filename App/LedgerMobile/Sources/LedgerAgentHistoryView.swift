@@ -120,11 +120,18 @@ struct LedgerAgentHistoryView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .transition(.opacity)
             }
+            // FlowDown's header: the name, and 新对话 as a round floating
+            // button beside it. A search under way puts its close there.
             Button {
-                searching.toggle()
-                if searching { searchFocused = true } else { query = "" }
+                if searching {
+                    searching = false
+                    query = ""
+                } else {
+                    sessions.startNew()
+                    close()
+                }
             } label: {
-                Image(systemName: searching ? "xmark" : "magnifyingglass")
+                Image(systemName: searching ? "xmark" : "square.and.pencil")
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(BalancedPalette.ink)
                     .frame(width: 44, height: 44)
@@ -135,8 +142,8 @@ struct LedgerAgentHistoryView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(searching ? "关闭搜索" : "搜索")
-            .accessibilityIdentifier("ledger-agent-history-search")
+            .accessibilityLabel(searching ? "关闭搜索" : "新对话")
+            .accessibilityIdentifier(searching ? "ledger-agent-history-search-close" : "ledger-agent-new")
         }
         .animation(.easeInOut(duration: 0.18), value: searching)
         // Claude's sidebar sets its title on the line of the page's round
@@ -279,10 +286,18 @@ struct LedgerAgentHistoryView: View {
 
     // MARK: Footer
 
-    /// At the leading end a round button with the app's mark where Claude
-    /// puts the user's picture: the ledger has no profile, so it holds what
-    /// is left over, 助手设置 and 清空历史. 新对话 is an ink capsule at the
-    /// trailing end. Rows scrolling under the two fade into the page.
+    private func footerSymbol(_ name: String) -> some View {
+        Image(systemName: name).font(.system(size: 18, weight: .regular))
+            .foregroundStyle(BalancedPalette.ink)
+            .frame(width: 32, height: 32)
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+    }
+
+    /// FlowDown's footer: settings at the leading end and search at the
+    /// trailing end, two plain 32pt symbols with nothing between them. The
+    /// settings button's menu also holds 清空历史. Rows scrolling under them
+    /// fade into the page.
     private var footer: some View {
         HStack(spacing: 8) {
             Menu {
@@ -296,37 +311,21 @@ struct LedgerAgentHistoryView: View {
                     }
                 }
             } label: {
-                LedgerMarkCanvas(progress: 1)
-                    .frame(width: 32, height: 32)
-                    .frame(width: 48, height: 48)
-                    .background {
-                        if !LedgerGlass.isAvailable {
-                            Circle().fill(LedgerAgentHistoryDrawer.selectedFill)
-                        }
-                    }
-                    .ledgerGlassControl()
-                    .contentShape(Circle())
+                footerSymbol("gearshape")
             }
-            .accessibilityLabel("更多")
+            .accessibilityLabel("设置")
             .accessibilityIdentifier("ledger-agent-history-more")
             Spacer(minLength: 0)
             Button {
-                sessions.startNew()
-                close()
+                searching = true
+                searchFocused = true
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "plus").font(.system(size: 16, weight: .medium))
-                    Text("新对话").balancedFont(size: 16, weight: .medium).lineLimit(1)
-                }
-                .foregroundStyle(BalancedPalette.page)
-                .padding(.leading, 18)
-                .padding(.trailing, 22)
-                .frame(minHeight: 48)
-                .background(Capsule().fill(BalancedPalette.ink))
-                .contentShape(Capsule())
+                footerSymbol("magnifyingglass")
             }
             .buttonStyle(.plain)
-            .accessibilityIdentifier("ledger-agent-new")
+            .disabled(searching)
+            .accessibilityLabel("搜索")
+            .accessibilityIdentifier("ledger-agent-history-search")
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
@@ -441,8 +440,6 @@ private final class LedgerAgentDrawerMotion {
     /// How far the drawer starts left of its place, so it slides in a little
     /// under the page rather than lying still.
     static let parallax: CGFloat = 50
-    /// How much the page shrinks into a card at the drawer fully out.
-    static let cardShrink: CGFloat = 0.08
 
     func began(from: CGFloat, to: CGFloat, velocity: CGFloat) {
         self.from = from
@@ -544,11 +541,10 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
             content
                 .accessibilityHidden(isPresented)
                 .overlay { if isOut { cover } }
-                // Compact width: the page draws back into one floating card,
-                // as FlowDown's chat does beside its sidebar. The shadow is
-                // a plain shape behind the page, and the page, its corners
-                // and the shadow scale as one, from one anchor, so they stay
-                // one card instead of drifting apart into layers.
+                // Compact width: the page slides aside as one card with
+                // rounded corners and FlowDown's light shadow, drawn by a
+                // plain shape behind it. It keeps its size: shrinking it
+                // moved the logo and greeting up and down under the finger.
                 .background {
                     if pushes && isOut {
                         RoundedRectangle(cornerRadius: Self.cardRadius, style: .continuous)
@@ -558,7 +554,6 @@ struct LedgerAgentHistoryDrawer: ViewModifier {
                             .allowsHitTesting(false)
                     }
                 }
-                .scaleEffect(pushes ? 1 - LedgerAgentDrawerMotion.cardShrink * progress : 1, anchor: .leading)
                 .background {
                     LedgerAgentDrawerPan(
                         mode: !(width > 0) ? .off : isPresented ? .closes : (edgeOpens ? .opens : .off),
