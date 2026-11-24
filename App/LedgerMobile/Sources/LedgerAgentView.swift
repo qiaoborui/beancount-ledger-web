@@ -550,13 +550,6 @@ private struct LedgerAgentChatScreen: View {
     /// Before iOS 18, the measures `contentOverflows` is worked out from.
     @State private var contentHeight: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
-    /// The height the conversation rests in, so the empty state can sit in
-    /// the middle of the page rather than at its top. Kept in an observed
-    /// box only the empty state reads: it changes on every frame of the
-    /// keyboard coming up or going down, and as screen state it redrew the
-    /// whole page, every message of a long conversation included, each of
-    /// those frames, which is what made the keyboard stutter.
-    @State private var restingHeight = LedgerAgentRestingHeight()
     /// When the empty state last read the clock for its greeting.
     @State private var greetingNow = Date()
 
@@ -570,7 +563,6 @@ private struct LedgerAgentChatScreen: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
                     if let crashReport { crashBand(crashReport) }
-                    if conversation.messages.isEmpty && !conversation.isRunning { emptyState }
                     ForEach(conversation.messages) { message in
                         switch message.role {
                         case .user: question(message)
@@ -638,7 +630,6 @@ private struct LedgerAgentChatScreen: View {
             .onGeometryChange(for: CGFloat.self) { geometry in
                 geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom
             } action: { height in
-                restingHeight.value = height
                 if #available(iOS 18.0, *) { return }
                 viewportHeight = height
                 measureFit()
@@ -690,6 +681,16 @@ private struct LedgerAgentChatScreen: View {
             // A touch on the conversation lets go of a row held open for the
             // model menu.
             .simultaneousGesture(TapGesture().onEnded { if rowPinned { rowPinned = false } })
+            // The empty state lies over the page rather than in it, centred
+            // in the page as it is without the keyboard: in the scroll
+            // content it was centred in the space left above the keyboard,
+            // which moved it with every frame of the keyboard coming up, and
+            // for a frame the content outgrew the page and was scrolled.
+            .overlay {
+                if conversation.messages.isEmpty && !conversation.isRunning {
+                    emptyState.ignoresSafeArea(.keyboard)
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
                 ZStack {
                     if showsJumpButton {
@@ -1089,8 +1090,11 @@ private struct LedgerAgentChatScreen: View {
                 }
             }
         }
-        .modifier(LedgerAgentRestingFrame(height: restingHeight, less: 52))
-        .padding(.vertical, 16)
+        .padding(.horizontal, 20)
+        // Centred a little above the middle of the page, as before.
+        .padding(.top, 28)
+        .padding(.bottom, 76)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// The empty state's greeting. Only the hour matters, and only the user's
@@ -2849,24 +2853,6 @@ private struct LedgerAgentCircleGlass: ViewModifier {
 /// at rest it is a capsule, and it keeps that corner when the second row or
 /// a multi-line draft makes it taller; a true capsule that tall would cut
 /// into the chip and the send circle in its corners.
-/// The page's resting height, observed only by the view that sizes itself
-/// to it.
-@MainActor @Observable
-final class LedgerAgentRestingHeight {
-    var value: CGFloat = 0
-}
-
-/// At least the page's resting height less `less`, content centred, read
-/// here so a change redraws only this.
-private struct LedgerAgentRestingFrame: ViewModifier {
-    let height: LedgerAgentRestingHeight
-    let less: CGFloat
-
-    func body(content: Content) -> some View {
-        content.frame(maxWidth: .infinity, minHeight: max(0, height.value - less), alignment: .center)
-    }
-}
-
 private struct LedgerAgentDock: ViewModifier {
     private static let shape = RoundedRectangle(cornerRadius: LedgerAgentChatScreen.dockHeight / 2, style: .continuous)
 
