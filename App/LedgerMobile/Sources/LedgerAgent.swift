@@ -52,6 +52,7 @@ struct LedgerAgentToolCall: Codable, Equatable, Sendable {
         case "present_onboarding_plan": String(localized: "生成开账方案")
         case "list_saved_conversations": String(localized: "查看历史对话")
         case "read_saved_conversation": String(localized: "读取历史对话")
+        case "read_memory": String(localized: "读取记忆")
         case "edit_memory": String(localized: "更新记忆")
         case "write_memory": String(localized: "整理记忆")
         case "list_artifacts": String(localized: "查看产物")

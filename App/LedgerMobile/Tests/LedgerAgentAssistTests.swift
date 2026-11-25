@@ -344,14 +344,21 @@ final class LedgerAgentAssistTests: XCTestCase {
 
     func testWorkspaceKeepsMemoryOutsideTheLedger() async throws {
         let workspace = LocalLedgerWorkspace(rootDirectory: try root())
-        let empty = await workspace.agentMemory()
-        XCTAssertEqual(empty, "")
-        try await workspace.saveAgentMemory("## 偏好\n- 金额保留两位小数\n\n")
-        let saved = await workspace.agentMemory()
-        XCTAssertEqual(saved, "## 偏好\n- 金额保留两位小数\n")
-        XCTAssertTrue(workspace.agentMemoryLocation.path.hasSuffix("runtime/agent-memory.md"))
-        try await workspace.saveAgentMemory("  ")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.agentMemoryLocation.path))
+        let empty = await workspace.agentMemoryFiles()
+        XCTAssertEqual(empty, [:])
+        XCTAssertTrue(workspace.agentMemoryLocation.path.hasSuffix("runtime/agent-memory"))
+        try await workspace.saveAgentMemoryFile("MEMORY.md", text: "## 偏好\n- 金额保留两位小数\n\n")
+        try await workspace.saveAgentMemoryFile("accounts/credit-cards",
+            text: LedgerAgentMemoryLayout.withDescription("- 招行 5 号出账", "信用卡账单日"))
+        let saved = await workspace.agentMemoryFiles()
+        XCTAssertEqual(saved["MEMORY.md"], "## 偏好\n- 金额保留两位小数\n")
+        XCTAssertEqual(saved["accounts/credit-cards.md"], "---\ndescription: 信用卡账单日\n---\n\n- 招行 5 号出账\n")
+        XCTAssertEqual(LedgerAgentMemoryLayout.description(of: saved["accounts/credit-cards.md"] ?? ""), "信用卡账单日")
+        try await workspace.saveAgentMemoryFile("accounts/credit-cards.md", text: "  ")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.agentMemoryLocation.appendingPathComponent("accounts").path))
+        await workspace.clearAgentMemory()
+        let cleared = await workspace.agentMemoryFiles()
+        XCTAssertEqual(cleared, [:])
 
         try await workspace.saveAgentStarters(Data("{}".utf8))
         let starters = await workspace.agentStarters()
@@ -408,5 +415,31 @@ private actor TitleCalls {
     func record(_ history: [String] = []) {
         count += 1
         histories.append(history)
+    }
+}
+
+final class LedgerAgentMemoryLayoutTests: XCTestCase {
+    func testPathsMatchTheNativeCore() {
+        XCTAssertEqual(LedgerAgentMemoryLayout.clean(""), "MEMORY.md")
+        XCTAssertEqual(LedgerAgentMemoryLayout.clean("memory"), "MEMORY.md")
+        XCTAssertEqual(LedgerAgentMemoryLayout.clean("./accounts/credit-cards"), "accounts/credit-cards.md")
+        for bad in ["../x", "a/b/c/d", "Merchants", "商户", "-x", "a//b"] {
+            XCTAssertNil(LedgerAgentMemoryLayout.clean(bad), bad)
+        }
+        XCTAssertTrue(LedgerAgentMemoryLayout.isSyncedMemory("agent-memory/MEMORY.md"))
+        XCTAssertTrue(LedgerAgentMemoryLayout.isSyncedMemory("agent-memory/accounts/credit-cards.md"))
+        XCTAssertTrue(LedgerAgentMemoryLayout.isSyncedMemory("agent-memory.md"))
+        XCTAssertFalse(LedgerAgentMemoryLayout.isSyncedMemory("agent-memory/.memory-tmp"))
+    }
+
+    func testOldMemoryBecomesMEMORYmd() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("memory-" + UUID().uuidString, isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let workspace = LocalLedgerWorkspace(rootDirectory: directory)
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("runtime"), withIntermediateDirectories: true)
+        try Data("- 金额保留两位小数\n".utf8).write(to: workspace.legacyAgentMemoryLocation)
+        let files = await workspace.agentMemoryFiles()
+        XCTAssertEqual(files, ["MEMORY.md": "- 金额保留两位小数\n"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.legacyAgentMemoryLocation.path))
     }
 }

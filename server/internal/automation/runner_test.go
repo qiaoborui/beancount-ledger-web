@@ -69,6 +69,8 @@ type fakeAgent struct {
 	mu       sync.Mutex
 	requests []map[string]any
 	fail     int
+	// onTurn runs inside each turn, as the model's tools would.
+	onTurn func(request map[string]any)
 }
 
 func (f *fakeAgent) RunTurn(raw string) string {
@@ -77,6 +79,9 @@ func (f *fakeAgent) RunTurn(raw string) string {
 	var request map[string]any
 	_ = json.Unmarshal([]byte(raw), &request)
 	f.requests = append(f.requests, request)
+	if f.onTurn != nil {
+		f.onTurn(request)
+	}
 	if f.fail > 0 {
 		f.fail--
 		return `{"version":1,"ok":false,"error":"connection refused","toolCalls":[]}`
@@ -234,5 +239,82 @@ func TestDegradedRunKeepsFindingsAndRetries(t *testing.T) {
 	state, _ := loadState(runner.runsDir())
 	if state.Tasks["daily-audit"].Retry != nil || state.Tasks["daily-audit"].LastStatus != StatusOK {
 		t.Fatalf("state = %+v", state.Tasks["daily-audit"])
+	}
+}
+
+func TestRunReadsAndUpdatesTheSharedMemory(t *testing.T) {
+	remote, work := ledgerRepo(t)
+	// The phone already pushed a memory.
+	run(t, work, "checkout", "--quiet", "--orphan", "agent-memory")
+	run(t, work, "rm", "-rf", "--quiet", ".")
+	if err := os.WriteFile(filepath.Join(work, "MEMORY.md"), []byte("- 美团记 Expenses:Food\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, work, "add", "-A")
+	run(t, work, "commit", "--quiet", "-m", "memory")
+	run(t, work, "push", "--quiet", "origin", "HEAD:agent-memory")
+
+	sg, _ := time.LoadLocation("Asia/Singapore")
+	now := time.Date(2026, 11, 17, 21, 3, 0, 0, sg)
+	agent := &fakeAgent{onTurn: func(request map[string]any) {
+		dir, _ := request["memoryPath"].(string)
+		data, err := os.ReadFile(filepath.Join(dir, "MEMORY.md"))
+		if err != nil || string(data) != "- 美团记 Expenses:Food\n" {
+			t.Errorf("the run did not get the memory: %q %v", data, err)
+		}
+		if request["memoryReadOnly"] != nil {
+			t.Error("the default mode is read-only")
+		}
+		_ = os.WriteFile(filepath.Join(dir, "audit.md"), []byte("---\ndescription: 巡检\n---\n\n- 重复的美团午饭一般是误导入\n"), 0o600)
+		// Meanwhile the phone remembers something else.
+		if err := os.WriteFile(filepath.Join(work, "MEMORY.md"), []byte("- 美团记 Expenses:Food\n- 回答用表格\n"), 0o644); err != nil {
+			t.Error(err)
+		}
+		run(t, work, "commit", "--quiet", "-am", "phone")
+		run(t, work, "push", "--quiet", "origin", "HEAD:agent-memory")
+	}}
+	runner := newTestRunner(t, remote, agent, nil, &now)
+	if result, err := runner.Tick(context.Background()); err != nil || len(result.Ran) != 1 {
+		t.Fatalf("tick = %+v, %v", result, err)
+	}
+	clone := filepath.Join(t.TempDir(), "memory")
+	run(t, "", "clone", "--quiet", "--branch", "agent-memory", remote, clone)
+	index, _ := os.ReadFile(filepath.Join(clone, "MEMORY.md"))
+	audit, _ := os.ReadFile(filepath.Join(clone, "audit.md"))
+	if string(index) != "- 美团记 Expenses:Food\n- 回答用表格\n" || !strings.Contains(string(audit), "误导入") {
+		t.Fatalf("memory branch: MEMORY.md %q, audit.md %q", index, audit)
+	}
+	if _, err := os.Stat(filepath.Join(clone, "README.md")); err != nil {
+		t.Fatal("the branch has no README")
+	}
+	var record RunRecord
+	data, _ := os.ReadFile(filepath.Join(runner.runsDir(), "runs", "20261117T1300Z-daily-audit", "run.json"))
+	_ = json.Unmarshal(data, &record)
+	if record.MemoryFiles != 1 {
+		t.Fatalf("memory files = %d", record.MemoryFiles)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(runner.cfg.Home, "memory")); len(entries) != 0 {
+		t.Fatalf("run memory folders left behind: %v", entries)
+	}
+}
+
+func TestReadOnlyMemoryIsNeverPushed(t *testing.T) {
+	remote, _ := ledgerRepo(t)
+	sg, _ := time.LoadLocation("Asia/Singapore")
+	now := time.Date(2026, 11, 17, 21, 3, 0, 0, sg)
+	agent := &fakeAgent{onTurn: func(request map[string]any) {
+		if request["memoryReadOnly"] != true {
+			t.Error("read mode did not reach the turn")
+		}
+		dir, _ := request["memoryPath"].(string)
+		_ = os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte("- x\n"), 0o600)
+	}}
+	runner := newTestRunner(t, remote, agent, nil, &now)
+	runner.cfg.MemoryMode = MemoryRead
+	if _, err := runner.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if out := run(t, "", "--git-dir", remote, "branch", "--list", "agent-memory"); strings.TrimSpace(out) != "" {
+		t.Fatal("a read-only run created the memory branch")
 	}
 }

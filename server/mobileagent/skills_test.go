@@ -555,7 +555,7 @@ func TestSkillsComeBeforeTheMemory(t *testing.T) {
 	if !response.OK {
 		t.Fatalf("unexpected response: %+v", response)
 	}
-	skills, remembered := strings.Index(systemPrompt, "可用技能："), strings.Index(systemPrompt, "记忆（memory.md）")
+	skills, remembered := strings.Index(systemPrompt, "可用技能："), strings.Index(systemPrompt, "记忆（memory/ 目录")
 	if skills < 0 || remembered < 0 || skills > remembered {
 		t.Fatalf("the memory no longer ends the prompt (skills %d, memory %d)", skills, remembered)
 	}

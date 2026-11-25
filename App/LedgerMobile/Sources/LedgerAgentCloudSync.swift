@@ -18,7 +18,8 @@ import UIKit
 /// <folder>/agent-sync.json                            format marker
 /// <folder>/preferences.plist                          model choice and switches, no keys
 /// <folder>/ledgers/<key>/ledger.json                  which ledger this is
-/// <folder>/ledgers/<key>/files/agent-memory.md
+/// <folder>/ledgers/<key>/files/agent-memory/MEMORY.md, <topic>.md, <group>/<topic>.md
+/// <folder>/ledgers/<key>/files/agent-memory.md          (versions before the folder)
 /// <folder>/ledgers/<key>/files/agent-history/<id>.json, <id>.transcript, <id>.<leaf>.transcript
 /// <folder>/ledgers/<key>/files/agent-attachments/<id>/<file>
 /// <folder>/ledgers/<key>/files/agent-artifacts/<artifact-id>.json
@@ -30,7 +31,7 @@ import UIKit
 /// Merge rules, per file, against the digest both sides had at this device's
 /// last sync:
 /// - Changed on one side only: that side wins, deletions included.
-/// - Changed on both: memory.md is merged line by line; a conversation keeps
+/// - Changed on both: a memory file is merged line by line; a conversation keeps
 ///   the record with the later `updatedAt`, and its transcripts and
 ///   attachments follow that record; an artifact keeps the newer file;
 ///   deleted on one side and changed on the other keeps the change.
@@ -90,7 +91,7 @@ enum LedgerAgentSyncLayout {
     static func isSynced(_ path: String, attachments: Bool = true) -> Bool {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard !parts.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) else { return false }
-        if parts == [memoryPath] { return true }
+        if LedgerAgentMemoryLayout.isSyncedMemory(path) { return true }
         if parts.count == 2, parts[0] == historyDirectory { return isHistoryFile(parts[1]) }
         if parts.count == 2, parts[0] == artifactsDirectory, parts[1].hasSuffix(".json") {
             return LedgerAgentArtifactSpec.isValidID(String(parts[1].dropLast(5)))
@@ -121,9 +122,13 @@ enum LedgerAgentSyncLayout {
         path.hasPrefix(historyDirectory + "/") && path.hasSuffix(".json")
     }
 
-    /// Three-way merge of memory.md, one line per fact: lines the other side
-    /// removed go, lines it added are kept next to the line they followed
-    /// there (or at the end), and this side's own edits stay as they are.
+    /// Whether a synced path is a memory file, merged line by line.
+    static func isMemory(_ path: String) -> Bool { LedgerAgentMemoryLayout.isSyncedMemory(path) }
+
+    /// Three-way merge of a memory file, one line per fact: lines the other
+    /// side removed go, lines it added are kept next to the same copy of the
+    /// line they followed there (or at the end), and this side's own edits
+    /// stay as they are. `server/agentmemory.MergeLines` is the same rule.
     static func mergeMemory(base: String, local: String, remote: String) -> String {
         func lines(_ text: String) -> [String] {
             text.split(separator: "\n", omittingEmptySubsequences: false).map {
@@ -133,12 +138,20 @@ enum LedgerAgentSyncLayout {
         }
         let baseLines = lines(base), remoteLines = lines(remote)
         let baseSet = Set(baseLines), remoteSet = Set(remoteLines)
-        let removed = baseSet.subtracting(remoteSet).filter { !$0.isEmpty }
+        // Front matter fences stay even when the other side moved them.
+        let removed = baseSet.subtracting(remoteSet).filter { !$0.isEmpty && $0 != "---" }
         var result = lines(local).filter { !removed.contains($0) }
         for (index, line) in remoteLines.enumerated() where !line.isEmpty && !baseSet.contains(line) && !result.contains(line) {
             var insertAt = result.count
-            for previous in remoteLines[..<index].reversed() where !previous.isEmpty {
-                if let found = result.lastIndex(of: previous) { insertAt = found + 1; break }
+            for previousIndex in stride(from: index - 1, through: 0, by: -1) where !remoteLines[previousIndex].isEmpty {
+                let previous = remoteLines[previousIndex]
+                // The same copy of a repeated anchor, such as "---".
+                let occurrence = remoteLines[...previousIndex].filter { $0 == previous }.count
+                let matches = result.indices.filter { result[$0] == previous }
+                if let found = matches.count >= occurrence ? matches[occurrence - 1] : matches.last {
+                    insertAt = found + 1
+                    break
+                }
             }
             // Keep a trailing blank line after the text, not before the line.
             if insertAt == result.count {
@@ -191,8 +204,11 @@ struct LedgerAgentSyncEngine: Sendable {
         /// over, as a first sync.
         var identity = ""
         var entries: [String: Entry] = [:]
-        /// memory.md as both sides last agreed, the base of its merge.
+        /// memory.md as both sides last agreed, the base of its merge
+        /// (versions before the memory folder).
         var memoryBase: String?
+        /// Each memory file as both sides last agreed, the base of its merge.
+        var memoryBases: [String: String]?
     }
 
     /// runtime/ of the ledger's workspace.
@@ -226,7 +242,12 @@ struct LedgerAgentSyncEngine: Sendable {
     func run(apply: @Sendable ([LedgerAgentSyncLocalChange]) async throws -> Set<String>) async throws -> LedgerAgentSyncReport {
         var state = loadState()
         if state.identity != identity { state = State(identity: identity) }
-        resolveRemoteConflicts(memoryBase: state.memoryBase ?? "")
+        if let legacy = state.memoryBase, state.memoryBases?[LedgerAgentSyncLayout.memoryPath] == nil {
+            state.memoryBases = (state.memoryBases ?? [:]).merging([LedgerAgentSyncLayout.memoryPath: legacy]) { current, _ in current }
+        }
+        state.memoryBase = nil
+        let memoryBases = state.memoryBases ?? [:]
+        resolveRemoteConflicts(memoryBases: memoryBases)
         let localStamps = scanLocal()
         let remoteStamps = try scanRemote()
         var report = LedgerAgentSyncReport()
@@ -239,7 +260,7 @@ struct LedgerAgentSyncEngine: Sendable {
         var winners: [UUID: Bool] = [:] // true: remote won
         var changes: [LedgerAgentSyncLocalChange] = []
         var settled: [String: String?] = [:] // path -> agreed digest, nil when gone on both sides
-        var agreedMemory: String?
+        var agreedMemory: [String: String] = [:]
 
         try? FileManager.default.removeItem(at: incoming)
 
@@ -283,10 +304,10 @@ struct LedgerAgentSyncEngine: Sendable {
                     action = .pull
                 } else if remoteDigest == nil {
                     action = .push
-                } else if path == LedgerAgentSyncLayout.memoryPath {
+                } else if LedgerAgentSyncLayout.isMemory(path) {
                     let local = String(decoding: try localData ?? Data(contentsOf: localURL), as: UTF8.self)
                     let theirs = String(decoding: try remoteData ?? FolderFiles.read(remoteURL), as: UTF8.self)
-                    let merged = LedgerAgentSyncLayout.mergeMemory(base: state.memoryBase ?? "", local: local, remote: theirs)
+                    let merged = LedgerAgentSyncLayout.mergeMemory(base: memoryBases[path] ?? "", local: local, remote: theirs)
                     action = .write(Data(merged.utf8))
                     report.merged += 1
                 } else if LedgerAgentSyncLayout.isRecord(path) {
@@ -306,8 +327,8 @@ struct LedgerAgentSyncEngine: Sendable {
                 switch action {
                 case .none:
                     settled[path] = .some(localDigest)
-                    if path == LedgerAgentSyncLayout.memoryPath, localDigest != nil, localDigest != base || state.memoryBase == nil {
-                        agreedMemory = String(decoding: try localData ?? Data(contentsOf: localURL), as: UTF8.self)
+                    if LedgerAgentSyncLayout.isMemory(path), localDigest != nil, localDigest != base || memoryBases[path] == nil {
+                        agreedMemory[path] = String(decoding: try localData ?? Data(contentsOf: localURL), as: UTF8.self)
                     }
                 case .push:
                     if localDigest == nil {
@@ -315,7 +336,7 @@ struct LedgerAgentSyncEngine: Sendable {
                     } else {
                         let data = try localData ?? Data(contentsOf: localURL)
                         try FolderFiles.write(data, to: remoteURL)
-                        if path == LedgerAgentSyncLayout.memoryPath { agreedMemory = String(decoding: data, as: UTF8.self) }
+                        if LedgerAgentSyncLayout.isMemory(path) { agreedMemory[path] = String(decoding: data, as: UTF8.self) }
                     }
                     settled[path] = .some(localDigest)
                     report.uploaded += 1
@@ -324,7 +345,7 @@ struct LedgerAgentSyncEngine: Sendable {
                     if remoteDigest != nil {
                         let data = try remoteData ?? FolderFiles.read(remoteURL)
                         staged = try stage(data)
-                        if path == LedgerAgentSyncLayout.memoryPath { agreedMemory = String(decoding: data, as: UTF8.self) }
+                        if LedgerAgentSyncLayout.isMemory(path) { agreedMemory[path] = String(decoding: data, as: UTF8.self) }
                     }
                     changes.append(.init(path: path, staged: staged, expected: localStamps[path]))
                     settled[path] = .some(remoteDigest)
@@ -333,7 +354,7 @@ struct LedgerAgentSyncEngine: Sendable {
                     try FolderFiles.write(data, to: remoteURL)
                     changes.append(.init(path: path, staged: try stage(data), expected: localStamps[path]))
                     settled[path] = .some(LedgerAgentSyncLayout.digest(data))
-                    agreedMemory = String(decoding: data, as: UTF8.self)
+                    agreedMemory[path] = String(decoding: data, as: UTF8.self)
                 }
             } catch {
                 report.failed += 1
@@ -355,8 +376,10 @@ struct LedgerAgentSyncEngine: Sendable {
                                         local: Self.localStamp(runtime.appendingPathComponent(path)),
                                         remote: Self.remoteStamp(remote.appendingPathComponent(path)))
         }
-        if let agreedMemory, !skipped.contains(LedgerAgentSyncLayout.memoryPath) { state.memoryBase = agreedMemory }
-        if state.entries[LedgerAgentSyncLayout.memoryPath] == nil { state.memoryBase = nil }
+        var bases = memoryBases
+        for (path, text) in agreedMemory where !skipped.contains(path) { bases[path] = text }
+        for path in bases.keys where state.entries[path] == nil { bases[path] = nil }
+        state.memoryBases = bases.isEmpty ? nil : bases
         try saveState(state)
         return report
     }
@@ -399,11 +422,12 @@ struct LedgerAgentSyncEngine: Sendable {
     /// Two devices that wrote memory.md or the same conversation at once
     /// leave iCloud conflict versions behind; fold them in by the same rules
     /// as a merge, before reading the remote side.
-    private func resolveRemoteConflicts(memoryBase: String) {
-        let memory = remote.appendingPathComponent(LedgerAgentSyncLayout.memoryPath)
-        _ = try? FolderConflictVersions.resolve(at: memory) { current, other in
-            Data(LedgerAgentSyncLayout.mergeMemory(base: memoryBase, local: String(decoding: current, as: UTF8.self),
-                                                   remote: String(decoding: other, as: UTF8.self)).utf8)
+    private func resolveRemoteConflicts(memoryBases: [String: String]) {
+        for path in Self.memoryPaths(in: remote, names: { try FolderFiles.names(in: $0) }) {
+            _ = try? FolderConflictVersions.resolve(at: remote.appendingPathComponent(path)) { current, other in
+                Data(LedgerAgentSyncLayout.mergeMemory(base: memoryBases[path] ?? "", local: String(decoding: current, as: UTF8.self),
+                                                       remote: String(decoding: other, as: UTF8.self)).utf8)
+            }
         }
         let history = remote.appendingPathComponent(LedgerAgentSyncLayout.historyDirectory, isDirectory: true)
         for name in (try? FolderFiles.names(in: history)) ?? [] where name.hasSuffix(".json") {
@@ -420,13 +444,34 @@ struct LedgerAgentSyncEngine: Sendable {
         return url
     }
 
+    /// The memory files under root (runtime/ or the folder's files/): the
+    /// legacy memory.md and everything in agent-memory/, two folders deep.
+    static func memoryPaths(in root: URL, names: (URL) throws -> [String]) -> [String] {
+        var paths = [LedgerAgentSyncLayout.memoryPath]
+        var pending: [(String, Int)] = [(LedgerAgentMemoryLayout.directory, 0)]
+        while let (relative, depth) = pending.popLast() {
+            let directory = root.appendingPathComponent(relative, isDirectory: true)
+            for name in (try? names(directory)) ?? [] where !name.hasPrefix(".") {
+                let path = relative + "/" + name
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path, isDirectory: &isDirectory),
+                   isDirectory.boolValue {
+                    if depth < 2 { pending.append((path, depth + 1)) }
+                } else if LedgerAgentMemoryLayout.isSyncedMemory(path) {
+                    paths.append(path)
+                }
+            }
+        }
+        return paths
+    }
+
     private func scanLocal() -> [String: Stamp] {
         var stamps: [String: Stamp] = [:]
         let fileManager = FileManager.default
         func add(_ path: String) {
             if let stamp = Self.localStamp(runtime.appendingPathComponent(path)) { stamps[path] = stamp }
         }
-        add(LedgerAgentSyncLayout.memoryPath)
+        for path in Self.memoryPaths(in: runtime, names: { try fileManager.contentsOfDirectory(atPath: $0.path) }) { add(path) }
         let history = runtime.appendingPathComponent(LedgerAgentSyncLayout.historyDirectory, isDirectory: true)
         for name in (try? fileManager.contentsOfDirectory(atPath: history.path)) ?? [] {
             add(LedgerAgentSyncLayout.historyDirectory + "/" + name)
@@ -452,7 +497,7 @@ struct LedgerAgentSyncEngine: Sendable {
         func add(_ path: String) {
             if let stamp = Self.remoteStamp(remote.appendingPathComponent(path)) { stamps[path] = stamp }
         }
-        add(LedgerAgentSyncLayout.memoryPath)
+        for path in Self.memoryPaths(in: remote, names: { try FolderFiles.names(in: $0) }) { add(path) }
         let history = remote.appendingPathComponent(LedgerAgentSyncLayout.historyDirectory, isDirectory: true)
         for name in try FolderFiles.names(in: history) { add(LedgerAgentSyncLayout.historyDirectory + "/" + name) }
         let artifacts = remote.appendingPathComponent(LedgerAgentSyncLayout.artifactsDirectory, isDirectory: true)
@@ -699,6 +744,8 @@ final class LedgerAgentCloudSync: ObservableObject {
 
     /// The ledger on screen; its data syncs from now on.
     func attach(_ repository: LocalLedgerRepository) {
+        // The memory branch of a Git ledger syncs whether or not iCloud does.
+        LedgerAgentMemorySync.shared.attach(repository)
         let changed = self.repository?.descriptor.id != repository.descriptor.id
         self.repository = repository
         if changed {
@@ -717,7 +764,10 @@ final class LedgerAgentCloudSync: ObservableObject {
     static let foregroundInterval: TimeInterval = 60
 
     /// A conversation or memory.md was saved.
-    func localChanged() { schedule(after: Self.debounce) }
+    func localChanged() {
+        LedgerAgentMemorySync.shared.localChanged()
+        schedule(after: Self.debounce)
+    }
 
     func choose(folder url: URL) {
         do {
@@ -860,6 +910,8 @@ final class LedgerAgentCloudSync: ObservableObject {
             currentKey = key
             error = report.failed > 0 ? String(localized: "有 \(report.failed) 个文件这次没有同步，稍后会再试。") : nil
             if report.changedLocally {
+                // Memory another device wrote goes on to the Git branch too.
+                LedgerAgentMemorySync.shared.localChanged()
                 LedgerAgentSessions.shared.reloadSaved()
                 LedgerAgentArtifactShelf.shared.changed()
             }

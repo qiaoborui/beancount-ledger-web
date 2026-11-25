@@ -56,7 +56,8 @@ func fail(code, message string) error { return &bridgeError{Code: "git." + code,
 var requestCancellations cancellationRegistry
 var storageLocks sync.Map
 
-// DispatchJSON accepts a version-1 fetch/export/commit/push/cancel request.
+// DispatchJSON accepts a version-1 fetch/export/commit/push/syncMemory/cancel
+// request.
 // Credentials are used for one request and are never stored in Git config.
 func DispatchJSON(raw string) (encoded string) {
 	input := request{}
@@ -115,7 +116,7 @@ func dispatch(ctx context.Context, input request, allowFileFixture bool) (any, e
 		return nil, err
 	}
 	switch input.Operation {
-	case "fetch", "export", "commit", "push":
+	case "fetch", "export", "commit", "push", "syncMemory":
 	default:
 		return nil, fail("invalid_request", "Unsupported Git operation")
 	}
@@ -124,7 +125,8 @@ func dispatch(ctx context.Context, input request, allowFileFixture bool) (any, e
 		return nil, err
 	}
 	input.StorageRoot = root
-	if input.Operation == "fetch" || input.Operation == "push" {
+	remoteOperation := input.Operation == "fetch" || input.Operation == "push" || input.Operation == "syncMemory"
+	if remoteOperation {
 		if err := validateRemote(input.URL, input.Branch, allowFileFixture); err != nil {
 			return nil, err
 		}
@@ -141,7 +143,7 @@ func dispatch(ctx context.Context, input request, allowFileFixture bool) (any, e
 	if err != nil {
 		return nil, err
 	}
-	if input.Operation == "fetch" || input.Operation == "push" {
+	if remoteOperation {
 		if err := bindRemote(root, input.URL, input.Branch); err != nil {
 			return nil, err
 		}
@@ -155,6 +157,8 @@ func dispatch(ctx context.Context, input request, allowFileFixture bool) (any, e
 		return createCommit(ctx, repository, input)
 	case "push":
 		return push(ctx, repository, input)
+	case "syncMemory":
+		return syncMemory(ctx, repository, input)
 	}
 	return nil, fail("invalid_request", "Unsupported Git operation")
 }

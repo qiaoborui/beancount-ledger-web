@@ -61,6 +61,17 @@ runs/<运行 id>/draft/after/…    助手改完的样子（删掉的文件没�
 
 运行 id 形如 `20261117T1300Z-daily-audit`（slot 的 UTC 时间 + 任务 id，手动运行加 `-manual`）。默认只保留最近 200 次。
 
+## 助手记忆（`agent-memory` 分支）
+
+账本助手的记忆是一个目录（`server/agentmemory`）：`MEMORY.md` 是入口，每次对话都带上；其他主题文件（如 `merchants.md`、`accounts/credit-cards.md`）开头有一句 `description`，系统提示里只列出路径和这句说明，助手用 `read_memory` 按需读全文。
+
+用 Git 同步的账本，这个目录还会同步到账本仓库的 `agent-memory` 分支（和账本 main 分开，不触发校验、不进账本历史）：
+
+- 手机：改了记忆几秒后、打开助手时（最多 10 分钟一次）、进「记忆」页时，原生核心在单独的缓存里拉分支，按文件三方合并（基准是上次两边一致的提交），写回本地，再推上去。只有一边改的文件那边赢；一边删一边改保留改动；两边都改按行合并。
+- 主机：每次运行前拉这个分支，把记忆放进本次运行自己的目录交给助手；运行改了记忆就同样三方合并后推回去（`run.json` 的 `memoryFiles` 记改了几个文件）。拉不到分支不影响运行，只是这次没有记忆。
+- `LEDGER_AUTOMATION_MEMORY`：`write`（默认，可读可写）、`read`（只给 `read_memory`，结论里提建议）、`off`（不带记忆）。`LEDGER_AUTOMATION_MEMORY_BRANCH` 改分支名。
+- 分支上的文件可以直接在 GitHub 或 Mac 上改，下次同步按行合并。旧版本的单个 `memory.md` 在第一次用到时自动变成 `MEMORY.md`。
+
 ## 在手机上看结果、接着聊
 
 用 Git 同步的账本会顺带拉 `automation-runs` 分支（单独的缓存，不碰账本自己的同步状态）：
