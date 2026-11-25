@@ -169,6 +169,12 @@ private struct LedgerAgentChatScreen: View {
     /// True while a drag from another app hovers the conversation.
     @State private var dropTargeted = false
     @FocusState private var composerFocused: Bool
+    /// The keyboard's own height and the bottom inset the page was given,
+    /// read by the dock alone. Switching input methods can leave the inset
+    /// at a taller keyboard's height than the one on screen (the Pinyin
+    /// keyboard's candidate bar is taller than the English keys): the dock
+    /// then floated that far above the keyboard (`LedgerAgentKeyboardSlack`).
+    @State private var keyboardInset = LedgerAgentKeyboardInset()
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var voice = LedgerAgentVoiceRecorder()
     /// How the current dictation was started: by a tap, which keeps the
@@ -220,6 +226,12 @@ private struct LedgerAgentChatScreen: View {
             if settings.isReady { chat } else { LedgerAgentIntro { settingsPresented = true } }
         }
         .background(LedgerAgentPalette.page)
+        // The page's bottom safe area: the keyboard's inset while it is up,
+        // the home indicator's when it is down. Read here, outside the dock's
+        // own inset, and not from the keyboard's frame it was given.
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { bottom in
+            keyboardInset.page = bottom
+        }
         // No heading over a conversation: the bar is a row of round buttons,
         // the way the assistant reads as a chat rather than a page. History
         // sits on the left, 新对话 and model settings on the right; a
@@ -1224,6 +1236,19 @@ private struct LedgerAgentChatScreen: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
         .padding(.top, 4)
+        // The keyboard's own frame, as it appears, changes and goes away: the
+        // inset the dock is laid out with can lag behind a shorter keyboard.
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+                  let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else { return }
+            let height = LedgerAgentKeyboardInset.height(of: frame)
+            withAnimation(.easeOut(duration: duration)) { keyboardInset.keyboard = height }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { note in
+            let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.2
+            withAnimation(.easeOut(duration: duration)) { keyboardInset.keyboard = 0 }
+        }
+        .modifier(LedgerAgentKeyboardSlack(inset: keyboardInset))
         // What was typed in a conversation waits there while the user looks
         // at another one.
         .onAppear { if draft.isEmpty { draft = sessions.unsentText(for: conversation.id) } }
@@ -2779,6 +2804,53 @@ private struct LedgerAgentQuickSwitch: View {
             .padding(.trailing, trailing)
             .frame(minHeight: 32)
             .contentShape(Rectangle())
+    }
+}
+
+/// The keyboard's visible height and the bottom inset the page was laid out
+/// with, read only by the dock. Both come from outside SwiftUI's own keyboard
+/// avoidance: its inset can keep a taller keyboard's height after the input
+/// method changes to a shorter one (Pinyin's candidate bar against the
+/// English keys), and the dock then rests that far above the keyboard.
+@MainActor @Observable
+final class LedgerAgentKeyboardInset {
+    /// The docked keyboard's height above the window's bottom; 0 without one,
+    /// and with a floating keyboard, which does not raise the page.
+    var keyboard: CGFloat = 0
+    /// The page's bottom safe area: the keyboard's inset while it is up, the
+    /// home indicator's when it is down.
+    var page: CGFloat = 0
+    /// The room the page kept for a keyboard taller than the one now on
+    /// screen, given back under the dock.
+    var slack: CGFloat {
+        keyboard > 0 ? max(0, page - keyboard) : 0
+    }
+
+    /// The keyboard's height above the window's bottom, from its own frame in
+    /// screen coordinates. 0 when it floats (an iPad keyboard not docked):
+    /// the page is not raised for one.
+    static func height(of frame: CGRect) -> CGFloat {
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }
+        guard let window else { return 0 }
+        let rect = window.convert(frame, from: nil)
+        guard rect.maxY >= window.bounds.maxY - 1 else { return 0 }
+        return max(0, window.bounds.maxY - rect.minY)
+    }
+}
+
+/// Moves the dock down by the room the page kept for a taller keyboard, so
+/// it rests 8 pt above the one on screen. A visual offset: the conversation's
+/// inset keeps its height, so no row goes under the dock.
+private struct LedgerAgentKeyboardSlack: ViewModifier {
+    let inset: LedgerAgentKeyboardInset
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: inset.slack)
+            .animation(.easeOut(duration: 0.2), value: inset.slack)
     }
 }
 
