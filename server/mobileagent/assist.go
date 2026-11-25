@@ -49,7 +49,7 @@ type assistRequestV1 struct {
 	Model             string            `json:"model"`
 	APIKey            string            `json:"apiKey"`
 	Custom            *customEndpointV1 `json:"custom,omitempty"`
-	// MemoryPath is the ledger's memory.md, read but never written here.
+	// MemoryPath is the ledger's memory folder, read but never written here.
 	MemoryPath string `json:"memoryPath,omitempty"`
 	// History is the visible conversation, oldest first. Suggestions with a
 	// history predict the next question; without one they are starters.
@@ -281,7 +281,8 @@ func ledgerFacts(request assistRequestV1) (string, error) {
 	return string(raw), err
 }
 
-// memoryText is memory.md, or empty when there is none.
+// memoryText is MEMORY.md and the index of the other memory files, or
+// empty when there is no memory.
 func memoryText(path string) string {
 	if path == "" {
 		return ""
@@ -290,7 +291,7 @@ func memoryText(path string) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(memory.snapshot())
+	return memory.summary()
 }
 
 func visibleHistory(history []historyMessageV1) []historyMessageV1 {

@@ -35,7 +35,7 @@ func everyToolSchema(t *testing.T) map[string]ai.ToolSchema {
 
 	add((&historyIndex{dir: t.TempDir()}).tools())
 
-	memory, err := openMemory(filepath.Join(t.TempDir(), "memory.md"))
+	memory, err := openMemory(filepath.Join(t.TempDir(), "agent-memory"))
 	if err != nil {
 		t.Fatalf("open memory: %v", err)
 	}

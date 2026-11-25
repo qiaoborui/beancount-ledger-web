@@ -674,36 +674,77 @@ actor LocalLedgerWorkspace {
         removeIfPresent(directory)
     }
 
-    /// runtime/agent-memory.md: the ledger Agent's memory.md, which every
-    /// turn reads and its memory tools rewrite. Like the history it stays
-    /// outside every generation, so it never enters a commit, a backup or
-    /// Git sync.
+    /// runtime/agent-memory/: the ledger Agent's memory folder
+    /// (`LedgerAgentMemoryLayout`), MEMORY.md and topic files, which every
+    /// turn reads and its memory tools change. Like the history it stays
+    /// outside every generation, so it never enters a ledger commit or a
+    /// backup; it syncs through the assistant's iCloud folder and the Git
+    /// repository's own agent-memory branch.
     nonisolated var agentMemoryLocation: URL {
-        rootDirectory.appendingPathComponent("runtime/agent-memory.md", isDirectory: false)
+        rootDirectory.appendingPathComponent("runtime/" + LedgerAgentMemoryLayout.directory, isDirectory: true)
     }
 
-    /// The runtime directory exists before a turn may write memory.md there.
+    /// runtime/agent-memory.md, the single memory.md of earlier versions.
+    nonisolated var legacyAgentMemoryLocation: URL {
+        rootDirectory.appendingPathComponent("runtime/" + LedgerAgentMemoryLayout.legacyFile, isDirectory: false)
+    }
+
+    /// The memory folder exists before a turn may write there. A memory.md
+    /// of an earlier version becomes MEMORY.md; when both exist the native
+    /// core merges them on the next turn.
     func prepareAgentMemory() throws -> URL {
         try createProtectedDirectory(try importRuntimeDirectory("runtime"))
-        let file = agentMemoryLocation
-        if let kind = try itemKindIfPresent(at: file), kind != .regularFile { throw WorkspaceError.unsupportedItem(file.lastPathComponent) }
-        return file
+        let folder = try importRuntimeDirectory("runtime/" + LedgerAgentMemoryLayout.directory)
+        try createProtectedDirectory(folder)
+        let index = folder.appendingPathComponent(LedgerAgentMemoryLayout.indexName)
+        if try itemKindIfPresent(at: legacyAgentMemoryLocation) == .regularFile, try itemKindIfPresent(at: index) == nil {
+            try fileManager.moveItem(at: legacyAgentMemoryLocation, to: index)
+            try protect(index)
+        }
+        return folder
     }
 
-    /// memory.md, or empty when there is none.
+    /// Every memory file, path → content.
+    func agentMemoryFiles() -> [String: String] {
+        guard let folder = try? prepareAgentMemory() else { return [:] }
+        return LedgerAgentMemoryLayout.load(folder)
+    }
+
+    /// The whole memory as one text, for digests and the tool-free assists.
     func agentMemory() -> String {
-        guard (try? itemKindIfPresent(at: agentMemoryLocation)) == .regularFile,
-              let data = try? Data(contentsOf: agentMemoryLocation) else { return "" }
-        return String(decoding: data, as: UTF8.self)
+        LedgerAgentMemoryLayout.digestText(agentMemoryFiles())
     }
 
-    /// Replaces memory.md as the user edited it; empty text removes it.
-    func saveAgentMemory(_ text: String) throws {
-        let file = try prepareAgentMemory()
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return removeIfPresent(file) }
-        try Data((trimmed + "\n").utf8).write(to: file, options: .atomic)
+    /// Replaces one memory file as the user edited it; empty text removes it.
+    func saveAgentMemoryFile(_ path: String, text: String) throws {
+        guard let path = LedgerAgentMemoryLayout.clean(path) else { throw WorkspaceError.unsupportedItem(path) }
+        let folder = try prepareAgentMemory()
+        let file = folder.appendingPathComponent(path, isDirectory: false)
+        let content = LedgerAgentMemoryLayout.normalize(text)
+        guard !content.isEmpty else {
+            removeIfPresent(file)
+            // A folder the file leaves empty goes too.
+            var parent = file.deletingLastPathComponent()
+            while parent.standardizedFileURL.path != folder.standardizedFileURL.path,
+                  (try? fileManager.contentsOfDirectory(atPath: parent.path))?.isEmpty == true {
+                removeIfPresent(parent)
+                parent = parent.deletingLastPathComponent()
+            }
+            return
+        }
+        if let kind = try itemKindIfPresent(at: file), kind != .regularFile { throw WorkspaceError.unsupportedItem(path) }
+        try createProtectedDirectory(file.deletingLastPathComponent())
+        try Data(content.utf8).write(to: file, options: .atomic)
         try protect(file)
+    }
+
+    /// Removes the whole memory.
+    func clearAgentMemory() {
+        removeIfPresent(legacyAgentMemoryLocation)
+        guard let folder = try? prepareAgentMemory() else { return }
+        for path in LedgerAgentMemoryLayout.load(folder).keys {
+            try? saveAgentMemoryFile(path, text: "")
+        }
     }
 
     /// runtime/agent-artifacts/<id>.json: the pages the assistant built to
@@ -745,11 +786,11 @@ actor LocalLedgerWorkspace {
         removeIfPresent(directory.appendingPathComponent(id + ".json"))
     }
 
-    /// Applies the workspace's file protection to a memory.md the native
+    /// Applies the workspace's file protection to memory files the native
     /// core just wrote.
     func protectAgentMemory() {
-        guard (try? itemKindIfPresent(at: agentMemoryLocation)) == .regularFile else { return }
-        try? protect(agentMemoryLocation)
+        guard (try? itemKindIfPresent(at: agentMemoryLocation)) == .directory else { return }
+        try? protectTree(at: agentMemoryLocation)
     }
 
     /// runtime/agent-starters.json: the saved 试试 suggestions.

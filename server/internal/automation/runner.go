@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/borui/beancount-ledger-web/server/agentmemory"
 	"github.com/borui/beancount-ledger-web/server/internal/app"
 )
 
@@ -44,6 +45,11 @@ type Config struct {
 	Repo       string
 	Branch     string
 	RunsBranch string
+	// MemoryBranch is where the 账本助手's memory folder is shared with the
+	// phone (agentmemory.BranchName).
+	MemoryBranch string
+	// MemoryMode is MemoryWrite (the default), MemoryRead or MemoryOff.
+	MemoryMode string
 	Entrypoint string
 	Location   *time.Location
 	Model      ModelConfig
@@ -99,12 +105,18 @@ func NewRunner(cfg Config) (*Runner, error) {
 		value    *string
 		fallback string
 	}{{&cfg.Branch, "main"}, {&cfg.RunsBranch, "automation-runs"}, {&cfg.Entrypoint, "main.bean"},
+		{&cfg.MemoryBranch, agentmemory.BranchName}, {&cfg.MemoryMode, MemoryWrite},
 		{&cfg.Model.API, "openai-completions"}, {&cfg.CommitName, "ledger-automation"},
 		{&cfg.CommitEmail, "ledger-automation@localhost"}}
 	for _, d := range defaults {
 		if *d.value == "" {
 			*d.value = d.fallback
 		}
+	}
+	switch cfg.MemoryMode {
+	case MemoryWrite, MemoryRead, MemoryOff:
+	default:
+		return nil, fmt.Errorf("memory mode must be %s, %s or %s, not %q", MemoryWrite, MemoryRead, MemoryOff, cfg.MemoryMode)
 	}
 	if cfg.Location == nil {
 		cfg.Location = time.Local
@@ -322,9 +334,12 @@ type RunRecord struct {
 	// DraftFiles are the ledger paths the draft changes; draft/base and
 	// draft/after hold each one before and after.
 	DraftFiles []string `json:"draftFiles,omitempty"`
-	Model      string   `json:"model"`
-	AuditMs    int64    `json:"auditMs,omitempty"`
-	AgentMs    int64    `json:"agentMs,omitempty"`
+	// MemoryFiles counts the 账本助手 memory files the run changed on the
+	// memory branch.
+	MemoryFiles int    `json:"memoryFiles,omitempty"`
+	Model       string `json:"model"`
+	AuditMs     int64  `json:"auditMs,omitempty"`
+	AgentMs     int64  `json:"agentMs,omitempty"`
 }
 
 // Status values of a run.
@@ -432,6 +447,13 @@ func (r *Runner) runAgent(ctx context.Context, task Task, job job, sha, workspac
 		return "", err
 	}
 	defer cleanup()
+	memory, err := r.openMemory(ctx, job.runID)
+	if err != nil {
+		// The run goes on without the memory rather than not at all.
+		r.cfg.Logger.Warn("open memory", "task", task.ID, "err", err)
+		memory = nil
+	}
+	defer memory.close()
 	message := buildMessage(task, report, job.slot)
 	request := map[string]any{
 		"version": 1, "turnId": job.runID, "workspaceRoot": workspace,
@@ -440,6 +462,12 @@ func (r *Runner) runAgent(ctx context.Context, task Task, job job, sha, workspac
 		"custom":      map[string]string{"api": r.cfg.Model.API, "baseURL": r.cfg.Model.BaseURL},
 		"thinking":    firstNonEmpty(task.Thinking, r.cfg.Model.Thinking),
 		"scratchRoot": scratch, "conversationId": record.ConversationID, "message": message,
+	}
+	if memory != nil {
+		request["memoryPath"] = memory.dir
+		if r.cfg.MemoryMode != MemoryWrite {
+			request["memoryReadOnly"] = true
+		}
 	}
 	limits := r.modelLimits(record.Model)
 	if limits.contextWindow > 0 {
@@ -466,6 +494,12 @@ func (r *Runner) runAgent(ctx context.Context, task Task, job job, sha, workspac
 		}
 		r.cfg.Logger.Warn("agent attempt failed", "task", task.ID, "attempt", attempt+1, "err", response.Error)
 		r.sleep(ctx, r.cfg.RetryDelays[attempt])
+	}
+	// What the Agent remembered is kept even when the turn then failed.
+	if changed, err := r.publishMemory(ctx, memory); err != nil {
+		r.cfg.Logger.Warn("publish memory", "task", task.ID, "err", err)
+	} else {
+		record.MemoryFiles = changed
 	}
 	if !response.OK {
 		return "", errors.New(firstNonEmpty(response.Error, "the Agent did not answer"))

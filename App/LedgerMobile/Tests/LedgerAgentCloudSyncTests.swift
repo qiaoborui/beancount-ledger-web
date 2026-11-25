@@ -155,6 +155,29 @@ final class LedgerAgentCloudSyncTests: XCTestCase {
         XCTAssertEqual(pad.read("agent-memory.md"), merged)
     }
 
+    func testMemoryFolderFilesSyncAndMergePerFile() async throws {
+        let root = try directory()
+        let remote = root.appendingPathComponent("folder/files", isDirectory: true)
+        let phone = try device("phone", root: root, remote: remote)
+        let pad = try device("pad", root: root, remote: remote)
+        try phone.write("agent-memory/MEMORY.md", "- 金额保留两位小数\n")
+        try phone.write("agent-memory/accounts/credit-cards.md", "---\ndescription: 信用卡\n---\n\n- 招行 5 号出账\n")
+        try await phone.sync()
+        try await pad.sync()
+        XCTAssertEqual(pad.read("agent-memory/accounts/credit-cards.md"), "---\ndescription: 信用卡\n---\n\n- 招行 5 号出账\n")
+
+        try phone.write("agent-memory/accounts/credit-cards.md", "---\ndescription: 信用卡\n---\n\n- 招行 5 号出账\n- 中信 10 号还款\n")
+        try pad.write("agent-memory/accounts/credit-cards.md", "---\ndescription: 信用卡账单日\n---\n\n- 招行 5 号出账\n")
+        try pad.remove("agent-memory/MEMORY.md")
+        try await pad.sync()
+        try await phone.sync()
+        let merged = "---\ndescription: 信用卡账单日\n---\n\n- 招行 5 号出账\n- 中信 10 号还款\n"
+        XCTAssertEqual(phone.read("agent-memory/accounts/credit-cards.md"), merged)
+        XCTAssertNil(phone.read("agent-memory/MEMORY.md"))
+        try await pad.sync()
+        XCTAssertEqual(pad.read("agent-memory/accounts/credit-cards.md"), merged)
+    }
+
     func testMergeMemoryPlacesAddedLinesAfterTheirNeighbour() {
         let merged = LedgerAgentSyncLayout.mergeMemory(
             base: "## A\n- a1\n\n## B\n- b1\n",
@@ -166,6 +189,9 @@ final class LedgerAgentCloudSyncTests: XCTestCase {
     func testOnlyAssistantFilesSync() {
         let id = UUID().uuidString, leaf = UUID().uuidString
         XCTAssertTrue(LedgerAgentSyncLayout.isSynced("agent-memory.md"))
+        XCTAssertTrue(LedgerAgentSyncLayout.isSynced("agent-memory/MEMORY.md"))
+        XCTAssertTrue(LedgerAgentSyncLayout.isSynced("agent-memory/accounts/credit-cards.md"))
+        XCTAssertFalse(LedgerAgentSyncLayout.isSynced("agent-memory/Notes.md"))
         XCTAssertTrue(LedgerAgentSyncLayout.isSynced("agent-history/\(id).json"))
         XCTAssertTrue(LedgerAgentSyncLayout.isSynced("agent-history/\(id).\(leaf).transcript"))
         XCTAssertTrue(LedgerAgentSyncLayout.isSynced("agent-attachments/\(id)/a.pdf"))

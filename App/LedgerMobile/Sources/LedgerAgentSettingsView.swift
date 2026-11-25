@@ -278,7 +278,7 @@ private struct LedgerAgentToolsView: View {
                 tool(String(localized: "向你提问（选项卡）"), "ask_user")
                 tool(String(localized: "改账（只改草稿）"),
                      "list_files · grep_files · read_file · edit_file · write_file · copy_file · move_file · delete_file · draft_changes · bean_check")
-                if settings.usesMemory { tool(String(localized: "记忆"), "edit_memory · write_memory") }
+                if settings.usesMemory { tool(String(localized: "记忆"), "read_memory · edit_memory · write_memory") }
                 tool(String(localized: "附件"),
                      "list_attachments · read_attachment · reconcile_attachment · view_attachment_image · save_attachment")
                 tool(String(localized: "历史对话"), "list_saved_conversations · read_saved_conversation")

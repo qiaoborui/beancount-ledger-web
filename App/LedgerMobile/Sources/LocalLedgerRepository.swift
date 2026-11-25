@@ -135,6 +135,11 @@ actor LocalLedgerRepository: LedgerRepository {
     /// The scheduled tasks' run records from the Git repository; nil when
     /// there are none to read.
     func automationRuns() async throws -> URL? { try await storage.automationRuns() }
+    /// Merges the assistant's memory folder with the Git repository's
+    /// agent-memory branch; nil when the ledger does not sync with Git.
+    func syncAgentMemory(folder: URL) async throws -> LedgerAgentMemorySyncResult? {
+        try await storage.syncAgentMemory(folder: folder)
+    }
 
     func bootstrap(start: String, end: String, today: String, valuationCurrency: String) async throws -> LedgerBootstrap {
         try await bootstrapSnapshot(start: start, end: end, today: today, valuationCurrency: valuationCurrency).payload

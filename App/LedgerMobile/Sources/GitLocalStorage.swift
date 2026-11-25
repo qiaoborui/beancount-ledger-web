@@ -345,6 +345,27 @@ actor GitLocalStorage: LogicalLocalStorage {
         return target
     }
 
+    /// The branch the assistant's memory folder is shared through.
+    static let agentMemoryBranch = LedgerAgentMemoryLayout.branch
+
+    /// Merges the memory folder with the agent-memory branch in a cache of
+    /// its own, apart from the ledger's; the native core fetches, merges
+    /// file by file and line by line, writes the folder and pushes. The
+    /// ledger's sync state is never touched.
+    func syncAgentMemory(folder: URL) async throws -> LedgerAgentMemorySyncResult? {
+        let root = syncRoot.appendingPathComponent("agent-memory", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let credential = try credentials.load(for: configuration.id)
+        var request = makeRequest("syncMemory", credential: credential)
+        request.storageRoot = root.appendingPathComponent("repository.git").path
+        request.branch = Self.agentMemoryBranch
+        request.directory = folder.path
+        request.timeoutSeconds = 60
+        let result = try JSONDecoder().decode(LedgerAgentMemorySyncResult.self, from: await transport.dispatch(request))
+        try? protectTree(root)
+        return result
+    }
+
     private func export(commit: String, to directory: URL) async throws {
         if commit.isEmpty {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
