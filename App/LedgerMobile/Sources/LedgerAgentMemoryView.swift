@@ -9,7 +9,12 @@ struct LedgerAgentMemoryView: View {
     @EnvironmentObject private var session: LedgerSession
     @ObservedObject private var settings = LedgerAgentSettings.shared
     @ObservedObject private var memorySync = LedgerAgentMemorySync.shared
+    @ObservedObject private var sessions = LedgerAgentSessions.shared
+    @Environment(\.dismiss) private var dismiss
     @State private var files: [String: String] = [:]
+    @State private var updated: [String: Date] = [:]
+    @State private var request = ""
+    @FocusState private var requesting: Bool
     @State private var loaded = false
     @State private var error: String?
     @State private var confirmingClear = false
@@ -33,12 +38,12 @@ struct LedgerAgentMemoryView: View {
                     LedgerAgentMemoryFileView(path: LedgerAgentMemoryLayout.indexName, onChange: reload)
                 } label: {
                     row(path: LedgerAgentMemoryLayout.indexName,
-                        detail: files[LedgerAgentMemoryLayout.indexName].map { _ in String(localized: "每次对话都会带上") }
+                        detail: files[LedgerAgentMemoryLayout.indexName].map { _ in String(localized: "总览，每次对话都会带上") }
                             ?? String(localized: "还没有记忆。和助手说「记住……」，或者点进来直接写。"))
                 }
                 .accessibilityIdentifier("ledger-agent-memory-index")
-            } header: { Text("总览") } footer: {
-                Text("只放每次对话都用得上的规则。超过约 3 KB 时，助手会把成块的细节挪进下面的主题文件。")
+            } header: { Text("自动记忆") } footer: {
+                Text("助手在对话里自己记下的偏好和习惯。MEMORY.md 只放每次都用得上的规则，超过约 3 KB 时助手会把成块的细节挪进下面的记忆文件。")
             }
             Section {
                 ForEach(topics, id: \.self) { path in
@@ -49,10 +54,10 @@ struct LedgerAgentMemoryView: View {
                     }
                 }
                 Button { creating = true } label: {
-                    Label("新建主题文件", systemImage: "doc.badge.plus")
+                    Label("新建记忆文件", systemImage: "doc.badge.plus")
                 }
                 .accessibilityIdentifier("ledger-agent-memory-new")
-            } header: { Text("主题文件") } footer: {
+            } header: { Text("记忆文件") } footer: {
                 Text("助手先看每个文件开头的说明，和问题有关才读全文，所以记忆多了也不会每次都占上下文。")
             }
             if memorySync.available {
@@ -97,9 +102,50 @@ struct LedgerAgentMemoryView: View {
             NavigationStack { LedgerAgentMemoryNewFileView(existing: Set(files.keys), onCreate: reload) }
                 .environmentObject(session)
         }
+        .safeAreaInset(edge: .bottom) { requestBar }
         .task { await load() }
         .task { await memorySync.syncNow() }
         .onChange(of: memorySync.revision) { _, _ in Task { await load() } }
+    }
+
+    /// 告诉助手要改什么: the request goes to a new conversation, where the
+    /// assistant changes the files with its memory tools.
+    private var requestBar: some View {
+        HStack(spacing: 8) {
+            TextField("告诉助手要更改或删除什么", text: $request, axis: .vertical)
+                .lineLimit(1...4)
+                .focused($requesting)
+                .submitLabel(.send)
+                .onSubmit(sendRequest)
+                .accessibilityIdentifier("ledger-agent-memory-request")
+            Button(action: sendRequest) {
+                Image(systemName: "arrow.up").font(.system(size: 15, weight: .semibold))
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                              ? BalancedPalette.edge : BalancedPalette.ink))
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+            .disabled(request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .accessibilityLabel("发送")
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
+        .padding(.vertical, 8)
+        .background(Capsule().fill(.regularMaterial))
+        .overlay(Capsule().stroke(BalancedPalette.edge, lineWidth: 0.5))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+    }
+
+    private func sendRequest() {
+        let text = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        request = ""
+        requesting = false
+        if !sessions.current.isRunning, !sessions.busyElsewhere { sessions.startNew() }
+        sessions.queuedQuestion = String(localized: "改一下你的记忆：\(text)\n（先看 MEMORY.md 和相关的记忆文件，用 edit_memory / write_memory 改，改完告诉我改了哪些文件。）")
+        dismiss()
     }
 
     private func row(path: String, detail: String) -> some View {
@@ -107,8 +153,8 @@ struct LedgerAgentMemoryView: View {
             HStack {
                 Text(verbatim: path).balancedMono(size: 13)
                 Spacer()
-                if let content = files[path] {
-                    Text(ByteCountFormatter.string(fromByteCount: Int64(content.utf8.count), countStyle: .file))
+                if let date = updated[path] {
+                    Text("更新于 \(date.formatted(.relative(presentation: .named)))")
                         .font(.caption).foregroundStyle(BalancedPalette.meta)
                 }
             }
@@ -123,6 +169,14 @@ struct LedgerAgentMemoryView: View {
     private func load() async {
         guard let repository = session.localRepository else { return }
         files = await repository.workspace.agentMemoryFiles()
+        let folder = repository.workspace.agentMemoryLocation
+        var dates: [String: Date] = [:]
+        for path in files.keys {
+            if let date = try? folder.appendingPathComponent(path).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate {
+                dates[path] = date
+            }
+        }
+        updated = dates
         loaded = true
     }
 
