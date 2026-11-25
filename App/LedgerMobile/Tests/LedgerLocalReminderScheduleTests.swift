@@ -154,7 +154,7 @@ final class LedgerLocalReminderScheduleTests: XCTestCase {
     func testActionsAndTapsOpenLedgerLinks() {
         typealias N = LedgerReminderNotification
         XCTAssertEqual(N.url(forAction: N.recordAction, userInfo: [:]), N.recordURL)
-        XCTAssertEqual(N.url(forAction: N.sentenceAction, userInfo: [:]), N.sentenceURL)
+        XCTAssertEqual(N.url(forAction: N.agentAction, userInfo: [:]), N.agentURL)
         XCTAssertEqual(N.url(forAction: N.importAction, userInfo: [:]), N.importsURL)
         XCTAssertEqual(N.url(forAction: "com.apple.UNNotificationDefaultActionIdentifier",
             userInfo: [N.urlKey: "ledger://imports"]), N.importsURL)
@@ -162,7 +162,7 @@ final class LedgerLocalReminderScheduleTests: XCTestCase {
             userInfo: [N.urlKey: "https://example.com"]))
         XCTAssertNil(N.url(forAction: "com.apple.UNNotificationDefaultActionIdentifier", userInfo: [:]))
         XCTAssertEqual(LedgerExternalRoute.parse(N.recordURL), .record)
-        XCTAssertEqual(LedgerExternalRoute.parse(N.sentenceURL), .sentence)
+        XCTAssertEqual(LedgerExternalRoute.parse(N.agentURL), .page(.agent))
         XCTAssertEqual(LedgerExternalRoute.parse(N.importsURL), .page(.imports))
         XCTAssertTrue(N.isReminder(categoryIdentifier: N.bookkeepingCategory))
         XCTAssertFalse(N.isReminder(categoryIdentifier: ""))

@@ -582,7 +582,7 @@ private struct MainTabView: View {
             }
         }
         .ledgerTimeRangeSheet()
-        // 记一笔 and 一句话记账 from the 快捷入口 widget or the app icon menu.
+        // 记一笔 from the 快捷入口 widget or the app icon menu.
         .sheet(item: quickEntryBinding(.record)) { _ in
             TransactionEditorView(
                 accounts: session.ledger?.accounts ?? [],
@@ -591,9 +591,6 @@ private struct MainTabView: View {
                 try await session.addLocalTransaction(entry)
             }
             .ledgerPrivacyProtectedSheet()
-        }
-        .fullScreenCover(item: quickEntryBinding(.sentence)) { _ in
-            NaturalLanguageBookkeepingView(onSaved: { session.quickEntry = nil })
         }
         // 周报 / 月报 from a report notification or a ledger://report link.
         .sheet(item: reportBinding) { request in

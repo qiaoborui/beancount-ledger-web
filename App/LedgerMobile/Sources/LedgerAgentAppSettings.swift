@@ -447,8 +447,7 @@ struct LedgerAgentAppSettingsHost: Sendable {
 #if os(iOS)
 extension LedgerAgentAppSettingsHost {
     /// The live settings of this app. Only the domains with plain values are
-    /// here: credentials, the privacy lock and the consent-gated import
-    /// classifier stay in their own screens.
+    /// here: credentials and the privacy lock stay in their own screens.
     @MainActor
     static func live(_ session: LedgerSession, defaults: UserDefaults = .standard) -> Self {
         Self(snapshot: {

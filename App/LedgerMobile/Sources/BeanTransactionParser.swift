@@ -17,7 +17,9 @@ enum BeanTransactionParser {
     /// The native engine checks directive types; the canonical validator later
     /// checks the original bytes in the complete destination workspace.
     static func transactionCount(_ text: String) throws -> Int {
-        guard !text.isEmpty, text.utf8.count <= 2_000_000 else { throw BookkeepingError.invalidModelResponse }
+        guard !text.isEmpty, text.utf8.count <= 2_000_000 else {
+            throw BookkeepingError.reviewRequired(String(localized: "交易内容为空或超过 2 MB。"))
+        }
         #if canImport(LedgerCore)
         let request = try JSONSerialization.data(withJSONObject: ["version": 1, "filename": "import.bean", "text": text])
         let response = MobilecoreParseTextJSON(String(decoding: request, as: UTF8.self))

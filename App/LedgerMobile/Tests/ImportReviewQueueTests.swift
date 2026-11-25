@@ -6,32 +6,31 @@ final class ImportReviewQueueTests: XCTestCase {
         let entries = [
             entry("ready", category: "Expenses:Food"),
             entry("unknown", category: "Expenses:Unknown"),
-            entry("classified", category: "Expenses:Books"),
+            entry("booked", category: "Expenses:Books"),
             entry("excluded", category: "Expenses:Unknown"),
             entry("no-funding", category: "Expenses:Food", funding: ""),
         ]
         let queue = ImportReviewQueue(
             entries: entries,
-            included: ["ready", "unknown", "classified", "no-funding"],
-            needsReview: ["classified"]
+            included: ["ready", "unknown", "booked", "no-funding"]
         )
 
-        XCTAssertEqual(queue.pendingIDs, ["unknown", "classified", "no-funding"])
-        XCTAssertEqual(queue.readyIDs, ["ready"])
+        XCTAssertEqual(queue.pendingIDs, ["unknown", "no-funding"])
+        XCTAssertEqual(queue.readyIDs, ["ready", "booked"])
         XCTAssertEqual(queue.uncheckedIDs, ["excluded"])
         XCTAssertEqual(queue.allIDs, entries.map(\.id))
-        XCTAssertEqual(queue.count(for: .pending), 3)
+        XCTAssertEqual(queue.count(for: .pending), 2)
         XCTAssertEqual(queue.defaultFilter, .pending)
     }
 
     func testOpensOnEverythingWhenNothingNeedsConfirmation() {
-        let queue = ImportReviewQueue(entries: [entry("a", category: "Expenses:Food")], included: ["a"], needsReview: [])
+        let queue = ImportReviewQueue(entries: [entry("a", category: "Expenses:Food")], included: ["a"])
         XCTAssertEqual(queue.defaultFilter, .all)
     }
 
     func testNeighborsAndPositionStayWithinTheFilter() {
         let entries = ["a", "b", "c", "d"].map { entry($0, category: $0 == "b" ? "Expenses:Food" : "Expenses:Unknown") }
-        let queue = ImportReviewQueue(entries: entries, included: Set(entries.map(\.id)), needsReview: [])
+        let queue = ImportReviewQueue(entries: entries, included: Set(entries.map(\.id)))
 
         XCTAssertEqual(queue.pendingIDs, ["a", "c", "d"])
         XCTAssertEqual(queue.neighbor(of: "a", in: .pending, offset: 1), "c")
@@ -63,17 +62,6 @@ final class ImportReviewQueueTests: XCTestCase {
         XCTAssertEqual(totals.map(\.currency), ["CNY", "USD"])
         XCTAssertEqual(totals.map(\.minorUnits), [2_500, 300])
         XCTAssertTrue(ImportReviewTotals.byCurrency([]).isEmpty)
-    }
-
-    func testClassificationProgressIgnoresUncheckedEntries() {
-        let ids = ["a", "b", "c", "d"]
-        let finished = ImportClassificationProgress.counts(entryIDs: ids, included: ["a", "b", "c"],
-            completed: ["a"], manuallyReviewed: ["c"])
-        XCTAssertEqual(finished.total, 3)
-        XCTAssertEqual(finished.done, 2)
-        let done = ImportClassificationProgress.counts(entryIDs: ids, included: ["a", "b"],
-            completed: ["a", "b"], manuallyReviewed: [])
-        XCTAssertEqual(done.done, done.total)
     }
 
     private func entry(_ id: String, category: String, funding: String = "Assets:Alipay", tags: [String]? = nil,

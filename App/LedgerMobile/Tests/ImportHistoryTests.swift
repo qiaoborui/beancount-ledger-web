@@ -61,15 +61,7 @@ final class ImportHistoryTests: XCTestCase {
             alipayFundRounding: true,
             preview: nil,
             reviewedEntries: [],
-            includedEntryIDs: [],
-            classificationResults: [:],
-            classificationOriginals: [:],
-            manuallyReviewedIDs: [],
-            classificationCompletedIDs: [],
-            classificationAcceptedFields: [:],
-            classificationManualReasons: [:],
-            classificationEvidence: [:],
-            onlyClassificationReview: false
+            includedEntryIDs: []
         )
 
         try store.save(draft)
@@ -97,15 +89,7 @@ final class ImportHistoryTests: XCTestCase {
             alipayFundRounding: false,
             preview: nil,
             reviewedEntries: [],
-            includedEntryIDs: [],
-            classificationResults: [:],
-            classificationOriginals: [:],
-            manuallyReviewedIDs: [],
-            classificationCompletedIDs: [],
-            classificationAcceptedFields: [:],
-            classificationManualReasons: [:],
-            classificationEvidence: [:],
-            onlyClassificationReview: false
+            includedEntryIDs: []
         )
         try store.save(draft)
 

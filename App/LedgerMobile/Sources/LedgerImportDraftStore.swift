@@ -3,7 +3,8 @@ import Foundation
 /// A resumable import review scoped to one local ledger.
 ///
 /// The source file is deliberately kept outside the JSON metadata so a
-/// classification update does not rewrite a potentially large bill file.
+/// review edit does not rewrite a potentially large bill file. Drafts saved by
+/// older versions also hold smart-classification fields; decoding ignores them.
 struct LedgerImportDraft: Codable, Equatable, Sendable {
     static let currentVersion = 1
 
@@ -18,14 +19,6 @@ struct LedgerImportDraft: Codable, Equatable, Sendable {
     var preview: LedgerImportPreview?
     var reviewedEntries: [LedgerImportEntry]
     var includedEntryIDs: Set<String>
-    var classificationResults: [String: ImportClassificationSuggestion]
-    var classificationOriginals: [String: LedgerImportEntry]
-    var manuallyReviewedIDs: Set<String>
-    var classificationCompletedIDs: Set<String>
-    var classificationAcceptedFields: [String: Set<String>]
-    var classificationManualReasons: [String: String]
-    var classificationEvidence: [String: [ImportClassificationRequest.Example]]
-    var onlyClassificationReview: Bool
     var excludedPostDateFillIDs: Set<String> = []
 
     var selectedFile: LedgerImportSelectedFile {
@@ -35,9 +28,6 @@ struct LedgerImportDraft: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case version, savedAt, ledgerID, fileID, fileName, providerOverride,
              alipayFundRounding, preview, reviewedEntries, includedEntryIDs,
-             classificationResults, classificationOriginals, manuallyReviewedIDs,
-             classificationCompletedIDs, classificationAcceptedFields,
-             classificationManualReasons, classificationEvidence, onlyClassificationReview,
              excludedPostDateFillIDs
     }
 
@@ -50,14 +40,6 @@ struct LedgerImportDraft: Codable, Equatable, Sendable {
         preview: LedgerImportPreview?,
         reviewedEntries: [LedgerImportEntry],
         includedEntryIDs: Set<String>,
-        classificationResults: [String: ImportClassificationSuggestion],
-        classificationOriginals: [String: LedgerImportEntry],
-        manuallyReviewedIDs: Set<String>,
-        classificationCompletedIDs: Set<String>,
-        classificationAcceptedFields: [String: Set<String>],
-        classificationManualReasons: [String: String],
-        classificationEvidence: [String: [ImportClassificationRequest.Example]],
-        onlyClassificationReview: Bool,
         excludedPostDateFillIDs: Set<String> = []
     ) {
         self.version = Self.currentVersion
@@ -71,14 +53,6 @@ struct LedgerImportDraft: Codable, Equatable, Sendable {
         self.preview = preview
         self.reviewedEntries = reviewedEntries
         self.includedEntryIDs = includedEntryIDs
-        self.classificationResults = classificationResults
-        self.classificationOriginals = classificationOriginals
-        self.manuallyReviewedIDs = manuallyReviewedIDs
-        self.classificationCompletedIDs = classificationCompletedIDs
-        self.classificationAcceptedFields = classificationAcceptedFields
-        self.classificationManualReasons = classificationManualReasons
-        self.classificationEvidence = classificationEvidence
-        self.onlyClassificationReview = onlyClassificationReview
         self.excludedPostDateFillIDs = excludedPostDateFillIDs
     }
 
@@ -94,14 +68,6 @@ struct LedgerImportDraft: Codable, Equatable, Sendable {
         preview = try container.decodeIfPresent(LedgerImportPreview.self, forKey: .preview)
         reviewedEntries = try container.decode([LedgerImportEntry].self, forKey: .reviewedEntries)
         includedEntryIDs = try container.decode(Set<String>.self, forKey: .includedEntryIDs)
-        classificationResults = try container.decode([String: ImportClassificationSuggestion].self, forKey: .classificationResults)
-        classificationOriginals = try container.decode([String: LedgerImportEntry].self, forKey: .classificationOriginals)
-        manuallyReviewedIDs = try container.decode(Set<String>.self, forKey: .manuallyReviewedIDs)
-        classificationCompletedIDs = try container.decode(Set<String>.self, forKey: .classificationCompletedIDs)
-        classificationAcceptedFields = try container.decode([String: Set<String>].self, forKey: .classificationAcceptedFields)
-        classificationManualReasons = try container.decode([String: String].self, forKey: .classificationManualReasons)
-        classificationEvidence = try container.decode([String: [ImportClassificationRequest.Example]].self, forKey: .classificationEvidence)
-        onlyClassificationReview = try container.decode(Bool.self, forKey: .onlyClassificationReview)
         excludedPostDateFillIDs = try container.decodeIfPresent(Set<String>.self, forKey: .excludedPostDateFillIDs) ?? []
         fileData = Data()
     }
@@ -118,14 +84,6 @@ struct LedgerImportDraft: Codable, Equatable, Sendable {
         try container.encodeIfPresent(preview, forKey: .preview)
         try container.encode(reviewedEntries, forKey: .reviewedEntries)
         try container.encode(includedEntryIDs, forKey: .includedEntryIDs)
-        try container.encode(classificationResults, forKey: .classificationResults)
-        try container.encode(classificationOriginals, forKey: .classificationOriginals)
-        try container.encode(manuallyReviewedIDs, forKey: .manuallyReviewedIDs)
-        try container.encode(classificationCompletedIDs, forKey: .classificationCompletedIDs)
-        try container.encode(classificationAcceptedFields, forKey: .classificationAcceptedFields)
-        try container.encode(classificationManualReasons, forKey: .classificationManualReasons)
-        try container.encode(classificationEvidence, forKey: .classificationEvidence)
-        try container.encode(onlyClassificationReview, forKey: .onlyClassificationReview)
         try container.encode(excludedPostDateFillIDs, forKey: .excludedPostDateFillIDs)
     }
 }

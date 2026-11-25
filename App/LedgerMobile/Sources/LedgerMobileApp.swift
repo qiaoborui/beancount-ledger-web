@@ -30,6 +30,9 @@ struct LedgerMobileApp: App {
         // Hands the assistant its bash tool; the machine itself boots on the
         // first command.
         LedgerLinuxMachine.install()
+        // Drops the API keys of the removed smart classification and
+        // 一句话记账 features, once.
+        RemovedFeatureCredentials.purgeOnce()
         let session = LedgerSession.appSession()
         _session = StateObject(wrappedValue: session)
         LocalLedgerBackgroundSyncService.shared.configure { [weak session] in

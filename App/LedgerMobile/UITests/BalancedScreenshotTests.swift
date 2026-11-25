@@ -294,55 +294,6 @@ final class BalancedScreenshotTests: XCTestCase {
         #endif
     }
 
-    func testCaptureNaturalLanguageBookkeeping() throws {
-        #if targetEnvironment(simulator)
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["--local-ui-testing"]
-        app.launchEnvironment["LEDGER_LOCAL_TEST_ID"] = UUID().uuidString
-        app.launch()
-        XCTAssertTrue(app.revealLedgerSetupMenu(), app.debugDescription)
-        app.buttons["local-ledger-create"].tap()
-        XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForExistence(timeout: 5), app.debugDescription)
-        app.buttons["local-ledger-confirm-create"].tap()
-        XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 40), app.debugDescription)
-
-        app.tabBars.buttons["流水"].tap()
-        // 记一笔 is the page's own quick entry button; the 流水操作 menu only
-        // closes when it is tapped.
-        XCTAssertTrue(app.buttons["transaction-create-local"].waitForExistence(timeout: 10), app.debugDescription)
-        app.buttons["transaction-create-local"].tap()
-        let natural = app.buttons["bookkeeping-natural-entry"]
-        XCTAssertTrue(natural.waitForExistence(timeout: 10), app.debugDescription)
-        natural.tap()
-        XCTAssertTrue(app.navigationBars["用一句话记账"].waitForExistence(timeout: 10), app.debugDescription)
-        Thread.sleep(forTimeInterval: 0.8)
-        save(app.screenshot(), as: "p3-natural-bookkeeping-empty")
-
-        // Parsed state: a sentence that yields one expense with a known account.
-        let input = app.textViews["bookkeeping-natural-input"]
-        XCTAssertTrue(input.waitForExistence(timeout: 5), app.debugDescription)
-        input.tap()
-        input.typeText("中午在美团外卖点餐 35 元，微信零钱支付。")
-        app.buttons["bookkeeping-parse"].tap()
-        let prepare = app.buttons["bookkeeping-prepare"]
-        for _ in 0..<7 where !prepare.exists || !prepare.isHittable { app.swipeUp() }
-        Thread.sleep(forTimeInterval: 1.2)
-        save(app.screenshot(), as: "p3-natural-bookkeeping-parsed")
-
-        // 修改交易信息 sheet.
-        app.swipeDown()
-        let edit = app.buttons["修改商户或备注"].firstMatch
-        if edit.waitForExistence(timeout: 5), edit.isHittable {
-            edit.tap()
-            Thread.sleep(forTimeInterval: 0.6)
-            save(app.screenshot(), as: "p3-natural-bookkeeping-details-sheet")
-        }
-        #else
-        throw XCTSkip("Simulator-only screenshot capture")
-        #endif
-    }
-
     func testCaptureTransactionShare() throws {
         #if targetEnvironment(simulator)
         continueAfterFailure = false

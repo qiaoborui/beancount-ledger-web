@@ -97,10 +97,10 @@ final class LedgerLocalReminders: ObservableObject {
     var categories: Set<UNNotificationCategory> {
         typealias N = LedgerReminderNotification
         let record = UNNotificationAction(identifier: N.recordAction, title: String(localized: "记一笔"), options: [.foreground])
-        let sentence = UNNotificationAction(identifier: N.sentenceAction, title: String(localized: "一句话记账"), options: [.foreground])
+        let agent = UNNotificationAction(identifier: N.agentAction, title: String(localized: "问账本助手"), options: [.foreground])
         let imports = UNNotificationAction(identifier: N.importAction, title: String(localized: "导入账单"), options: [.foreground])
         var all: Set<UNNotificationCategory> = [
-            UNNotificationCategory(identifier: N.bookkeepingCategory, actions: [record, sentence], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: N.bookkeepingCategory, actions: [record, agent], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: N.importCategory, actions: [imports], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: N.plainCategory, actions: [], intentIdentifiers: [], options: []),
         ]

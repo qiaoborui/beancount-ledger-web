@@ -1,14 +1,13 @@
 import Foundation
 
 /// What the 快捷入口 widget, the Control Center buttons and the app icon's
-/// long-press menu can open: the assistant, the two entry forms, search, or
+/// long-press menu can open: the assistant, the entry form, search, or
 /// any tab. Each one is a `ledger://` link, so they all go through
 /// `LedgerExternalRoute` like any other deep link: a protected ledger is
 /// unlocked first and the action runs after that.
 enum LedgerQuickLink: String, CaseIterable, Sendable {
     case agent
     case record
-    case sentence
     case search
     case overview
     case transactions
@@ -23,7 +22,6 @@ enum LedgerQuickLink: String, CaseIterable, Sendable {
         switch self {
         case .agent: URL(string: "ledger://agent")!
         case .record: URL(string: "ledger://record")!
-        case .sentence: URL(string: "ledger://record?mode=sentence")!
         case .search: URL(string: "ledger://search")!
         case .overview: URL(string: "ledger://overview")!
         case .transactions: URL(string: "ledger://transactions")!
@@ -38,7 +36,6 @@ enum LedgerQuickLink: String, CaseIterable, Sendable {
         switch self {
         case .agent: String(localized: "问账本助手")
         case .record: String(localized: "记一笔")
-        case .sentence: String(localized: "一句话记账")
         case .search: String(localized: "搜索")
         case .overview: String(localized: "概览")
         case .transactions: String(localized: "交易")
@@ -55,7 +52,6 @@ enum LedgerQuickLink: String, CaseIterable, Sendable {
     var shortTitle: String {
         switch self {
         case .agent: String(localized: "问助手")
-        case .sentence: String(localized: "一句话")
         default: title
         }
     }
@@ -64,7 +60,6 @@ enum LedgerQuickLink: String, CaseIterable, Sendable {
         switch self {
         case .agent: "sparkles"
         case .record: "plus"
-        case .sentence: "text.bubble"
         case .search: "magnifyingglass"
         case .overview: "house"
         case .transactions: "list.bullet"

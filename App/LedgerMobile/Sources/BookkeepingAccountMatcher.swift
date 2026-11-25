@@ -1,6 +1,7 @@
 import Foundation
 
-/// Local, explainable account matching for natural-language bookkeeping.
+/// Local, explainable account matching for Siri / Shortcuts recordings
+/// (`LedgerShortcutRecording`).
 ///
 /// The text side and the ledger side are matched separately: a concept is
 /// triggered by words in the sentence (`滴滴` → taxi), then resolved to the
@@ -492,46 +493,5 @@ enum BookkeepingAccountMatcher {
             masked = masked.replacingOccurrences(of: word, with: String(repeating: "\u{3000}", count: word.count))
         }
         return masked
-    }
-
-    // MARK: Candidate lists for the editor
-
-    static func categoryCandidates(selected: String, accounts: [LedgerAccount]) -> [LedgerAccount] {
-        let active = accounts.filter { ($0.account.hasPrefix("Expenses:") || $0.account.hasPrefix("Income:")) && $0.active }
-        var result: [LedgerAccount] = []
-        if let current = active.first(where: { $0.account == selected }) {
-            result.append(current)
-            let prefixParts = selected.components(separatedBy: ":").prefix(2).joined(separator: ":")
-            let siblings = active.filter { $0.account.hasPrefix(prefixParts) && $0.account != selected }
-            result.append(contentsOf: siblings.prefix(3))
-        }
-        for acc in active where !result.contains(where: { $0.account == acc.account }) {
-            result.append(acc)
-            if result.count >= 5 { break }
-        }
-        return result
-    }
-
-    static func fundingCandidates(selected: String, accounts: [LedgerAccount]) -> [LedgerAccount] {
-        let active = accounts.filter { ($0.account.hasPrefix("Assets:") || $0.account.hasPrefix("Liabilities:")) && $0.active }
-        var result: [LedgerAccount] = []
-        if let current = active.first(where: { $0.account == selected }) {
-            result.append(current)
-        }
-        let priorityKeywords = ["wechat", "weixin", "alipay", "cmb", "icbc", "creditcard", "cash"]
-        for kw in priorityKeywords {
-            if let match = active.first(where: { acc in
-                !result.contains(where: { $0.account == acc.account }) &&
-                (acc.account.lowercased().contains(kw) || acc.displayLabel.lowercased().contains(kw))
-            }) {
-                result.append(match)
-            }
-            if result.count >= 5 { break }
-        }
-        for acc in active where !result.contains(where: { $0.account == acc.account }) {
-            result.append(acc)
-            if result.count >= 5 { break }
-        }
-        return result
     }
 }

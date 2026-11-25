@@ -4,19 +4,18 @@ import WidgetKit
 
 /// 快捷入口: a home screen widget with one wide button and round buttons
 /// below it, in the shape of the Claude app's widget. Long-press → 编辑小组件
-/// picks what each button opens: the assistant, 记一笔, 一句话记账, search or
+/// picks what each button opens: the assistant, 记一笔, search or
 /// any tab. It shows no ledger data, so it needs no snapshot and never has to
 /// be hidden on a locked device; every button is a `ledger://` link and the
 /// app asks for Face ID before the action runs.
 enum QuickActionWidgetTarget: String, AppEnum {
-    case agent, record, sentence, search, overview, transactions, accounts, imports
+    case agent, record, search, overview, transactions, accounts, imports
     case incomeExpense, investments, currencies, query
 
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "快捷入口")
     static let caseDisplayRepresentations: [Self: DisplayRepresentation] = [
         .agent: DisplayRepresentation(title: "问账本助手", image: .init(systemName: "sparkles")),
         .record: DisplayRepresentation(title: "记一笔", image: .init(systemName: "plus")),
-        .sentence: DisplayRepresentation(title: "一句话记账", image: .init(systemName: "text.bubble")),
         .search: DisplayRepresentation(title: "搜索", image: .init(systemName: "magnifyingglass")),
         .overview: DisplayRepresentation(title: "概览", image: .init(systemName: "house")),
         .transactions: DisplayRepresentation(title: "交易", image: .init(systemName: "list.bullet")),

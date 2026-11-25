@@ -68,9 +68,7 @@ final class ImportPostDateMatchTests: XCTestCase {
             ledgerID: UUID(), file: LedgerImportSelectedFile(name: "hsbc.csv", data: Data("x".utf8)),
             providerOverride: nil, alipayFundRounding: false, preview: preview,
             reviewedEntries: preview.entries, includedEntryIDs: preview.defaultIncludedEntryIDs,
-            classificationResults: [:], classificationOriginals: [:], manuallyReviewedIDs: [],
-            classificationCompletedIDs: [], classificationAcceptedFields: [:], classificationManualReasons: [:],
-            classificationEvidence: [:], onlyClassificationReview: false, excludedPostDateFillIDs: ["fill-1"])
+            excludedPostDateFillIDs: ["fill-1"])
         let encoded = try JSONEncoder().encode(draft)
         XCTAssertEqual(try JSONDecoder().decode(LedgerImportDraft.self, from: encoded).excludedPostDateFillIDs, ["fill-1"])
 

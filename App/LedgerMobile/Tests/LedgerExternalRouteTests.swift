@@ -76,11 +76,11 @@ final class LedgerExternalRouteTests: XCTestCase {
     func testQuickActionRoutes() throws {
         XCTAssertEqual(try parse("ledger://record"), .record)
         XCTAssertEqual(try parse("ledger://record/"), .record)
-        XCTAssertEqual(try parse("ledger://record?mode=sentence"), .sentence)
+        // 一句话记账 was removed; its old link opens the assistant.
+        XCTAssertEqual(try parse("ledger://record?mode=sentence"), .page(.agent))
         XCTAssertEqual(try parse("ledger://page?name=incomeExpense"), .page(.incomeExpense))
         XCTAssertEqual(try parse("ledger://page?name=query"), .page(.query))
         XCTAssertEqual(LedgerExternalRoute.record.destination, .transactions)
-        XCTAssertEqual(LedgerExternalRoute.sentence.destination, .transactions)
         for raw in ["ledger://record?mode=other", "ledger://record?mode=sentence&x=1", "ledger://record?other=1",
                     "ledger://capture", "ledger://page", "ledger://page?name=unknown", "ledger://page?name=query&x=1",
                     "ledger://record?mode=sentence&mode=sentence"] {
@@ -92,7 +92,6 @@ final class LedgerExternalRouteTests: XCTestCase {
             switch link {
             case .agent: XCTAssertEqual(route, .page(.agent))
             case .record: XCTAssertEqual(route, .record)
-            case .sentence: XCTAssertEqual(route, .sentence)
             case .search: XCTAssertEqual(route, .search(""))
             default: XCTAssertEqual(route, .page(try XCTUnwrap(LedgerDestination(rawValue: link.rawValue))))
             }
@@ -112,7 +111,7 @@ final class LedgerExternalRouteTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ExternalRouteRejectingURLProtocol.self]
         let session = LedgerSession(api: LedgerAPIClient(session: URLSession(configuration: configuration)), defaults: defaults)
-        for raw in ["ledger://record", "ledger://record?mode=sentence"] {
+        for raw in ["ledger://record"] {
             session.openWidgetURL(try XCTUnwrap(URL(string: raw)))
             XCTAssertNotNil(session.pendingExternalRoute)
             await session.applyPendingExternalRoute()

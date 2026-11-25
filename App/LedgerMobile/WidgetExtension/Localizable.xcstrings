@@ -185,32 +185,12 @@
         }
       }
     },
-    "一句话" : {
+    "一键记一笔或问账本助手，并查看今天的支出。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sentence"
-          }
-        }
-      }
-    },
-    "一句话记账" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Record in a sentence"
-          }
-        }
-      }
-    },
-    "一键记一笔或一句话记账，并查看今天的支出。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Add an entry or record in one sentence with a tap, and see today's spending."
+            "value" : "Add an entry or ask the ledger assistant with a tap, and see today's spending."
           }
         }
       }

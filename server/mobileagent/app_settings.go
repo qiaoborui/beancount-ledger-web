@@ -25,8 +25,7 @@ import (
 
 // appSettingsV1 is one snapshot of the App settings, grouped by area. Only
 // settings that are the user's own choices are here: credentials, the privacy
-// lock, the consent-gated import classifier and the assistant's own model
-// choice stay in their screens.
+// lock and the assistant's own model choice stay in their screens.
 type appSettingsV1 struct {
 	Overview  appOverviewV1  `json:"overview"`
 	Tabs      appTabsV1      `json:"tabs"`

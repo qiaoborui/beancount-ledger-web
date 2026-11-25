@@ -1418,19 +1418,6 @@
         }
       }
     },
-    "AI" : {
-      "shouldTranslate" : false
-    },
-    "AI 与智能记账" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "AI & smart entry"
-          }
-        }
-      }
-    },
     "AI 开账" : {
       "localizations" : {
         "en" : {
@@ -1451,48 +1438,8 @@
         }
       }
     },
-    "AI 提示" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "AI tips"
-          }
-        }
-      }
-    },
     "API Key" : {
       "shouldTranslate" : false
-    },
-    "API Key 存放在这台设备的 Keychain，随账本导出与 Git 同步的内容中均不包含它。调用费用由你的 TypeSafe 账户承担。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The API key is stored in this device's Keychain and is never included in ledger exports or Git sync. Usage is billed to your TypeSafe account."
-          }
-        }
-      }
-    },
-    "API Key 安全保存在当前设备的 Keychain，不随账本导出，也不进入 Git 版本库。解析结果在本地生成并校验。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The API key stays in this device's Keychain. It isn't exported with the ledger or committed to Git. Results are generated and validated on device."
-          }
-        }
-      }
-    },
-    "API Key 已保存在本机" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "API key saved on this device"
-          }
-        }
-      }
     },
     "App 与小组件无法访问共享 Keychain 或 App Group" : {
       "localizations" : {
@@ -1560,16 +1507,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "BQL query editor"
-          }
-        }
-      }
-    },
-    "Base URL（含 /v1）" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Base URL (including /v1)"
           }
         }
       }
@@ -1793,16 +1730,6 @@
         }
       }
     },
-    "HTTPS 加密传输" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Encrypted over HTTPS"
-          }
-        }
-      }
-    },
     "Key 只保存在这台设备的钥匙串里。对话只发送给你选的模型服务，确认创建前不会写入任何文件。" : {
       "localizations" : {
         "en" : {
@@ -1904,32 +1831,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "MetricKit crash diagnostic"
-          }
-        }
-      }
-    },
-    "OpenAI 兼容接口" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OpenAI-compatible API"
-          }
-        }
-      }
-    },
-    "TypeSafe" : {
-      "shouldTranslate" : false
-    },
-    "TypeSafe API Key" : {
-      "shouldTranslate" : false
-    },
-    "TypeSafe API Key 无效，请在设置中更新。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The TypeSafe API key is invalid. Update it in Settings."
           }
         }
       }
@@ -2104,26 +2005,6 @@
         }
       }
     },
-    "一句话" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sentence"
-          }
-        }
-      }
-    },
-    "一句话记账" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Record in a sentence"
-          }
-        }
-      }
-    },
     "一周开始于" : {
       "localizations" : {
         "en" : {
@@ -2140,16 +2021,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "You can tag up to %lld transactions at a time."
-          }
-        }
-      }
-    },
-    "一键解析" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Parse"
           }
         }
       }
@@ -2294,16 +2165,6 @@
         }
       }
     },
-    "下午买了一杯星巴克 32 元，招行信用卡付款。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Bought a Starbucks coffee for 32 yuan this afternoon, paid with my CMB credit card."
-          }
-        }
-      }
-    },
     "下拉刷新重新读取账本。" : {
       "localizations" : {
         "en" : {
@@ -2380,16 +2241,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "China CITIC Bank"
-          }
-        }
-      }
-    },
-    "中午在美团外卖点餐 35 元，微信零钱支付。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ordered lunch on Meituan for 35 yuan, paid with WeChat balance."
           }
         }
       }
@@ -2534,16 +2385,6 @@
         }
       }
     },
-    "为此账本启用智能分类" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Enable smart categorization for this ledger"
-          }
-        }
-      }
-    },
     "主要币种" : {
       "localizations" : {
         "en" : {
@@ -2570,16 +2411,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Books"
-          }
-        }
-      }
-    },
-    "买书分账" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Split a book purchase"
           }
         }
       }
@@ -2814,6 +2645,16 @@
         }
       }
     },
+    "交易内容为空或超过 2 MB。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The transactions are empty or larger than 2 MB."
+          }
+        }
+      }
+    },
     "交易分页响应超过容量限制" : {
       "localizations" : {
         "en" : {
@@ -2874,32 +2715,12 @@
         }
       }
     },
-    "交易性质" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Transaction type"
-          }
-        }
-      }
-    },
     "交易操作未完成" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Transaction action incomplete"
-          }
-        }
-      }
-    },
-    "交易日期" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Date"
           }
         }
       }
@@ -3294,16 +3115,6 @@
         }
       }
     },
-    "今早乘坐地铁 7 元，支付宝花呗扣款。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Took the subway this morning for 7 yuan, charged to Alipay Huabei."
-          }
-        }
-      }
-    },
     "从 %@ 的 %@ 到 %@ 的 %@" : {
       "localizations" : {
         "en" : {
@@ -3364,16 +3175,6 @@
         }
       }
     },
-    "从工行储蓄卡转账 3000 元还招商银行信用卡。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Transferred 3,000 yuan from my ICBC debit card to pay off my CMB credit card."
-          }
-        }
-      }
-    },
     "从已归档的汇丰账单为支付宝/微信/美团分录补上记账日，并检查重复记账。" : {
       "localizations" : {
         "en" : {
@@ -3400,16 +3201,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Repository URL"
-          }
-        }
-      }
-    },
-    "付款 / 收款账户" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Payment / receiving account"
           }
         }
       }
@@ -3954,36 +3745,6 @@
         }
       }
     },
-    "保存配置" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Save Settings"
-          }
-        }
-      }
-    },
-    "保留当前标签" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keep Current Tags"
-          }
-        }
-      }
-    },
-    "保留当前账户" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keep Current Account"
-          }
-        }
-      }
-    },
     "保留本地账本并停止同步" : {
       "localizations" : {
         "en" : {
@@ -4094,52 +3855,12 @@
         }
       }
     },
-    "信用卡还款" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Credit card payment"
-          }
-        }
-      }
-    },
     "信用账户" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Credit accounts"
-          }
-        }
-      }
-    },
-    "修改交易信息" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Edit Transaction Details"
-          }
-        }
-      }
-    },
-    "修改商户或备注" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Edit Payee or Note"
-          }
-        }
-      }
-    },
-    "修改日期" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Change Date"
           }
         }
       }
@@ -5114,16 +4835,6 @@
         }
       }
     },
-    "出" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Out"
-          }
-        }
-      }
-    },
     "出报告" : {
       "localizations" : {
         "en" : {
@@ -5340,16 +5051,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Category"
-          }
-        }
-      }
-    },
-    "分类 / 对应账户" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Category / counter account"
           }
         }
       }
@@ -5624,16 +5325,6 @@
         }
       }
     },
-    "删除这条分录" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Delete this posting"
-          }
-        }
-      }
-    },
     "删除这条崩溃日志？" : {
       "localizations" : {
         "en" : {
@@ -5654,16 +5345,6 @@
         }
       }
     },
-    "判断结果无法验证，请继续手动核对。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The suggestion couldn't be verified. Continue reviewing manually."
-          }
-        }
-      }
-    },
     "利息支出" : {
       "localizations" : {
         "en" : {
@@ -5674,12 +5355,12 @@
         }
       }
     },
-    "到点提醒「今天的账记了吗？」，可以直接点「记一笔」或「一句话记账」。" : {
+    "到点提醒「今天的账记了吗？」，可以直接点「记一笔」或「问账本助手」。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Asks “Did you log today's spending?” with buttons for “Add an entry” and “Record in a sentence”."
+            "value" : "Asks “Did you log today's spending?” with buttons for “Add an entry” and “Ask the ledger assistant”."
           }
         }
       }
@@ -5974,42 +5655,12 @@
         }
       }
     },
-    "卡尾号与支付身份唯一匹配" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Card last digits uniquely match the payment identity"
-          }
-        }
-      }
-    },
-    "历史检索在本机完成。原始账单、订单号、账户余额、附件和完整账本保留在本机。服务暂时不可用时，可以继续手动分类。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "History lookup happens on device. Original statements, order numbers, balances, attachments, and the full ledger stay on device. If the service is unavailable, you can keep categorizing manually."
-          }
-        }
-      }
-    },
     "历史记录删除失败" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Failed to delete the history record"
-          }
-        }
-      }
-    },
-    "历史记录已变化，请重试" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "History has changed. Please try again"
           }
         }
       }
@@ -6104,28 +5755,6 @@
         }
       }
     },
-    "参考历史 · %lld 条" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld history reference"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld history references"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "反向价格" : {
       "localizations" : {
         "en" : {
@@ -6142,16 +5771,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Send"
-          }
-        }
-      }
-    },
-    "发送内容" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "What gets sent"
           }
         }
       }
@@ -6468,16 +6087,6 @@
         }
       }
     },
-    "同意并启用" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Agree and Enable"
-          }
-        }
-      }
-    },
     "同步冲突" : {
       "localizations" : {
         "en" : {
@@ -6698,26 +6307,6 @@
         }
       }
     },
-    "启用后，账单导入自动判断；自然语言入口点击「补充账户建议」会发送原始描述和未确定的分录。发送内容包含日期、商家、交易描述、金额、币种、支付方式、账单渠道、卡尾号、候选账户，以及最多 5 条相关历史的日期、商家、描述、支付方式、账户和标签。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "When enabled, statement imports are categorized automatically. Tapping “Suggest accounts” in natural-language entry sends the original description and undecided postings. Data sent includes date, merchant, description, amount, currency, payment method, statement channel, card last digits, candidate accounts, and up to 5 related history items (date, merchant, description, payment method, accounts, and tags)."
-          }
-        }
-      }
-    },
-    "启用在线智能分类？" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Enable online smart categorization?"
-          }
-        }
-      }
-    },
     "启用设备生物识别后自动配置" : {
       "localizations" : {
         "en" : {
@@ -6898,16 +6487,6 @@
         }
       }
     },
-    "咖啡饮品" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Coffee & drinks"
-          }
-        }
-      }
-    },
     "哈希指纹 %@" : {
       "localizations" : {
         "en" : {
@@ -6948,16 +6527,6 @@
         }
       }
     },
-    "商户 / 交易对方（选填）" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Payee / counterparty (optional)"
-          }
-        }
-      }
-    },
     "商户 / 收款方名称" : {
       "localizations" : {
         "en" : {
@@ -6984,16 +6553,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Payee & narration"
-          }
-        }
-      }
-    },
-    "商户与用途" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Payee & purpose"
           }
         }
       }
@@ -7104,16 +6663,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Search the ledger for ${query}"
-          }
-        }
-      }
-    },
-    "地铁出行" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Subway ride"
           }
         }
       }
@@ -7424,16 +6973,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Compound conditions & aggregate filtering"
-          }
-        }
-      }
-    },
-    "复式借贷平衡已通过校验" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Double-entry balance verified"
           }
         }
       }
@@ -8008,16 +7547,6 @@
         }
       }
     },
-    "导入信息待确认 · 查看建议" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import details to confirm · view suggestions"
-          }
-        }
-      }
-    },
     "导入完成" : {
       "localizations" : {
         "en" : {
@@ -8104,16 +7633,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bill import reminder"
-          }
-        }
-      }
-    },
-    "导入账单时自动判断；自然语言草稿中点击「补充账户建议」时，Jev 根据支付信息和相关历史判断分类和付款或收款账户。结果填入预览，经你确认后在本机校验并保存。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Runs automatically on statement import. In natural-language drafts, tap “Suggest accounts” and Jev suggests the category and paying or receiving account from payment details and related history. Results fill the preview and are validated and saved on device after you confirm."
           }
         }
       }
@@ -8784,16 +8303,6 @@
         }
       }
     },
-    "已启用" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "On"
-          }
-        }
-      }
-    },
     "已启用后台更新，点按立即刷新" : {
       "localizations" : {
         "en" : {
@@ -9200,16 +8709,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Balanced"
-          }
-        }
-      }
-    },
-    "已配置" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Configured"
           }
         }
       }
@@ -9938,16 +9437,6 @@
         }
       }
     },
-    "待判断" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Undecided"
-          }
-        }
-      }
-    },
     "待对账" : {
       "localizations" : {
         "en" : {
@@ -10128,16 +9617,6 @@
         }
       }
     },
-    "快捷灵感示例" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Quick examples"
-          }
-        }
-      }
-    },
     "快捷范围预设" : {
       "localizations" : {
         "en" : {
@@ -10184,16 +9663,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Quick entry works with on-device ledgers only"
-          }
-        }
-      }
-    },
-    "快速预设" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Quick presets"
           }
         }
       }
@@ -10364,16 +9833,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Restoring as a new ledger leaves the current ledger unchanged. Replacing first backs up the current contents of “%@” to the same folder, then replaces all files with the selected backup."
-          }
-        }
-      }
-    },
-    "恢复原草稿" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Restore Original Draft"
           }
         }
       }
@@ -10804,16 +10263,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Taxi rides"
-          }
-        }
-      }
-    },
-    "扣款/收款账户" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Paying/receiving account"
           }
         }
       }
@@ -11608,16 +11057,6 @@
         }
       }
     },
-    "支付方式与账户名称唯一匹配" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Payment method uniquely matches the account name"
-          }
-        }
-      }
-    },
     "支付账户" : {
       "localizations" : {
         "en" : {
@@ -11644,16 +11083,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Expenses %@"
-          }
-        }
-      }
-    },
-    "支出/收入分类" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Expense/income category"
           }
         }
       }
@@ -12108,16 +11537,6 @@
         }
       }
     },
-    "数据与隐私安全" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Data & privacy"
-          }
-        }
-      }
-    },
     "数码电子" : {
       "localizations" : {
         "en" : {
@@ -12468,6 +11887,16 @@
         }
       }
     },
+    "无法写入这段草稿" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can't add this draft"
+          }
+        }
+      }
+    },
     "无法创建本地账本目录" : {
       "localizations" : {
         "en" : {
@@ -12708,26 +12137,6 @@
         }
       }
     },
-    "日常交易" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Daily transaction"
-          }
-        }
-      }
-    },
-    "日常支出" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Daily expense"
-          }
-        }
-      }
-    },
     "日常记账" : {
       "localizations" : {
         "en" : {
@@ -12744,16 +12153,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Date"
-          }
-        }
-      }
-    },
-    "日期、金额、币种和商家描述沿用账单。信息有歧义时会提示核对；复杂拆分交易保留原分录。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Date, amount, currency, and merchant come from the statement. Ambiguous details are flagged for review; complex split transactions keep their original postings."
           }
         }
       }
@@ -12898,16 +12297,6 @@
         }
       }
     },
-    "昨天用招行信用卡买书 128 元，其中 48 元替同事垫付。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Yesterday I bought a book for 128 yuan with my CMB credit card, 48 of it paid on behalf of a coworker."
-          }
-        }
-      }
-    },
     "显示" : {
       "localizations" : {
         "en" : {
@@ -12944,66 +12333,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Show amounts to view the chart"
-          }
-        }
-      }
-    },
-    "智能分类" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Smart categorization"
-          }
-        }
-      }
-    },
-    "智能分类 %lld / %lld" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Smart categorization %lld / %lld"
-          }
-        }
-      }
-    },
-    "智能分类已就绪" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Smart categorization ready"
-          }
-        }
-      }
-    },
-    "智能分类暂时不可用，你可以继续手动核对或稍后重试。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Smart categorization is unavailable right now. Keep reviewing manually or try again later."
-          }
-        }
-      }
-    },
-    "智能分类暂时不可用，已完成的建议保留，你可以继续核对或重试。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Smart categorization is unavailable right now. Finished suggestions are kept; keep reviewing or try again."
-          }
-        }
-      }
-    },
-    "智能分类额度暂时用完，请稍后重试。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Smart categorization quota is used up for now. Try again later."
           }
         }
       }
@@ -13374,16 +12703,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Replace API key"
-          }
-        }
-      }
-    },
-    "替换 TypeSafe API Key" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Replace TypeSafe API key"
           }
         }
       }
@@ -14388,16 +13707,6 @@
         }
       }
     },
-    "未配置" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not set up"
-          }
-        }
-      }
-    },
     "本周" : {
       "localizations" : {
         "en" : {
@@ -14744,16 +14053,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Period balance"
-          }
-        }
-      }
-    },
-    "本机 Keychain 存储" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stored in this device's Keychain"
           }
         }
       }
@@ -15228,16 +14527,6 @@
         }
       }
     },
-    "标签建议" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Suggested tags"
-          }
-        }
-      }
-    },
     "标签总数最多 50 个" : {
       "localizations" : {
         "en" : {
@@ -15398,6 +14687,16 @@
         }
       }
     },
+    "核对并写入账本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Review and add to ledger"
+          }
+        }
+      }
+    },
     "核对期初" : {
       "localizations" : {
         "en" : {
@@ -15474,16 +14773,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Invalid model temporary file"
-          }
-        }
-      }
-    },
-    "模型名称" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Model name"
           }
         }
       }
@@ -15918,16 +15207,6 @@
         }
       }
     },
-    "正在校验与写入…" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Validating and writing…"
-          }
-        }
-      }
-    },
     "正在校验账本" : {
       "localizations" : {
         "en" : {
@@ -16338,16 +15617,6 @@
         }
       }
     },
-    "此账本的导入交易，以及你主动请求账户建议的自然语言描述和草稿、支付方式和卡尾号、候选账户及最多 5 条相关历史片段将发送至 TypeSafe。费用使用你提供的 API Key结算，可随时关闭。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This ledger's imported transactions, plus any natural-language descriptions and drafts you request suggestions for, payment methods and card digits, candidate accounts, and up to 5 related history snippets will be sent to TypeSafe. Usage is billed to your API key, and you can turn this off anytime."
-          }
-        }
-      }
-    },
     "每一轮只显示一行标题，点标题展开。" : {
       "localizations" : {
         "en" : {
@@ -16534,16 +15803,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Day %lld of each month"
-          }
-        }
-      }
-    },
-    "每次点击「发送并解析」时，仅将输入文字、参考日期、时区与当前账本候选账户发送给配置的服务端。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Each time you tap “Send and parse”, only the text you entered, the reference date, time zone, and this ledger's candidate accounts are sent to the configured server."
           }
         }
       }
@@ -17058,16 +16317,6 @@
         }
       }
     },
-    "清空输入" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Clear Input"
-          }
-        }
-      }
-    },
     "清除" : {
       "localizations" : {
         "en" : {
@@ -17264,16 +16513,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "MoM"
-          }
-        }
-      }
-    },
-    "现有信息不足，请核对支付信息后选择账户。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not enough information. Check the payment details and choose an account."
           }
         }
       }
@@ -17478,16 +16717,6 @@
         }
       }
     },
-    "用一句话记账" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Record in One Sentence"
-          }
-        }
-      }
-    },
     "用仓库做版本交换，多设备共用" : {
       "localizations" : {
         "en" : {
@@ -17598,32 +16827,12 @@
         }
       }
     },
-    "相同支付方式的已确认历史一致" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Confirmed history with the same payment method agrees"
-          }
-        }
-      }
-    },
     "真实时间轴" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Time-scaled axis"
-          }
-        }
-      }
-    },
-    "硅基流动" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SiliconFlow"
           }
         }
       }
@@ -17738,16 +16947,6 @@
         }
       }
     },
-    "确认并生成预览" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Confirm and Generate Preview"
-          }
-        }
-      }
-    },
     "确认方案" : {
       "localizations" : {
         "en" : {
@@ -17764,16 +16963,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Confirm ledger changes"
-          }
-        }
-      }
-    },
-    "确认这笔草稿" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Confirm This Draft"
           }
         }
       }
@@ -17854,26 +17043,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Mobile payments & e-wallets"
-          }
-        }
-      }
-    },
-    "移除 API Key 并停用" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove API Key and Disable"
-          }
-        }
-      }
-    },
-    "移除 Key" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove Key"
           }
         }
       }
@@ -18074,26 +17243,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No. %lld"
-          }
-        }
-      }
-    },
-    "第 %lld 笔第 %lld 条分录需要补充金额。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Transaction %lld, posting %lld needs an amount."
-          }
-        }
-      }
-    },
-    "第 %lld 笔第 %lld 条分录需要选择账户。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Transaction %lld, posting %lld needs an account."
           }
         }
       }
@@ -18454,16 +17603,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Counting"
-          }
-        }
-      }
-    },
-    "继续分类" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Continue Categorizing"
           }
         }
       }
@@ -18928,16 +18067,6 @@
         }
       }
     },
-    "草稿已补全 · 点按核对" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Draft complete · tap to review"
-          }
-        }
-      }
-    },
     "草稿或账本已变化，请重新生成预览。" : {
       "localizations" : {
         "en" : {
@@ -18954,16 +18083,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Medicine & clinics"
-          }
-        }
-      }
-    },
-    "获取 TypeSafe API Key" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Get a TypeSafe API Key"
           }
         }
       }
@@ -19114,26 +18233,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Covers through %@"
-          }
-        }
-      }
-    },
-    "解析中…" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Parsing…"
-          }
-        }
-      }
-    },
-    "解析结果无法验证，请补充描述或手动编辑。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The parsed result couldn't be verified. Add more detail or edit it manually."
           }
         }
       }
@@ -19528,36 +18627,6 @@
         }
       }
     },
-    "语义解析" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Semantic parsing"
-          }
-        }
-      }
-    },
-    "语义解析服务调用失败，请检查接口、模型、Key 和额度。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The parsing service call failed. Check the endpoint, model, key, and quota."
-          }
-        }
-      }
-    },
-    "语义解析设置" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Parsing settings"
-          }
-        }
-      }
-    },
     "语言" : {
       "localizations" : {
         "en" : {
@@ -19574,16 +18643,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Description"
-          }
-        }
-      }
-    },
-    "说明 / 备注" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Description / note"
           }
         }
       }
@@ -19614,16 +18673,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Turn on “Shortcuts Recording” for an on-device ledger in Ledger Settings first."
-          }
-        }
-      }
-    },
-    "请先在智能分类设置中填写 TypeSafe API Key。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Enter a TypeSafe API key in smart categorization settings first."
           }
         }
       }
@@ -19718,16 +18767,6 @@
         }
       }
     },
-    "请先配置语义解析接口、模型和 API Key。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Set up the parsing endpoint, model, and API key first."
-          }
-        }
-      }
-    },
     "请刷新账本并预览修改后再保存" : {
       "localizations" : {
         "en" : {
@@ -19788,32 +18827,12 @@
         }
       }
     },
-    "请补充交易日期、金额、币种和用途，再重新解析。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Add the date, amount, currency, and purpose, then parse again."
-          }
-        }
-      }
-    },
     "请补充日期和至少两条分录。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Add a date and at least two postings."
-          }
-        }
-      }
-    },
-    "请补充每条分录的账户和金额。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Add an account and amount for each posting."
           }
         }
       }
@@ -19994,16 +19013,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Read attachments and the ledger %lld times"
-          }
-        }
-      }
-    },
-    "调整日期" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Adjust Date"
           }
         }
       }
@@ -21278,16 +20287,6 @@
         }
       }
     },
-    "资金账户和对应账户需使用不同账户，请打开编辑同时调整。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The funding and counter accounts must be different. Open the editor to adjust both."
-          }
-        }
-      }
-    },
     "走势保留形状，刻度和末值一并隐藏，避免从坐标反推金额。" : {
       "localizations" : {
         "en" : {
@@ -21514,26 +20513,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enter password"
-          }
-        }
-      }
-    },
-    "输入日常口语描述，自动拆分多账户分录与金额" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Describe it in plain words to split accounts and amounts automatically"
-          }
-        }
-      }
-    },
-    "输入日常口语，如：中午在美团外卖点餐 35 元，微信零钱支付。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Describe it in plain words, e.g. Ordered lunch on Meituan for 35 yuan, paid with WeChat balance."
           }
         }
       }
@@ -21968,16 +20947,6 @@
         }
       }
     },
-    "这笔交易包含复杂分录或缺少可用账户，请打开编辑核对。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This transaction has complex postings or no usable account. Open it to review."
-          }
-        }
-      }
-    },
     "这笔交易正在由服务器确认，请等待同步完成后再试。" : {
       "localizations" : {
         "en" : {
@@ -21998,32 +20967,12 @@
         }
       }
     },
-    "这笔交易的账户或历史信息过多，请手动核对。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This transaction has too many accounts or too much history. Review it manually."
-          }
-        }
-      }
-    },
     "这笔已经记过了，没有重复记录。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Already recorded; nothing was added again."
-          }
-        }
-      }
-    },
-    "连接 AI 语义解析模型" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Connect an AI parsing model"
           }
         }
       }
@@ -22198,16 +21147,6 @@
         }
       }
     },
-    "选择%@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Choose %@"
-          }
-        }
-      }
-    },
     "选择为标签操作对象" : {
       "localizations" : {
         "en" : {
@@ -22244,16 +21183,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Choose Another Category…"
-          }
-        }
-      }
-    },
-    "选择分录账户" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Choose Posting Account"
           }
         }
       }
@@ -22614,16 +21543,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Balance"
-          }
-        }
-      }
-    },
-    "配置已保存" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Settings saved"
           }
         }
       }

@@ -26,9 +26,8 @@ action. Foreground saves and network recovery trigger synchronization; iOS grant
 background execution opportunities. SQLite indexing and iCloud/S3 provider
 adapters remain future work. Reports reuse the Go read model against a pinned local generation.
 Files/iCloud Drive sharing currently exports a snapshot. Gmail automation and
-hosted ledger automation are outside the local-only product. Optional import
-classification calls TypeSafe directly with a user-supplied key; ledger queries,
-validation and writes continue to run entirely on the device.
+hosted ledger automation are outside the local-only product. Ledger queries,
+validation and writes run entirely on the device.
 
 An on-device ledger Agent is in progress in `server/mobileagent`. It runs a
 PiG (Pi in Go) agent loop inside LedgerCore and calls the model provider
@@ -233,19 +232,13 @@ when a local ledger becomes active, and only reduced local summaries are shared.
 The native inputs converge on a reviewable local change set:
 
 ```text
-Natural language -> semantic parser (BYOK compatible API / future device parser)
 Manual entry ----> exact structured records
 Statements ------> existing engine extraction and source-aware deduplication
                            |
                            v
                 BookkeepingDraft + source evidence
                            |
-                Local candidates and confirmed history
-                           |
-                Optional account/classification provider
-                (Jev today; protocol supports device models)
-                           |
-                Editable review of missing facts and proposals
+                Editable review of missing accounts
                            |
                 Existing local engine renders exact postings
                            |
@@ -269,78 +262,16 @@ The exact UTF-8 fragment is stored in a content-addressed `.bean` file beside th
 entrypoint and included from that entrypoint. Importing identical bytes again is
 rejected. Users review possible semantic duplicates with different source text.
 
-`BookkeepingSemanticParser` and `BookkeepingClassifier` are separate replaceable
-capabilities. `BookkeepingPipeline` assembles account context and proposals outside
-SwiftUI. `BookkeepingDraft` carries multiple transaction records, exact posting
-strings, source fingerprint/location/original text, unresolved questions and
-account proposals. Existing statement commit requests retain the engine's source
+`BookkeepingDraft` carries multiple transaction records, exact posting strings
+and source fingerprint/location/original text. Existing statement commit requests retain the engine's source
 metadata, archive receipts and deduplication identity. Legacy statement summary
 amounts remain display values; the new writer path requires exact posting strings.
 
-### Natural language and manual entry
-
-Open **Add transaction -> 用一句话记账**. Configure **语义解析设置** there or
-in Settings with an HTTPS OpenAI-compatible base URL (including `/v1`), model
-name and personal API Key. The endpoint must support `/chat/completions` and
-`response_format: {"type":"json_object"}`. Each explicit **发送并解析** action
-sends the entered text, captured reference date/timezone and account candidates
-to that endpoint. There is no automatic cloud fallback or background parsing.
-Keys use a separate unsynchronized, device-only, `WhenUnlocked` Keychain item.
-Changing endpoint requires reentering the key. Redirects, embedded URL credentials,
-queries and fragments are rejected; request and response bodies are bounded.
-
-The semantic response describes source quantities and signed addition/subtraction
-terms. Code verifies source tokens/spans and computes with checked Decimal
-arithmetic. For a 128 purchase with 48 advanced for a colleague, postings become
-80 expense, 48 receivable and -128 payment. The response cannot introduce an
-invented numeric literal to balance the entry. Unknown accounts and missing facts
-remain questions. Dates, accounts, amounts and currencies can be edited before
-preview. Arabic decimal amounts are supported; Chinese number words and unsupported
-cost/rate semantics require clarification or manual entry. Explicit review is
-required even when the model output parses successfully.
-
-The natural-language editor can explicitly request **补充账户建议** when the
-ledger's Jev classification setting is enabled. Only unresolved accounts are sent
-for candidate decisions; proposals remain separate until the user selects one.
-Candidates respect economic role, account dates and currency. Each request can
-include up to five confirmed history examples for that merchant. Input edits,
-settings changes, privacy shielding, cancellation or ledger changes invalidate
-in-flight results. Tests inject an offline classifier to verify provider independence.
-
-### Optional Jev account classification
-
-Open **Settings -> 智能分类**, save a personal TypeSafe key and enable the active
-ledger. Statement review calls Jev automatically; natural-language account advice
-requires its explicit button. The consent screen describes both uses. Keys are
-excluded from ledger files, exports, Git, App Group and preferences. Removing the
-key disables classification for every ledger on the device.
-
-Statement classification supplies two independent `Choice` questions to
-`https://api.typesafe.ai/v1/systemone`, model `jev-1.13.0`: category/counterpart
-account and payment/receipt account. Transaction nature is a local description of
-the selected posting roots and signs. Jev generates neither transaction text nor
-tags. Source dates, exact posting amounts, currency, description, metadata and
-existing tags are preserved. Complex/priced statement postings remain editable
-for manual review. Generic per-posting decisions support split natural-language
-drafts, with explicit acceptance of each account proposal.
-
-Local statement history retrieval uses merchant, description and payment identity,
-returning up to five confirmed examples on/before the transaction date. The
-request contains the transaction facts, eligible account names/labels and selected
-history. Original statements, attachments, balances, full ledger contents, source
-paths and order IDs stay local. Natural-language account advice additionally
-sends the entered description. The ephemeral cookie-free transport rejects
-redirects. Full finite distributions, candidate membership, sums and the selected
-maximum are checked. Up to 254 eligible candidates plus review are supported;
-larger sets request manual selection instead of silently truncating coverage.
-
-Unique card identities and established payment mappings can provide local funding
-hints. Issuer, credit/debit and suffix constraints gate model funding results.
-Generic payment channels alone never establish a bank-card identity. Statement
-account autofill requires probability >= 0.95, confidence >= 0.9 and lead >= 0.2,
-plus compatible posting roots/signs. These thresholds are review policies, not
-measured accuracy guarantees. Manual edits win; stale answers are discarded.
-Service failures retain the draft and existing suggestions.
+Natural-language bookkeeping (一句话记账) and the optional Jev import
+classification (智能分类) were removed in November 2026. The ledger assistant
+covers natural-language entry: it drafts changes that go through the same
+prepared-change review. A Beancount draft in one of its answers can be checked and
+written with 核对并写入账本, through the `.bean` transaction-file route above.
 
 ### Prepared changes and validation
 
@@ -358,13 +289,12 @@ workspace locking. Concurrent edits/sync require a fresh preview. Failures retai
 the previous generation; original statement runtime is consumed only after a
 successful import publication.
 
-Run `BookkeepingPipelineTests`, `ImportClassificationTests`,
+Run `BookkeepingPipelineTests`,
 `LocalLedgerRepositoryTests`, `LocalLedgerWorkspaceTests`, `LedgerImportModelsTests`
 and the native creation/import/settings UI tests. Synthetic integration tests use
 the app-linked Go engine and canonical Python Beancount runtime, including split
 entries, precision, original-byte import, rejected directives/duplicates, failed
-validation and stale revisions. Transport tests use mocked model responses.
-Live model quality and latency require consented data and working provider keys.
+validation and stale revisions.
 
 ## Local write transaction
 

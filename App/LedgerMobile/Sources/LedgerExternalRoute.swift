@@ -9,8 +9,6 @@ enum LedgerExternalRoute: Equatable, Sendable {
     case agent(String)
     /// The fast editor for a new transaction, from a widget or quick action.
     case record
-    /// 用一句话记账, the natural-language entry, from a widget or quick action.
-    case sentence
     /// 周报 / 月报, over the current tab: one period, or the latest when nil.
     case report(LedgerReportRouteTarget?)
     /// One run of a scheduled task, from its notification: the assistant
@@ -24,7 +22,7 @@ enum LedgerExternalRoute: Equatable, Sendable {
         case .transactions: .transactions
         case .search: .search
         case .agent, .automationRun: .agent
-        case .record, .sentence: .transactions
+        case .record: .transactions
         case .report: .overview
         }
     }
@@ -76,8 +74,10 @@ enum LedgerExternalRoute: Equatable, Sendable {
             return .automationRun(id)
         case "record":
             guard !query.isEmpty else { return .record }
+            // 一句话记账 was removed; links to it already on a home screen or
+            // in a delivered notification open the assistant instead.
             guard query == ["mode": "sentence"] else { return nil }
-            return .sentence
+            return .page(.agent)
         case "page":
             // Any tab by its stored name, for the configurable 快捷入口 widget.
             guard Set(query.keys) == ["name"], let name = query["name"],
@@ -132,7 +132,7 @@ struct LedgerAgentPendingAutomationRun: Identifiable, Equatable, Sendable {
 }
 
 struct LedgerQuickEntryRequest: Identifiable, Equatable, Sendable {
-    enum Kind: Equatable, Sendable { case record, sentence }
+    enum Kind: Equatable, Sendable { case record }
     let id = UUID()
     let kind: Kind
 }

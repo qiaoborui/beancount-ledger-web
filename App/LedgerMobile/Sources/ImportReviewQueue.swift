@@ -21,21 +21,20 @@ enum ImportReviewFilter: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// Splits a drafted import into the review page's working sets, in the
-/// preview's own order. An included entry needs confirmation when the
-/// classifier left a field for the person, or when either side of the
-/// transaction still has no real account.
+/// preview's own order. An included entry needs confirmation when either
+/// side of the transaction still has no real account.
 struct ImportReviewQueue: Equatable, Sendable {
     private(set) var pendingIDs: [String] = []
     private(set) var readyIDs: [String] = []
     private(set) var uncheckedIDs: [String] = []
     private(set) var allIDs: [String] = []
 
-    init(entries: [LedgerImportEntry], included: Set<String>, needsReview: Set<String>) {
+    init(entries: [LedgerImportEntry], included: Set<String>) {
         for entry in entries {
             allIDs.append(entry.id)
             if !included.contains(entry.id) {
                 uncheckedIDs.append(entry.id)
-            } else if needsReview.contains(entry.id) || Self.needsAccount(entry) {
+            } else if Self.needsAccount(entry) {
                 pendingIDs.append(entry.id)
             } else {
                 readyIDs.append(entry.id)
@@ -116,18 +115,5 @@ enum ImportReviewTotals {
         }
         return totals.map { (currency: $0.key, minorUnits: $0.value) }
             .sorted { $0.minorUnits == $1.minorUnits ? $0.currency < $1.currency : $0.minorUnits > $1.minorUnits }
-    }
-}
-
-enum ImportClassificationProgress {
-    /// Progress over the entries smart classification can still touch: the
-    /// checked ones. An unchecked entry is never classified, so counting it
-    /// would leave 继续分类 showing after a finished run. Entries the person
-    /// already reviewed by hand count as done.
-    static func counts(entryIDs: [String], included: Set<String>, completed: Set<String>,
-                       manuallyReviewed: Set<String>) -> (done: Int, total: Int) {
-        let scope = entryIDs.filter { included.contains($0) }
-        let done = scope.filter { completed.contains($0) || manuallyReviewed.contains($0) }.count
-        return (done, scope.count)
     }
 }
