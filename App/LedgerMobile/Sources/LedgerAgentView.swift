@@ -67,6 +67,9 @@ struct LedgerAgentView: View {
                 if let repository = session.localRepository {
                     sessions.bind(ledger: repository.descriptor.id, storage: .live(repository))
                     LedgerAgentCloudSync.shared.attach(repository)
+                    // The memory branch of a Git ledger syncs once the
+                    // assistant opens, whether or not iCloud does.
+                    LedgerAgentMemorySync.shared.attach(repository)
                     attachAutomations(repository)
                     // After the bind, so AI 开账's greeting opens the new
                     // ledger's conversation instead of being dropped as the

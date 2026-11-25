@@ -744,8 +744,6 @@ final class LedgerAgentCloudSync: ObservableObject {
 
     /// The ledger on screen; its data syncs from now on.
     func attach(_ repository: LocalLedgerRepository) {
-        // The memory branch of a Git ledger syncs whether or not iCloud does.
-        LedgerAgentMemorySync.shared.attach(repository)
         let changed = self.repository?.descriptor.id != repository.descriptor.id
         self.repository = repository
         if changed {
