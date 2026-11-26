@@ -12,8 +12,11 @@ import SwiftUI
 /// the name. Design: `docs/design/ios-balanced/agent-home.html`.
 struct LedgerIconTabBar: View {
     let model: LedgerIconTabBarModel
+    /// The row's width, for finding the icon under a dragging finger.
+    @State private var width: CGFloat = 0
 
     static let height: CGFloat = 44
+    private static let inset: CGFloat = 12
 
     var body: some View {
         HStack(spacing: 0) {
@@ -21,19 +24,42 @@ struct LedgerIconTabBar: View {
                 item(destination)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, Self.inset)
         .frame(height: Self.height)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        // A finger sliding along the row changes tab as it passes each icon,
+        // as Claude's bar does. Alongside the buttons, so a tap and a long
+        // press still reach them.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { drag in
+                    guard let destination = destination(at: drag.location.x) else { return }
+                    select(destination)
+                }
+        )
         .accessibilityElement(children: .contain)
         .accessibilityLabel("标签栏")
         .accessibilityIdentifier("ledger-icon-tab-bar")
     }
 
+    private func destination(at x: CGFloat) -> LedgerDestination? {
+        let count = model.destinations.count
+        let span = width - Self.inset * 2
+        guard count > 0, span > 0 else { return nil }
+        let index = Int(((x - Self.inset) / (span / CGFloat(count))).rounded(.down))
+        return model.destinations[min(max(index, 0), count - 1)]
+    }
+
+    private func select(_ destination: LedgerDestination) {
+        guard destination != model.selection else { return }
+        LedgerFeedback.selection()
+        model.select(destination)
+    }
+
     private func item(_ destination: LedgerDestination) -> some View {
         let selected = destination == model.selection
         return Button {
-            guard destination != model.selection else { return }
-            LedgerFeedback.selection()
-            model.select(destination)
+            select(destination)
         } label: {
             glyph(destination, selected: selected)
                 .foregroundStyle(selected ? BalancedPalette.ink : BalancedPalette.meta.opacity(0.55))
@@ -42,6 +68,13 @@ struct LedgerIconTabBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // A long press offers the shortcuts that tab leads to: on 更多, the
+        // pages that are not in the bar.
+        .contextMenu {
+            ForEach(model.shortcuts(destination), id: \.self) { link in
+                Button(link.title, systemImage: link.systemImage) { model.open(link.url) }
+            }
+        }
         .accessibilityLabel(destination.barTitle)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
         .accessibilityIdentifier("ledger-tab-\(destination.barTitle)")
@@ -77,6 +110,20 @@ struct LedgerIconTabBarModel: Equatable {
     var destinations: [LedgerDestination]
     var selection: LedgerDestination
     var select: @MainActor (LedgerDestination) -> Void
+    /// Opens a shortcut's `ledger://` link, as the widget and the icon menu do.
+    var open: @MainActor (URL) -> Void = { _ in }
+
+    /// What a long press on a tab offers. 更多 lists the pages that are not
+    /// in the bar; every other tab offers 记一笔 and 搜索, the two things
+    /// worth reaching from anywhere.
+    func shortcuts(_ destination: LedgerDestination) -> [LedgerQuickLink] {
+        if destination == .settings {
+            return LedgerDestination.allCases
+                .filter { !destinations.contains($0) && $0 != .search }
+                .compactMap { LedgerQuickLink(rawValue: $0.rawValue) }
+        }
+        return [.record, .search]
+    }
 
     /// What the bar shows. The shell builds a new model, with a new closure,
     /// each time it draws; compared by what it shows, the model left in the

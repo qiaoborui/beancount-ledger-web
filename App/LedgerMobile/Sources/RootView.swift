@@ -515,7 +515,8 @@ private struct MainTabView: View {
         return LedgerIconTabBarModel(
             destinations: LedgerDestination.iconBarDestinations(session.compactTabDestinations),
             selection: selection.wrappedValue,
-            select: { selection.wrappedValue = $0 })
+            select: { selection.wrappedValue = $0 },
+            open: { [session] in session.openWidgetURL($0) })
     }
 
     private func quickEntryBinding(_ kind: LedgerQuickEntryRequest.Kind) -> Binding<LedgerQuickEntryRequest?> {
