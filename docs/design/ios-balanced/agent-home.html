@@ -111,7 +111,9 @@ svg.mk .pg { fill: var(--p-ink); } svg.mk .ct { fill: var(--p-page); }
 .iconbar { position: absolute; left: 18px; right: 18px; bottom: 14px; height: 30px; display: flex; justify-content: space-between; align-items: center; z-index: 6; }
 .ib { width: 38px; height: 24px; border-radius: 12px; display: grid; place-items: center; color: var(--p-meta); --p-ink-mark: var(--p-meta); }
 .ib svg.i { width: 15px; height: 15px; stroke-width: 1.9; }
-.ib.on { background: var(--p-sel); color: var(--p-ink); }
+.ib { opacity: .55; }
+.ib.on { opacity: 1; color: var(--p-ink); }
+.ib.on svg.i { stroke-width: 2.2; }
 .ib .mk { width: 14px; height: 14px; }
 .phone.crop { height: 168px; border-radius: 0 0 44px 44px; border-top: 0; }
 .dim { position: absolute; right: 6px; font-size: 11px; font-weight: 600; color: var(--warn); z-index: 12; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 3px; }
@@ -325,7 +327,7 @@ code { font-family: var(--mono); font-size: 12.5px; }
 <section>
   <div class="head">
     <div class="eyebrow">方案 A</div>
-    <h2>助手是第一个标签<span class="tag rec">推荐</span></h2>
+    <h2>助手是第一个标签<span class="tag rec">已选</span></h2>
     <p>和截图里的 Claude 一样：助手是首页，输入框下面是一排只有图标的底栏。原来浮在右边的助手按钮收进底栏，成为第一个；后面是概览、流水、账户、更多，还是 5 个。底栏一直在，不折叠，也没有玻璃胶囊，直接画在页面上。只有远程账本（助手跑不了）保持现在的样子。</p>
   </div>
   <div class="row">
@@ -359,7 +361,7 @@ code { font-family: var(--mono); font-size: 12.5px; }
     <div class="k">底栏高度</div><div>62pt 胶囊，离底边 16pt</div><div>44pt 一行，坐在 Home 指示条上方</div>
     <div class="k">输入框到屏幕底边</div><div>约 172pt</div><div>约 128pt</div>
     <div class="k">图标</div><div>系统符号 + 10pt 文字</div><div>22pt 图标，无文字；助手用结平标志</div>
-    <div class="k">选中态</div><div>胶囊里一块浅色底</div><div>图标变成墨色，背后一块 52×32pt 的圆角浅底（配色方案的 selected 色）；没选中的是 meta 灰色。和 Claude 一样</div>
+    <div class="k">选中态</div><div>胶囊里一块浅色底</div><div>没有背景垫块，只换颜色：选中的图标是墨色、线条稍粗；没选中的是浅灰（meta 色 55% 不透明）。点按区域仍是每格 44×44pt</div>
     <div class="k">背景</div><div>玻璃</div><div>无。内容滚到底栏下面时用页面底色淡出（约 40pt 的渐变）</div>
     <div class="k">折叠</div><div>往下翻时收成小圆</div><div>不折叠，一直在</div>
     <div class="k">点按</div><div>系统反馈</div><div>轻触觉反馈；再点一次当前图标回到顶部（助手页上就是回到对话最下面）</div>
@@ -442,15 +444,15 @@ code { font-family: var(--mono); font-size: 12.5px; }
     <b class="h">较高</b><p>自己画底栏。系统标签栏藏起来以后，推入二级页面时要自己决定底栏在不在（建议二级页面不显示，和现在一样），iPad 仍用侧边栏不受影响。助手页一个图标栏、其它页一个图标栏，切换时位置必须分毫不差，不然会跳。</p>
     <b class="h">较高</b><p>键盘、底栏、输入框三者的位置。输入框在图标栏上方，键盘出来时图标栏藏到键盘下、输入框要正好接住，不能跳一下。#740 修过的键盘卡顿要回归。</p>
     <b class="m">中</b><p>外部路由。通知点进来要切到助手标签并打开某段对话，原来是“弹浮层”，现在是“切标签”，正在弹 sheet 时切标签的顺序要重新理一遍（#722 的崩溃就出在通知路径）。</p>
-    <b class="m">中</b><p>助手页底色。助手现在固定白底（<code>LedgerAgentPalette.page</code>），暖纸下和概览的米白挨在一起会有色差。稿子里画成跟随配色方案，建议一起改；不想改的话两个标签切换会看得出来。</p>
+    <b class="m">中</b><p>助手页底色。助手现在固定白底（<code>LedgerAgentPalette.page</code>），这次改成跟随配色方案（暖纸、纯净、冷灰各自的页面色），不然和概览来回切会有色差。助手里的气泡、卡片颜色要跟着检查一遍。</p>
     <b class="l">低</b><p>保活和后台回答。对话状态本来就放在 <code>LedgerAgentSessions</code>，不跟页面走，标签切走不会打断。</p>
     <b class="l">低</b><p>启动速度。少了一次浮层弹出，首屏只渲染助手的空状态，应该比现在快，不会更慢。</p>
   </div>
 </section>
 
 <section class="verdict">
-  <div><div class="eyebrow">推荐</div><h2>方案 A</h2><p style="color:var(--fg-2)">它就是参考截图的结构，改动只在根部，账本依旧一下点到。底栏只留图标以后矮了约 44pt，B 的好处（更大的对话区）A 也拿到了大半。</p></div>
-  <div><div class="eyebrow">需要你定</div><ul style="margin:6px 0 0;padding-left:18px;color:var(--fg-2)"><li>A 还是 B。</li><li>助手页是否改成跟随配色方案的底色（建议改）。</li><li>「启动时打开」放 设置 › 导航，这个位置可以吗。</li></ul></div>
+  <div><div class="eyebrow">已定</div><h2>方案 A</h2><p style="color:var(--fg-2)">它就是参考截图的结构，改动只在根部，账本依旧一下点到。底栏只留图标以后矮了约 44pt，B 的好处（更大的对话区）A 也拿到了大半。</p></div>
+  <div><div class="eyebrow">一起定下的</div><ul style="margin:6px 0 0;padding-left:18px;color:var(--fg-2)"><li>底栏只有图标，不折叠；选中只加深颜色，不加背景。</li><li>助手页底色跟随配色方案。</li><li>「启动时打开」放在 设置 › 导航。</li></ul></div>
 </section>
 
 </main>
@@ -476,7 +478,7 @@ code { font-family: var(--mono); font-size: 12.5px; }
     var t = [['a', null], ['o', 'i-house'], ['t', 'i-list'], ['c', 'i-book'], ['m', 'i-ell']];
     return '<div class="iconbar' + (cls ? ' ' + cls : '') + '">' + t.map(function (x) {
       var sel = x[0] === on;
-      var glyph = x[1] ? ic(x[1]) : '<svg class="mk" width="14" height="14" style="' + (sel ? '--p-page:var(--p-sel)' : '--p-ink:var(--p-meta)') + '"><use href="#mark"/></svg>';
+      var glyph = x[1] ? ic(x[1]) : '<svg class="mk" width="14" height="14" style="' + (sel ? '' : '--p-ink:var(--p-meta)') + '"><use href="#mark"/></svg>';
       return '<div class="ib' + (sel ? ' on' : '') + '">' + glyph + '</div>';
     }).join('') + '</div>';
   }
@@ -509,7 +511,7 @@ code { font-family: var(--mono); font-size: 12.5px; }
   var F = {
     'A-home': S + topA + empty + '<div class="fade"></div>' + composer(50) + bar('a') + HB,
     'A-chat': S + topA + convo + '<div class="fade"></div>' + composer(50) + bar('a') + HB,
-    'A-drawer': S + drawerA.replace('<div class="mini-greet">晚上好</div>', '<div class="mini-greet">晚上好</div><div class="iconbar" style="left:14px;right:auto;bottom:-12px"><div class="ib on"><svg class="mk" width="14" height="14" style="--p-page:var(--p-sel)"><use href="#mark"/></svg></div></div>') + HB,
+    'A-drawer': S + drawerA.replace('<div class="mini-greet">晚上好</div>', '<div class="mini-greet">晚上好</div><div class="iconbar" style="left:14px;right:auto;bottom:-12px"><div class="ib on"><svg class="mk" width="14" height="14"><use href="#mark"/></svg></div></div>') + HB,
     'A-overview': S + overview + '<div class="fade short"></div>' + bar('o') + HB,
     'cmp-old': '<div class="composer" style="bottom:76px"><div class="plus g">' + ic('i-plus') + '</div><div class="field g"><span>问问账本…</span><div class="mic">' + ic('i-mic') + '</div><div class="send">' + ic('i-wave', ' style="width:15px;height:15px"') + '</div></div></div>' + tabs('a') + '<div class="dim" style="top:12px;left:16px;right:auto">输入框到底边 ≈ 172pt</div>' + HB,
     'cmp-new': '<div class="fade"></div>' + composer(50) + bar('a') + '<div class="dim ok" style="top:12px;left:16px;right:auto">输入框到底边 ≈ 128pt</div>' + HB,
