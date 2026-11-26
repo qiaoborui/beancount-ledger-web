@@ -229,7 +229,9 @@ private struct LedgerAgentChatScreen: View {
         let warning: LedgerAgentBranchWarning
     }
 
-    var body: some View {
+    // The page is built in steps (page, presented, lifecycle, body) so the
+    // type checker sees a few short modifier chains instead of one long one.
+    private var page: some View {
         Group {
             if settings.isReady {
                 chat
@@ -257,6 +259,10 @@ private struct LedgerAgentChatScreen: View {
                                 ? AnyView(LedgerAgentBarTitle(text: conversationIsFresh
                                     ? String(localized: "新对话") : sessions.title(of: conversation)))
                                 : nil)
+    }
+
+    private var presented: some View {
+        page
         .sheet(isPresented: $settingsPresented) {
             NavigationStack { LedgerAgentSettingsView() }
                 .ledgerPrivacyProtectedSheet()
@@ -303,6 +309,10 @@ private struct LedgerAgentChatScreen: View {
             Text(confirmationMessage(confirmation))
         }
         .sensoryFeedback(.success, trigger: copies)
+    }
+
+    private var lifecycle: some View {
+        presented
         // An edit belongs to its conversation.
         .onChange(of: conversation.id) { _, _ in cancelEditing() }
         .onAppear {
@@ -379,6 +389,10 @@ private struct LedgerAgentChatScreen: View {
         .onChange(of: conversation.phase) { _, phase in
             if case .failed(.interrupted, _) = phase { resumeIfInterrupted() }
         }
+    }
+
+    var body: some View {
+        lifecycle
         .task {
             guard !firstAppearance.readCrashReport else { return }
             firstAppearance.readCrashReport = true
