@@ -809,9 +809,7 @@ private struct LedgerAgentChatScreen: View {
                 emptyState
                     .padding(.bottom, Self.emptyStateClearance)
                     .ignoresSafeArea(.keyboard)
-                    .opacity(composerFocused ? 0 : 1)
-                    .allowsHitTesting(!composerFocused)
-                    .animation(.easeOut(duration: 0.2), value: composerFocused)
+                    .modifier(LedgerAgentKeyboardFade(inset: keyboardInset))
             }
         }
         // Bills and screenshots can also be dragged in from Photos, Files
@@ -2920,6 +2918,23 @@ final class LedgerAgentKeyboardInset {
         let rect = window.convert(frame, from: nil)
         guard rect.maxY >= window.bounds.maxY - 1 else { return 0 }
         return max(0, window.bounds.maxY - rect.minY)
+    }
+}
+
+/// Fades the empty state while the keyboard is up, in the keyboard's own
+/// spring. Keyed on the keyboard rather than on focus: the first focus of a
+/// launch holds the main thread while the keyboard loads, and a fade started
+/// with the focus was over before a frame of it was drawn. The keyboard's
+/// frame arrives once it is loaded, as it starts to move. Its own modifier,
+/// so a keyboard change redraws this and not the page.
+private struct LedgerAgentKeyboardFade: ViewModifier {
+    let inset: LedgerAgentKeyboardInset
+
+    func body(content: Content) -> some View {
+        let up = inset.keyboard > 0
+        content
+            .opacity(up ? 0 : 1)
+            .allowsHitTesting(!up)
     }
 }
 
