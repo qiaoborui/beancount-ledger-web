@@ -89,7 +89,9 @@ private struct AlphaGrid {
     }
 
     func at(x: Int, y: Int) -> UInt8 {
-        // A CGContext's first row is its bottom one.
-        pixels[(height - 1 - y) * bytesPerRow + x * 4 + 3]
+        // An image drawn into a bitmap context lands upright: its first row
+        // in memory is the image's top one. (Reading it from the bottom also
+        // passed the old page mark, which is nearly the same either way up.)
+        pixels[y * bytesPerRow + x * 4 + 3]
     }
 }
