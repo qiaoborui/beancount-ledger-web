@@ -186,11 +186,30 @@ struct LedgerMascotCanvas: View {
     var pose: LedgerMascotPose = .rest
 
     var body: some View {
-        Canvas { context, size in
-            LedgerMascotDrawing(state: state, palette: palette, small: small, pose: pose).draw(in: context, size: size)
+        Group {
+            if palette.isMono {
+                // The silhouette, then the face punched out of it as a view
+                // of its own: a blend mode inside one Canvas did not cut
+                // through when rendered to an image (the tab glyph).
+                ZStack {
+                    canvas(.ink)
+                    canvas(.holes).blendMode(.destinationOut)
+                }
+                .compositingGroup()
+            } else {
+                canvas(.full)
+            }
         }
         .aspectRatio(1, contentMode: .fit)
         .accessibilityHidden(true)
+    }
+
+    private func canvas(_ pass: LedgerMascotDrawing.Pass) -> some View {
+        Canvas { context, size in
+            LedgerMascotDrawing(state: state, palette: pass == .holes ? .mono(.clear) : palette, small: small,
+                                pose: pose, pass: pass)
+                .draw(in: context, size: size)
+        }
     }
 }
 
@@ -199,6 +218,11 @@ struct LedgerMascotDrawing {
     let palette: LedgerMascotPalette
     let small: Bool
     let pose: LedgerMascotPose
+    var pass: Pass = .full
+
+    /// A one-colour character is drawn twice: the ink without its face,
+    /// then only the face, which the canvas view cuts out of the ink.
+    enum Pass { case full, ink, holes }
 
     private static var bodyPath: Path { LedgerMascotPath.parse(
         "M32 18.5C44.5 18.5 51.5 26.5 51.5 37.5C51.5 49.5 43.5 56 32 56C20.5 56 12.5 50 12.5 44C12.5 40.4 15.6 38.8 15.6 35.4C15.6 32.2 13.6 30.4 14.4 27C16.4 21.4 23.5 18.5 32 18.5Z") }
@@ -211,7 +235,6 @@ struct LedgerMascotDrawing {
         var root = context
         root.translateBy(x: (size.width - 64 * scale) / 2, y: (size.height - 64 * scale) / 2)
         root.scaleBy(x: scale, y: scale)
-        // A layer of its own, so the mono cut-outs only cut the character.
         root.drawLayer { layer in
             var c = layer
             c.translateBy(x: pose.offset.width, y: pose.offset.height)
@@ -424,10 +447,11 @@ struct LedgerMascotDrawing {
 
     // MARK: Helpers
 
-    /// Draws the face in ink, or, in one colour, cuts it out.
+    /// The face's context: drawn in ink, left out of the one-colour ink
+    /// pass, and the only thing the holes pass shows.
     private func cut(_ c: GraphicsContext) -> GraphicsContext {
         var f = c
-        if palette.isMono { f.blendMode = .destinationOut }
+        if pass == .ink { f.opacity = 0 }
         return f
     }
 
