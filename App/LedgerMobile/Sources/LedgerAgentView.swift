@@ -254,14 +254,9 @@ private struct LedgerAgentChatScreen: View {
                 chat
             } else {
                 LedgerAgentIntro { settingsPresented = true }
+                    .safeAreaInset(edge: .bottom, spacing: 0) { iconBar }
             }
         }
-        // The icon bar keeps its room in the safe area, the way a system tab
-        // bar does: the keyboard's inset covers it rather than adding to it,
-        // so the composer rides the keyboard in the system's own animation
-        // and nothing is laid out again halfway through it.
-        .safeAreaPadding(.bottom, barRoom)
-        .overlay { iconBar }
         .background(LedgerAgentPalette.page)
         // The page's bottom safe area: the keyboard's inset while it is up,
         // the home indicator's when it is down. Read here, outside the dock's
@@ -593,20 +588,19 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
-    /// The room the icon bar takes under the composer; none without one.
-    private var barRoom: CGFloat { tabBar == nil ? 0 : LedgerIconTabBar.height }
-
-    /// The shell's icon bar under the composer. It stays put above the home
-    /// indicator while the keyboard comes up over it, as a system tab bar
-    /// does; it is never added or taken away, which moved the composer.
+    /// The shell's icon bar under the composer, while the keyboard is down.
+    /// It is never taken out of the layout: it folds to nothing as the
+    /// keyboard comes up, in the keyboard's own spring, so the composer
+    /// rides one motion instead of two.
     @ViewBuilder private var iconBar: some View {
         if let tabBar {
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                LedgerIconTabBar(model: tabBar)
-            }
-            .ignoresSafeArea(.keyboard)
-            .accessibilityHidden(keyboardInset.keyboard > 0)
+            let folded = keyboardInset.keyboard > 0
+            LedgerIconTabBar(model: tabBar)
+                .frame(height: folded ? 0 : LedgerIconTabBar.height, alignment: .top)
+                .clipped()
+                .opacity(folded ? 0 : 1)
+                .allowsHitTesting(!folded)
+                .accessibilityHidden(folded)
         }
     }
 
@@ -801,7 +795,10 @@ private struct LedgerAgentChatScreen: View {
                 .padding(.bottom, 10)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            composer
+            VStack(spacing: 0) {
+                composer
+                iconBar
+            }
         }
         // The empty state lies over the page rather than in it, above
         // the composer as it rests and out of the keyboard's way: in the
@@ -814,7 +811,7 @@ private struct LedgerAgentChatScreen: View {
                 // up, rather than moving with the keyboard or lying
                 // under the raised composer.
                 emptyState
-                    .padding(.bottom, Self.emptyStateClearance - barRoom)
+                    .padding(.bottom, Self.emptyStateClearance)
                     .ignoresSafeArea(.keyboard)
                     .opacity(composerFocused ? 0 : 1)
                     .allowsHitTesting(!composerFocused)
@@ -1331,14 +1328,12 @@ private struct LedgerAgentChatScreen: View {
         // The keyboard's own frame, as it appears, changes and goes away: the
         // inset the dock is laid out with can lag behind a shorter keyboard.
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
-            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-                  let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else { return }
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
             let height = LedgerAgentKeyboardInset.height(of: frame)
-            withAnimation(.easeOut(duration: duration)) { keyboardInset.keyboard = height }
+            withAnimation(LedgerAgentKeyboardInset.motion) { keyboardInset.keyboard = height }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { note in
-            let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.2
-            withAnimation(.easeOut(duration: duration)) { keyboardInset.keyboard = 0 }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(LedgerAgentKeyboardInset.motion) { keyboardInset.keyboard = 0 }
         }
         .modifier(LedgerAgentKeyboardSlack(inset: keyboardInset))
         // What was typed in a conversation waits there while the user looks
@@ -2906,6 +2901,10 @@ final class LedgerAgentKeyboardInset {
     /// The page's bottom safe area: the keyboard's inset while it is up, the
     /// home indicator's when it is down.
     var page: CGFloat = 0
+
+    /// The keyboard's own spring (UIKit's keyboard curve), so what moves with
+    /// the keyboard moves in step with it and with SwiftUI's avoidance.
+    static let motion = Animation.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500, initialVelocity: 0)
     /// The room the page kept for a keyboard taller than the one now on
     /// screen, given back under the dock.
     var slack: CGFloat {
