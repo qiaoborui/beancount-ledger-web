@@ -63,9 +63,12 @@ struct LedgerIconTabBar: View {
                 guard current.sliding, let over = destination(at: drag.location.x) else { return }
                 if over != target {
                     LedgerFeedback.selection()
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { target = over }
+                    withAnimation(.easeOut(duration: 0.18)) { target = over }
                 }
-                menu?.tip = .init(title: over.barTitle, x: center(of: over))
+                // The tip rides under the finger itself, not from icon to
+                // icon; only its name changes as it crosses one.
+                let x = min(max(drag.location.x, Self.inset + 24), width - Self.inset - 24)
+                menu?.moveTip(title: over.barTitle, x: x)
             }
             .onEnded { drag in
                 defer { ended() }
@@ -91,8 +94,8 @@ struct LedgerIconTabBar: View {
     private func ended() {
         press?.timer?.cancel()
         press = nil
-        menu?.tip = nil
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { target = nil }
+        menu?.hideTip()
+        withAnimation(.easeOut(duration: 0.2)) { target = nil }
     }
 
     private func destination(at x: CGFloat) -> LedgerDestination? {
@@ -120,15 +123,17 @@ struct LedgerIconTabBar: View {
     private func item(_ destination: LedgerDestination) -> some View {
         let selected = destination == model.selection
         let grounded = destination == (target ?? model.selection)
-        return glyph(destination, selected: selected)
-            .foregroundStyle(selected || grounded ? BalancedPalette.ink : BalancedPalette.meta.opacity(0.55))
-            .frame(width: 52, height: 34)
+        return glyph(destination, selected: grounded)
+            .foregroundStyle(grounded ? BalancedPalette.ink : BalancedPalette.meta.opacity(0.7))
+            .frame(width: 64, height: 36)
+            // Claude's ground: a wide capsule, barely darker than the page,
+            // that fades from one icon to the next.
             .background {
-                if grounded {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(BalancedPalette.selected)
-                }
+                Capsule(style: .continuous)
+                    .fill(BalancedPalette.ink.opacity(0.055))
+                    .opacity(grounded ? 1 : 0)
             }
+            .animation(.easeOut(duration: 0.2), value: grounded)
             .frame(maxWidth: .infinity)
             .frame(height: Self.height)
             .contentShape(Rectangle())
@@ -179,6 +184,22 @@ final class LedgerIconTabMenu {
     var tip: Tip?
     var card: Card?
 
+    /// Follows the finger in a quick spring, so the tip glides with it
+    /// rather than jumping frame to frame; it fades and grows in the first
+    /// time.
+    func moveTip(title: String, x: CGFloat) {
+        if tip == nil {
+            withAnimation(.spring(response: 0.26, dampingFraction: 0.72)) { tip = Tip(title: title, x: x) }
+            return
+        }
+        withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.86)) { tip = Tip(title: title, x: x) }
+    }
+
+    func hideTip() {
+        guard tip != nil else { return }
+        withAnimation(.easeOut(duration: 0.16)) { tip = nil }
+    }
+
     func show(_ items: [LedgerQuickLink], from x: CGFloat, open: @escaping @MainActor (URL) -> Void) {
         guard !items.isEmpty else { return }
         tip = nil
@@ -215,13 +236,14 @@ private struct LedgerIconTabMenuLayer: View {
                     Text(tip.title)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(BalancedPalette.page)
+                        .contentTransition(.opacity)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(Capsule().fill(BalancedPalette.ink))
                         .fixedSize()
-                        .position(x: tip.x, y: proxy.size.height - LedgerIconTabBar.height - 6)
+                        .position(x: tip.x, y: proxy.size.height - LedgerIconTabBar.height - 4)
                         .allowsHitTesting(false)
-                        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: tip)
+                        .transition(.scale(scale: 0.6, anchor: .bottom).combined(with: .opacity))
                         .accessibilityHidden(true)
                 }
             }
