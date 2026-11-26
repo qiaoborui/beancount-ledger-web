@@ -89,7 +89,10 @@ final class LedgerAgentListView: UIView, UICollectionViewDelegate, UIGestureReco
     weak var model: LedgerAgentListModel?
     var onTap: () -> Void = {}
     var running = false {
-        didSet { if running != oldValue { updateJump() } }
+        didSet {
+            collection.growsWithoutAnimation = running
+            if running != oldValue { updateJump() }
+        }
     }
     /// New content moves the list to its end. Reading back turns it off;
     /// coming to rest at the end, the jump button or sending turns it on.
@@ -306,11 +309,23 @@ final class LedgerAgentListView: UIView, UICollectionViewDelegate, UIGestureReco
 /// Reports each layout, after which the list may move to its end.
 final class LedgerAgentListCollectionView: UICollectionView {
     var didLayout: (() -> Void)?
+    /// While a reply streams in, a row that grew takes its new height at
+    /// once. A hosting cell's self-sizing is otherwise applied as an animated
+    /// change: the list moved to the new end in the same pass, but the row
+    /// grew into it over a few frames, crossfading its old and new text, so
+    /// every new line made the reply jump up and settle back. FlowDown sizes
+    /// a row before showing it and moves the row and the offset together;
+    /// here the row's size is applied in the same frame as the offset.
+    var growsWithoutAnimation = false
     private var lastContentHeight: CGFloat = -1
     private var lastHeight: CGFloat = -1
 
     override func layoutSubviews() {
-        super.layoutSubviews()
+        if growsWithoutAnimation {
+            UIView.performWithoutAnimation { super.layoutSubviews() }
+        } else {
+            super.layoutSubviews()
+        }
         guard contentSize.height != lastContentHeight || bounds.height != lastHeight else { return }
         lastContentHeight = contentSize.height
         lastHeight = bounds.height
