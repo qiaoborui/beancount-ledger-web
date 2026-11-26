@@ -84,7 +84,7 @@ struct LedgerAgentLiveTimeline: View {
                     }
                     // Only the new block's opacity animates; nothing moves,
                     // so the page following the reply never races a slide.
-                    .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+                    .modifier(LedgerAgentFadeIn())
                 }
             }
             // Streamed text only grows, but its Markdown does not (a table's
@@ -192,10 +192,32 @@ struct LedgerAgentRoundView: View, Equatable {
                             LedgerAgentThought(step: steps[index], reveals: reveals, folded: display != .expanded)
                         }
                     }
-                    .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+                    .modifier(LedgerAgentFadeIn(active: reveals))
                 }
             }
         }
+    }
+}
+
+/// Fades a block or a step in as it first appears in a streaming turn,
+/// without animating its arrival. An opacity transition carrying its own
+/// animation made the insertion an animated change: the rows under it slid
+/// to their new places, and the list cell, sized by its hosting
+/// configuration, grew over the same 0.3 s while the list had already moved
+/// to the new end, so each new paragraph or tool call made the reply jump
+/// and settle. Here the block takes its place at once and only its own
+/// opacity changes, in a transaction of its own.
+struct LedgerAgentFadeIn: ViewModifier {
+    var active = true
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(!active || shown ? 1 : 0)
+            .onAppear {
+                guard active, !shown else { return }
+                withLedgerAnimation(.easeInOut(duration: 0.3)) { shown = true }
+            }
     }
 }
 

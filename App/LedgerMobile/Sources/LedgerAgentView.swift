@@ -588,12 +588,15 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
-    /// The shell's icon bar under the composer, while the keyboard is down;
-    /// the keyboard covers where it was and the composer rides on it.
+    /// The shell's icon bar under the composer, while the keyboard is down.
+    /// It is never taken out of the layout: it folds to nothing as the
+    /// keyboard comes up, in the keyboard's own spring, so the composer
+    /// rides one motion instead of two.
+    /// The keyboard is read in the slot alone: read here, every keyboard
+    /// change would draw the whole page again as the animation starts.
     @ViewBuilder private var iconBar: some View {
-        if let tabBar, keyboardInset.keyboard == 0 {
-            LedgerIconTabBar(model: tabBar)
-                .transition(.opacity)
+        if let tabBar {
+            LedgerAgentIconBarSlot(model: tabBar, inset: keyboardInset)
         }
     }
 
@@ -806,9 +809,7 @@ private struct LedgerAgentChatScreen: View {
                 emptyState
                     .padding(.bottom, Self.emptyStateClearance)
                     .ignoresSafeArea(.keyboard)
-                    .opacity(composerFocused ? 0 : 1)
-                    .allowsHitTesting(!composerFocused)
-                    .animation(.easeOut(duration: 0.2), value: composerFocused)
+                    .modifier(LedgerAgentKeyboardFade(inset: keyboardInset))
             }
         }
         // Bills and screenshots can also be dragged in from Photos, Files
@@ -1308,9 +1309,10 @@ private struct LedgerAgentChatScreen: View {
             }
         }
         // The dock is anchored to the bottom, so the second row opens upward
-        // under the field. Only this change is animated here; the keyboard
-        // moves the inset with the system's own animation.
-        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: composerExpanded)
+        // under the field. Only this change is animated here, in the
+        // keyboard's spring: focus opens the row as the keyboard comes up,
+        // and two springs at once read as a stutter.
+        .animation(LedgerAgentKeyboardInset.motion, value: composerExpanded)
         .onChange(of: composerFocused) { _, focused in if focused { rowPinned = false } }
         // The chip's menu is done with once a model or an effort is chosen.
         .onChange(of: settings.modelTitle) { _, _ in rowPinned = false }
@@ -1321,14 +1323,12 @@ private struct LedgerAgentChatScreen: View {
         // The keyboard's own frame, as it appears, changes and goes away: the
         // inset the dock is laid out with can lag behind a shorter keyboard.
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
-            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
-                  let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double else { return }
+            guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
             let height = LedgerAgentKeyboardInset.height(of: frame)
-            withAnimation(.easeOut(duration: duration)) { keyboardInset.keyboard = height }
+            withAnimation(LedgerAgentKeyboardInset.motion) { keyboardInset.keyboard = height }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { note in
-            let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.2
-            withAnimation(.easeOut(duration: duration)) { keyboardInset.keyboard = 0 }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            withAnimation(LedgerAgentKeyboardInset.motion) { keyboardInset.keyboard = 0 }
         }
         .modifier(LedgerAgentKeyboardSlack(inset: keyboardInset))
         // What was typed in a conversation waits there while the user looks
@@ -2896,6 +2896,10 @@ final class LedgerAgentKeyboardInset {
     /// The page's bottom safe area: the keyboard's inset while it is up, the
     /// home indicator's when it is down.
     var page: CGFloat = 0
+
+    /// The keyboard's own spring (UIKit's keyboard curve), so what moves with
+    /// the keyboard moves in step with it and with SwiftUI's avoidance.
+    static let motion = Animation.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500, initialVelocity: 0)
     /// The room the page kept for a keyboard taller than the one now on
     /// screen, given back under the dock.
     var slack: CGFloat {
@@ -2914,6 +2918,42 @@ final class LedgerAgentKeyboardInset {
         let rect = window.convert(frame, from: nil)
         guard rect.maxY >= window.bounds.maxY - 1 else { return 0 }
         return max(0, window.bounds.maxY - rect.minY)
+    }
+}
+
+/// Fades the empty state while the keyboard is up, in the keyboard's own
+/// spring. Keyed on the keyboard rather than on focus: the first focus of a
+/// launch holds the main thread while the keyboard loads, and a fade started
+/// with the focus was over before a frame of it was drawn. The keyboard's
+/// frame arrives once it is loaded, as it starts to move. Its own modifier,
+/// so a keyboard change redraws this and not the page.
+private struct LedgerAgentKeyboardFade: ViewModifier {
+    let inset: LedgerAgentKeyboardInset
+
+    func body(content: Content) -> some View {
+        let up = inset.keyboard > 0
+        content
+            .opacity(up ? 0 : 1)
+            .allowsHitTesting(!up)
+    }
+}
+
+/// The icon bar under the composer, folded away while the keyboard is up.
+/// Its own view, so a keyboard change redraws this row and not the page.
+private struct LedgerAgentIconBarSlot: View {
+    let model: LedgerIconTabBarModel
+    let inset: LedgerAgentKeyboardInset
+    /// The shell draws the bar itself while the tabs slide.
+    @Environment(\.ledgerIconTabBarHidden) private var hidden
+
+    var body: some View {
+        let folded = inset.keyboard > 0
+        LedgerIconTabBar(model: model)
+            .frame(height: folded ? 0 : LedgerIconTabBar.height, alignment: .top)
+            .clipped()
+            .opacity(folded || hidden ? 0 : 1)
+            .allowsHitTesting(!folded && !hidden)
+            .accessibilityHidden(folded)
     }
 }
 

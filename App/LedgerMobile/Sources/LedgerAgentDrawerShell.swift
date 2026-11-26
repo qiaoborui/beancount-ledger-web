@@ -141,6 +141,8 @@ final class LedgerAgentDrawerController: UIViewController, UIGestureRecognizerDe
     static let commitDistance: CGFloat = 100
     static let springDuration: TimeInterval = 0.5
     static let springDamping: CGFloat = 0.9
+    /// The icon bar's row (`LedgerIconTabBar.height`, in the app target).
+    static let iconBarHeight: CGFloat = 44
 
     private let pageHost = UIHostingController(rootView: AnyView(EmptyView()))
     private var drawerHost: UIHostingController<AnyView>?
@@ -594,6 +596,9 @@ final class LedgerAgentDrawerController: UIViewController, UIGestureRecognizerDe
         guard abs(moved.x) > abs(moved.y) * 1.2 else { return false }
         guard mode == .opens ? moved.x > 0 : moved.x < 0 else { return false }
         if mode == .closes { return true }
+        // The icon bar's row along the bottom: a finger sliding there changes
+        // tab, it does not pull the drawer out.
+        if start.y >= view.bounds.height - view.safeAreaInsets.bottom - Self.iconBarHeight { return false }
         if start.x <= view.safeAreaInsets.left + 24 { return true }
         guard let hit = view.hitTest(start, with: nil) else { return true }
         return !Self.claimsRightwardDrag(from: hit, upTo: view)
