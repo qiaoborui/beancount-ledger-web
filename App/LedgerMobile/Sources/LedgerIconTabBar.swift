@@ -24,7 +24,7 @@ struct LedgerIconTabBar: View {
 
     static let height: CGFloat = 44
     private static let inset: CGFloat = 12
-    private static let holdDelay: Duration = .milliseconds(420)
+    private static let holdDelay: Duration = .milliseconds(260)
 
     private struct Press {
         var sliding = false
@@ -203,7 +203,7 @@ final class LedgerIconTabMenu {
     func show(_ items: [LedgerQuickLink], from x: CGFloat, open: @escaping @MainActor (URL) -> Void) {
         guard !items.isEmpty else { return }
         tip = nil
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) { card = Card(items: items, x: x, open: open) }
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) { card = Card(items: items, x: x, open: open) }
     }
 
     func close() {
@@ -337,12 +337,23 @@ private struct LedgerTabSelectedKey: EnvironmentKey {
     static let defaultValue = true
 }
 
+private struct LedgerIconTabBarHiddenKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     /// The icon bar of the shell this page is a tab of; nil on iPad, on a
     /// remote ledger and on pages that are not a tab.
     var ledgerIconTabBar: LedgerIconTabBarModel? {
         get { self[LedgerIconTabBarKey.self] }
         set { self[LedgerIconTabBarKey.self] = newValue }
+    }
+
+    /// True while the shell slides from one tab to the next and draws the
+    /// bar itself, still, over both: the pages hide their own.
+    var ledgerIconTabBarHidden: Bool {
+        get { self[LedgerIconTabBarHiddenKey.self] }
+        set { self[LedgerIconTabBarHiddenKey.self] = newValue }
     }
 
     /// False while this tab is kept alive behind another one.
@@ -357,15 +368,35 @@ extension View {
     /// behind it so content scrolled under it does not show through.
     func ledgerIconTabBar(_ model: LedgerIconTabBarModel) -> some View {
         safeAreaInset(edge: .bottom, spacing: 0) {
-            LedgerIconTabBar(model: model)
-                .background(alignment: .bottom) {
-                    LinearGradient(stops: [.init(color: BalancedPalette.page.opacity(0), location: 0),
-                                           .init(color: BalancedPalette.page, location: 0.4)],
-                                   startPoint: .top, endPoint: .bottom)
-                        .padding(.top, -20)
-                        .ignoresSafeArea(edges: .bottom)
-                        .allowsHitTesting(false)
-                }
+            LedgerIconTabBarInset(model: model)
+        }
+    }
+}
+
+/// A ledger page's bar on its fading ground, hidden while the shell slides.
+private struct LedgerIconTabBarInset: View {
+    let model: LedgerIconTabBarModel
+    @Environment(\.ledgerIconTabBarHidden) private var hidden
+
+    var body: some View {
+        LedgerIconTabBar(model: model)
+            .ledgerIconTabBarGround()
+            .opacity(hidden ? 0 : 1)
+            .allowsHitTesting(!hidden)
+    }
+}
+
+extension View {
+    /// The page's ground fading in behind the bar, so content scrolled under
+    /// it does not show through.
+    func ledgerIconTabBarGround() -> some View {
+        background(alignment: .bottom) {
+            LinearGradient(stops: [.init(color: BalancedPalette.page.opacity(0), location: 0),
+                                   .init(color: BalancedPalette.page, location: 0.4)],
+                           startPoint: .top, endPoint: .bottom)
+                .padding(.top, -20)
+                .ignoresSafeArea(edges: .bottom)
+                .allowsHitTesting(false)
         }
     }
 }
@@ -374,32 +405,86 @@ extension View {
 /// stack once it has been opened, as a `TabView` would, but the system tab
 /// bar is not used: every tab draws `LedgerIconTabBar` itself, so on
 /// 账本助手 the bar is part of the page the history drawer pushes aside.
+///
+/// Changing tab slides the pages sideways, as Claude's do: the new one in
+/// from the side of its icon, the old one out the other way. The bar stays
+/// still: while the pages move they hide their own and the shell draws one
+/// over both.
 struct LedgerIconTabShell<Content: View>: View {
     let model: LedgerIconTabBarModel
     @ViewBuilder var content: (LedgerDestination) -> Content
     /// The tabs opened so far; they stay mounted behind the selected one.
     @State private var opened: Set<LedgerDestination> = []
     @State private var menu = LedgerIconTabMenu()
+    @State private var width: CGFloat = 0
+    /// Where each page is drawn from, sideways, while they slide.
+    @State private var offsets: [LedgerDestination: CGFloat] = [:]
+    /// The page sliding out; drawn until the slide is over.
+    @State private var leaving: LedgerDestination?
+    @State private var slideCount = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static var motion: Animation { .spring(response: 0.42, dampingFraction: 0.92) }
 
     var body: some View {
         ZStack {
             ForEach(model.destinations) { destination in
                 if destination == model.selection || opened.contains(destination) {
                     let selected = destination == model.selection
+                    let shown = selected || destination == leaving
                     content(destination)
                         .environment(\.ledgerIconTabBar, model)
                         .environment(\.ledgerTabSelected, selected)
-                        .opacity(selected ? 1 : 0)
+                        .environment(\.ledgerIconTabBarHidden, leaving != nil)
+                        .offset(x: offsets[destination] ?? 0)
+                        .opacity(shown ? 1 : 0)
                         .allowsHitTesting(selected)
                         .accessibilityHidden(!selected)
-                        .zIndex(selected ? 1 : 0)
+                        .zIndex(selected ? 2 : shown ? 1 : 0)
                 }
             }
         }
-        .onChange(of: model.selection, initial: true) { _, selection in
-            opened.insert(selection)
+        .overlay(alignment: .bottom) {
+            if leaving != nil {
+                LedgerIconTabBar(model: model)
+                    .ledgerIconTabBarGround()
+                    .allowsHitTesting(false)
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .onChange(of: model.selection, initial: true) { old, new in
+            opened.insert(new)
+            if old != new { slide(from: old, to: new) }
         }
         .ledgerIconTabMenuLayer(menu)
+    }
+
+    private func slide(from old: LedgerDestination, to new: LedgerDestination) {
+        guard !reduceMotion, width > 0,
+              let from = model.destinations.firstIndex(of: old),
+              let to = model.destinations.firstIndex(of: new) else { return }
+        let direction: CGFloat = to > from ? 1 : -1
+        slideCount += 1
+        let current = slideCount
+        // Placed first, without animation, so the next frame starts from
+        // the side; then both move together.
+        var place = Transaction()
+        place.disablesAnimations = true
+        withTransaction(place) {
+            leaving = old
+            offsets = [new: direction * width, old: 0]
+        }
+        DispatchQueue.main.async {
+            guard current == slideCount else { return }
+            withAnimation(Self.motion) {
+                offsets[new] = 0
+                offsets[old] = -direction * width * 0.3
+            } completion: {
+                guard current == slideCount else { return }
+                leaving = nil
+                offsets = [:]
+            }
+        }
     }
 }
 #endif

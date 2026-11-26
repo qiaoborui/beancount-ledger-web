@@ -2943,14 +2943,16 @@ private struct LedgerAgentKeyboardFade: ViewModifier {
 private struct LedgerAgentIconBarSlot: View {
     let model: LedgerIconTabBarModel
     let inset: LedgerAgentKeyboardInset
+    /// The shell draws the bar itself while the tabs slide.
+    @Environment(\.ledgerIconTabBarHidden) private var hidden
 
     var body: some View {
         let folded = inset.keyboard > 0
         LedgerIconTabBar(model: model)
             .frame(height: folded ? 0 : LedgerIconTabBar.height, alignment: .top)
             .clipped()
-            .opacity(folded ? 0 : 1)
-            .allowsHitTesting(!folded)
+            .opacity(folded || hidden ? 0 : 1)
+            .allowsHitTesting(!folded && !hidden)
             .accessibilityHidden(folded)
     }
 }
