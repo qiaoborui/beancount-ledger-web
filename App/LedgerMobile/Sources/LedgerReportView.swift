@@ -226,7 +226,7 @@ struct LedgerReportView: View {
                 ReportCoverageView(coverage: data.coverage, onRecord: openRecord, onImport: openImports)
             }
         case .assistant:
-            if session.agentFloatsInTabBar {
+            if session.agentIsTab {
                 Button(action: askAssistant) {
                     Label("问账本助手：总结这一期", systemImage: "sparkles")
                 }

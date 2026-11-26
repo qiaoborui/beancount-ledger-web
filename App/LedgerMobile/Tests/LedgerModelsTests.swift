@@ -13,23 +13,53 @@ final class LedgerModelsTests: XCTestCase {
 
     func testSearchRoutesThroughMoreUnlessItIsATabOrFloats() {
         for tabs: [LedgerDestination] in [[.overview, .transactions, .accounts], [.incomeExpense]] {
-            // The assistant floats beside the tab bar: search opens from 更多.
-            let withAgent = LedgerDestination.compactDirectDestinations(tabs, agentFloats: true)
-            XCTAssertEqual(withAgent, tabs)
+            // The assistant is the first tab: search opens from 更多.
+            let withAgent = LedgerDestination.compactDirectDestinations(tabs, agentIsTab: true)
+            XCTAssertEqual(withAgent, [.agent] + tabs)
+            XCTAssertFalse(LedgerDestination.agent.isCompactOverflow(in: withAgent))
+            XCTAssertEqual(LedgerDestination.agent.compactSelection(in: withAgent), .agent)
             XCTAssertTrue(LedgerDestination.search.isCompactOverflow(in: withAgent))
             XCTAssertEqual(LedgerDestination.search.compactSelection(in: withAgent), .settings)
-            // Without the assistant, search keeps its floating button.
-            let withoutAgent = LedgerDestination.compactDirectDestinations(tabs, agentFloats: false)
+            // Without the assistant, search keeps its floating button and the
+            // assistant's page is in 更多.
+            let withoutAgent = LedgerDestination.compactDirectDestinations(tabs, agentIsTab: false)
             XCTAssertFalse(LedgerDestination.search.isCompactOverflow(in: withoutAgent))
             XCTAssertEqual(LedgerDestination.search.compactSelection(in: withoutAgent), .search)
+            XCTAssertTrue(LedgerDestination.agent.isCompactOverflow(in: withoutAgent))
             XCTAssertFalse(LedgerDestination.settings.isCompactOverflow(in: tabs))
             XCTAssertTrue(LedgerDestination.imports.isCompactOverflow(in: withAgent))
             XCTAssertEqual(LedgerDestination.imports.compactSelection(in: withAgent), .settings)
         }
         let searchTab: [LedgerDestination] = [.overview, .search]
-        XCTAssertEqual(LedgerDestination.compactDirectDestinations(searchTab, agentFloats: false), searchTab)
+        XCTAssertEqual(LedgerDestination.compactDirectDestinations(searchTab, agentIsTab: false), searchTab)
         XCTAssertFalse(LedgerDestination.search.isCompactOverflow(in: searchTab))
         XCTAssertEqual(LedgerDestination.search.compactSelection(in: searchTab), .search)
+    }
+
+    func testIconBarPutsTheAssistantFirstAndMoreLast() {
+        XCTAssertEqual(LedgerDestination.iconBarDestinations([.overview, .transactions, .accounts]),
+                       [.agent, .overview, .transactions, .accounts, .settings])
+        XCTAssertEqual(LedgerDestination.transactions.barTitle, "流水")
+        XCTAssertEqual(LedgerDestination.agent.barTitle, "助手")
+    }
+
+    func testLaunchPageDefaultsToTheAssistantAndMigratesTheOldSwitch() throws {
+        let suite = "LedgerModelsTests.launch.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(LedgerLaunchPage.stored(in: defaults), .assistant)
+        // 打开 App 时进入助手, turned off before the setting existed.
+        defaults.set(false, forKey: LedgerLaunchPage.legacyDefaultsKey)
+        XCTAssertEqual(LedgerLaunchPage.stored(in: defaults), .ledger)
+        defaults.set(true, forKey: LedgerLaunchPage.legacyDefaultsKey)
+        XCTAssertEqual(LedgerLaunchPage.stored(in: defaults), .assistant)
+        // A choice made in 设置 wins and replaces the old switch.
+        LedgerLaunchPage.ledger.store(in: defaults)
+        XCTAssertEqual(LedgerLaunchPage.stored(in: defaults), .ledger)
+        XCTAssertNil(defaults.object(forKey: LedgerLaunchPage.legacyDefaultsKey))
+        XCTAssertEqual(LedgerLaunchPage.assistant.destination(tabs: [.transactions]), .agent)
+        XCTAssertEqual(LedgerLaunchPage.ledger.destination(tabs: [.transactions, .overview]), .transactions)
+        XCTAssertEqual(LedgerLaunchPage.ledger.destination(tabs: []), .overview)
     }
 
     func testCompactTabsPreserveOrderDeduplicateLimitAndFallback() {

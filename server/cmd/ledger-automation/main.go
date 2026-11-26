@@ -109,11 +109,13 @@ func printCheck(output io.Writer, runner *automation.Runner, ctx context.Context
 
 func configFromEnv(getenv func(string) string, logger *slog.Logger) (automation.Config, error) {
 	cfg := automation.Config{
-		Home:       getenv("LEDGER_AUTOMATION_HOME"),
-		Repo:       getenv("LEDGER_AUTOMATION_REPO"),
-		Branch:     getenv("LEDGER_AUTOMATION_BRANCH"),
-		RunsBranch: getenv("LEDGER_AUTOMATION_RUNS_BRANCH"),
-		Entrypoint: getenv("LEDGER_AUTOMATION_ENTRYPOINT"),
+		Home:         getenv("LEDGER_AUTOMATION_HOME"),
+		Repo:         getenv("LEDGER_AUTOMATION_REPO"),
+		Branch:       getenv("LEDGER_AUTOMATION_BRANCH"),
+		RunsBranch:   getenv("LEDGER_AUTOMATION_RUNS_BRANCH"),
+		MemoryBranch: getenv("LEDGER_AUTOMATION_MEMORY_BRANCH"),
+		MemoryMode:   getenv("LEDGER_AUTOMATION_MEMORY"),
+		Entrypoint:   getenv("LEDGER_AUTOMATION_ENTRYPOINT"),
 		Model: automation.ModelConfig{
 			API:      getenv("LEDGER_AUTOMATION_MODEL_API"),
 			BaseURL:  getenv("LEDGER_AUTOMATION_MODEL_BASE_URL"),

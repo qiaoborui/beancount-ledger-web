@@ -84,9 +84,14 @@ type turnRequestV1 struct {
 	// Attachments are the files of the conversation, each copied into the
 	// runtime directory by the shell; those sent with this question are new.
 	Attachments []attachmentV1 `json:"attachments,omitempty"`
-	// MemoryPath is the ledger's memory.md, which the system prompt carries
-	// and the memory tools rewrite; empty turns memory off.
+	// MemoryPath is the ledger's memory folder (MEMORY.md and topic files,
+	// see agentmemory), whose MEMORY.md and index the system prompt carries
+	// and whose files the memory tools read and change; empty turns memory
+	// off. An older shell names the single memory.md, which moves into the
+	// folder beside it.
 	MemoryPath string `json:"memoryPath,omitempty"`
+	// MemoryReadOnly offers only read_memory, for an unattended run.
+	MemoryReadOnly bool `json:"memoryReadOnly,omitempty"`
 	// StreamEvents asks the observer for the streaming event kinds besides
 	// "model" and "tool"; see turnEventV1.
 	StreamEvents bool   `json:"streamEvents,omitempty"`
@@ -567,6 +572,7 @@ func runTurnIn(ctx context.Context, cancel context.CancelFunc, network *turnHTTP
 			if remembered, err = openMemory(request.MemoryPath); err != nil {
 				return files, err
 			}
+			remembered.readOnly = request.MemoryReadOnly
 			*memory = remembered
 			for _, tool := range remembered.tools() {
 				tools = append(tools, tool)

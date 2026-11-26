@@ -12,9 +12,9 @@ final class LocalOnlySurfaceUITests: XCTestCase {
         XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
-        XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 40))
+        XCTAssertTrue(app.compactTab("更多").waitForExistence(timeout: 40))
         func openSettings() {
-            app.tabBars.buttons["更多"].tap()
+            app.compactTab("更多").tap()
             let settings = app.buttons["more-settings"]
             for _ in 0..<5 where !settings.isHittable { app.swipeUp() }
             settings.tap()
@@ -37,7 +37,7 @@ final class LocalOnlySurfaceUITests: XCTestCase {
         add(shot)
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.compactTab("更多").waitForExistence(timeout: 20))
         openSettings()
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         XCTAssertEqual(toggle.value as? String, "0")
@@ -73,7 +73,7 @@ final class LocalOnlySurfaceUITests: XCTestCase {
         XCTAssertFalse(app.buttons["ledger-sync-status"].exists)
         XCTAssertFalse(app.buttons["隐藏金额"].exists)
         XCTAssertFalse(app.buttons["显示金额"].exists)
-        app.tabBars.buttons["更多"].tap()
+        app.compactTab("更多").tap()
         app.buttons["more-settings"].tap()
         // The device-only rows sit below the general sections.
         let localFiles = app.buttons["settings-local-files"]

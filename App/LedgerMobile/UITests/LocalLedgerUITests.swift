@@ -42,8 +42,8 @@ final class LocalLedgerUITests: XCTestCase {
         seed.tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(app.staticTexts["pagination-fixture-ready"].waitForExistence(timeout: 30))
-        app.tabBars.buttons["流水"].tap()
-        if !app.textFields["transaction-quick-search"].waitForExistence(timeout: 3) { app.tabBars.buttons["流水"].tap() }
+        app.compactTab("流水").tap()
+        if !app.textFields["transaction-quick-search"].waitForExistence(timeout: 3) { app.compactTab("流水").tap() }
         XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 10), app.debugDescription)
         func capture(_ name: String) {
             let attachment = XCTAttachment(screenshot: app.screenshot())
@@ -132,7 +132,7 @@ final class LocalLedgerUITests: XCTestCase {
         shot.lifetime = .keepAlways
         add(shot)
         XCTAssertFalse(appeared, "Old privacy splash must not replace the new launch while authentication is pending")
-        XCTAssertFalse(app.tabBars.firstMatch.exists, "Protected content must stay inaccessible during authentication")
+        XCTAssertFalse(app.compactTabBarExists, "Protected content must stay inaccessible during authentication")
         XCTAssertTrue(app.otherElements["ledger-privacy-cover"].exists)
         XCTAssertFalse(app.buttons["local-ledger-create"].exists)
         XCTAssertFalse(app.buttons["选择其他账本"].exists)
@@ -161,7 +161,7 @@ final class LocalLedgerUITests: XCTestCase {
         overview.name = "overview-without-loading-card"
         overview.lifetime = .keepAlways
         add(overview)
-        app.tabBars.buttons["流水"].tap()
+        app.compactTab("流水").tap()
         XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["正在读取流水"].exists)
         XCTAssertFalse(app.staticTexts["统计中…"].exists)
@@ -184,9 +184,9 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap()
         app.buttons["local-ledger-confirm-create"].tap()
-        app.tabBars.buttons["流水"].tap()
+        app.compactTab("流水").tap()
         if !app.buttons["transaction-actions"].waitForExistence(timeout: 3) {
-            app.tabBars.buttons["流水"].tap()
+            app.compactTab("流水").tap()
         }
         XCTAssertTrue(app.buttons["transaction-create-local"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["transaction-create-local"].tap()
@@ -305,10 +305,10 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["关闭"].firstMatch.tap()
         // Native global search uses complete metadata candidates, not the
         // legacy all-history transaction array. Drill-down must survive refresh.
-        // On the local ledger 账本助手 takes the floating button, and search
-        // opens from 更多 unless it is one of the chosen tabs.
-        XCTAssertTrue(app.tabBars.buttons["助手"].waitForExistence(timeout: 5), app.debugDescription)
-        app.tabBars.buttons["更多"].tap()
+        // On the local ledger 账本助手 is the first tab, and search opens
+        // from 更多 unless it is one of the chosen tabs.
+        XCTAssertTrue(app.compactTab("助手").waitForExistence(timeout: 5), app.debugDescription)
+        app.compactTab("更多").tap()
         let searchEntry = app.buttons["more-search"]
         XCTAssertTrue(searchEntry.waitForExistence(timeout: 5), app.debugDescription)
         searchEntry.tap()
@@ -345,7 +345,7 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["交易详情"].waitForExistence(timeout: 10))
         app.navigationBars["交易详情"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(historyRows.waitForExistence(timeout: 15))
-        app.tabBars.buttons["流水"].tap()
+        app.compactTab("流水").tap()
         XCTAssertTrue(editedRow.waitForExistence(timeout: 15))
         let date = DateFormatter()
         date.locale = Locale(identifier: "en_US_POSIX")
@@ -362,7 +362,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.buttons["完成"].firstMatch.tap()
         // open(URL:) relaunches the isolated app into its overview root. Return
         // explicitly to the transaction list before testing mutable row actions.
-        app.tabBars.buttons["流水"].tap()
+        app.compactTab("流水").tap()
         XCTAssertTrue(app.textFields["transaction-quick-search"].waitForExistence(timeout: 10))
         XCTAssertTrue(editedRow.waitForExistence(timeout: 15))
         editedRow.press(forDuration: 1)
@@ -387,7 +387,7 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(app.revealLedgerSetupMenu())
         app.buttons["local-ledger-create"].tap(); app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30))
-        app.tabBars.buttons["流水"].tap()
+        app.compactTab("流水").tap()
         app.buttons["transaction-create-local"].tap()
         XCTAssertTrue(app.buttons["高级"].waitForExistence(timeout: 5)); app.buttons["高级"].tap()
         // The backend requires a nonempty payee. A generic payee with blank
@@ -453,7 +453,7 @@ final class LocalLedgerUITests: XCTestCase {
         XCTAssertTrue(app.buttons["local-ledger-confirm-create"].waitForExistence(timeout: 5))
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30), app.debugDescription)
-        app.tabBars.buttons["流水"].tap()
+        app.compactTab("流水").tap()
         XCTAssertTrue(app.buttons["transaction-create-local"].waitForExistence(timeout: 5))
         app.buttons["transaction-create-local"].tap()
         XCTAssertTrue(app.buttons["高级"].waitForExistence(timeout: 5))
@@ -478,7 +478,7 @@ final class LocalLedgerUITests: XCTestCase {
         app.terminate()
         app.launch()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 30), app.debugDescription)
-        app.tabBars.buttons["流水"].tap()
+        app.compactTab("流水").tap()
         XCTAssertTrue(app.staticTexts["Offline coffee"].firstMatch.waitForExistence(timeout: 10))
         #else
         throw XCTSkip("Simulator-only isolated authentication fixture; physical runtime uses integration tests and device authentication")

@@ -67,6 +67,9 @@ struct LedgerAgentView: View {
                 if let repository = session.localRepository {
                     sessions.bind(ledger: repository.descriptor.id, storage: .live(repository))
                     LedgerAgentCloudSync.shared.attach(repository)
+                    // The memory branch of a Git ledger syncs once the
+                    // assistant opens, whether or not iCloud does.
+                    LedgerAgentMemorySync.shared.attach(repository)
                     attachAutomations(repository)
                     // After the bind, so AI 开账's greeting opens the new
                     // ledger's conversation instead of being dropped as the
@@ -171,6 +174,11 @@ private struct LedgerAgentChatScreen: View {
     /// True while a drag from another app hovers the conversation.
     @State private var dropTargeted = false
     @FocusState private var composerFocused: Bool
+    /// The shell's icon bar, drawn under the composer when 账本助手 is a tab,
+    /// so the drawer pushes it aside with the page.
+    @Environment(\.ledgerIconTabBar) private var tabBar
+    /// False while another tab is in front of this one.
+    @Environment(\.ledgerTabSelected) private var tabSelected
     /// The keyboard's own height and the bottom inset the page was given,
     /// read by the dock alone. Switching input methods can leave the inset
     /// at a taller keyboard's height than the one on screen (the Pinyin
@@ -238,9 +246,16 @@ private struct LedgerAgentChatScreen: View {
         let warning: LedgerAgentBranchWarning
     }
 
-    var body: some View {
+    // The page is built in steps (page, presented, lifecycle, body) so the
+    // type checker sees a few short modifier chains instead of one long one.
+    private var page: some View {
         Group {
-            if settings.isReady { chat } else { LedgerAgentIntro { settingsPresented = true } }
+            if settings.isReady {
+                chat
+            } else {
+                LedgerAgentIntro { settingsPresented = true }
+                    .safeAreaInset(edge: .bottom, spacing: 0) { iconBar }
+            }
         }
         .background(LedgerAgentPalette.page)
         // The page's bottom safe area: the keyboard's inset while it is up,
@@ -261,6 +276,10 @@ private struct LedgerAgentChatScreen: View {
                                 ? AnyView(LedgerAgentBarTitle(text: conversationIsFresh
                                     ? String(localized: "新对话") : sessions.title(of: conversation)))
                                 : nil)
+    }
+
+    private var presented: some View {
+        page
         .sheet(isPresented: $settingsPresented) {
             NavigationStack { LedgerAgentSettingsView() }
                 .ledgerPrivacyProtectedSheet()
@@ -315,14 +334,18 @@ private struct LedgerAgentChatScreen: View {
             Text(confirmationMessage(confirmation))
         }
         .sensoryFeedback(.success, trigger: copies)
+    }
+
+    private var lifecycle: some View {
+        presented
         // An edit belongs to its conversation.
         .onChange(of: conversation.id) { _, _ in cancelEditing() }
         .onAppear {
             drawer.openSettings = { settingsPresented = true }
             drawer.revise = { revise($0) }
             drawer.ask = { ask($0) }
-            conversation.isOnScreen = true
-            LedgerAgentBackgroundRun.shared.conversationSeen()
+            conversation.isOnScreen = tabSelected
+            if tabSelected { LedgerAgentBackgroundRun.shared.conversationSeen() }
             resumeIfInterrupted()
             // Only past a minute: the greeting reads the hour, and a new
             // value redraws the whole page.
@@ -330,6 +353,17 @@ private struct LedgerAgentChatScreen: View {
             if now.timeIntervalSince(greetingNow) >= 60 { greetingNow = now }
         }
         .onDisappear { conversation.isOnScreen = false }
+        // As a tab the page stays mounted behind the others: it is on screen
+        // only while its tab is the selected one.
+        .onChange(of: tabSelected) { _, selected in
+            conversation.isOnScreen = selected
+            if selected {
+                LedgerAgentBackgroundRun.shared.conversationSeen()
+                resumeIfInterrupted()
+            } else {
+                composerFocused = false
+            }
+        }
         // A turn the system cut short goes on by itself once the user is
         // back on this screen with the ledger unlocked.
         .onChange(of: scenePhase) { _, phase in
@@ -380,6 +414,10 @@ private struct LedgerAgentChatScreen: View {
         .onChange(of: conversation.phase) { _, phase in
             if case .failed(.interrupted, _) = phase { resumeIfInterrupted() }
         }
+    }
+
+    var body: some View {
+        lifecycle
         .task {
             guard !firstAppearance.readCrashReport else { return }
             firstAppearance.readCrashReport = true
@@ -547,6 +585,15 @@ private struct LedgerAgentChatScreen: View {
     private var historyButton: some View {
         circleButton("sidebar.left", label: "历史对话", identifier: "ledger-agent-history") {
             drawer.open()
+        }
+    }
+
+    /// The shell's icon bar under the composer, while the keyboard is down;
+    /// the keyboard covers where it was and the composer rides on it.
+    @ViewBuilder private var iconBar: some View {
+        if let tabBar, keyboardInset.keyboard == 0 {
+            LedgerIconTabBar(model: tabBar)
+                .transition(.opacity)
         }
     }
 
@@ -740,7 +787,12 @@ private struct LedgerAgentChatScreen: View {
                 .padding(.trailing, 16)
                 .padding(.bottom, 10)
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                composer
+                iconBar
+            }
+        }
         // The empty state lies over the page rather than in it, above
         // the composer as it rests and out of the keyboard's way: in the
         // scroll content it was centred in the space left above the
@@ -1046,6 +1098,11 @@ private struct LedgerAgentChatScreen: View {
             // over the greeting at any type size.
             LedgerMarkCanvas(progress: 1)
                 .frame(width: 60, height: 60)
+                // Where the launch cover's mark lands (`LedgerLaunchHandoff`).
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    LedgerLaunchHandoff.greetingMark = tabSelected ? frame : nil
+                }
+                .onDisappear { LedgerLaunchHandoff.greetingMark = nil }
                 .padding(.bottom, -8)
                 .accessibilityHidden(true)
             Text(BalancedReading.serifified(Self.greeting(at: greetingNow), size: 30, relativeTo: .title))
@@ -2561,11 +2618,9 @@ private struct LedgerAgentRunning: View {
     }
 }
 
-/// Whether the app opens on 账本助手.
+/// Launches that skip 启动时打开 (`LedgerLaunchPage`).
 enum LedgerAgentLaunch {
-    static let storageKey = "ledger.agent.opensAtLaunch"
-
-    /// A UI test or preview fixture launch, which expects the tabs.
+    /// A UI test or preview fixture launch, which expects the ledger's tabs.
     static var isFixture: Bool {
         ProcessInfo.processInfo.arguments.contains {
             $0.hasPrefix("--safe-") || $0.hasPrefix("--local-") || $0.hasPrefix("--initial-tab=")

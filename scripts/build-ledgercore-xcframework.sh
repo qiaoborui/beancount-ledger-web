@@ -34,6 +34,7 @@ mkdir -p "${source_root}/internal"
 cp -R "${server_root}/mobilecore" "${source_root}/mobilecore"
 cp -R "${server_root}/mobilegit" "${source_root}/mobilegit"
 cp -R "${server_root}/mobileagent" "${source_root}/mobileagent"
+cp -R "${server_root}/agentmemory" "${source_root}/agentmemory"
 cp -R "${server_root}/internal/." "${source_root}/internal/"
 cp "${server_root}/go.mod" "${server_root}/go.sum" "${source_root}/"
 

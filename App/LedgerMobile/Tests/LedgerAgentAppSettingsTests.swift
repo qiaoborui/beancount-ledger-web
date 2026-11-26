@@ -13,7 +13,7 @@ final class LedgerAgentAppSettingsTests: XCTestCase {
     {
       "overview": {"sections": ["retention", "periodStats", "spendingTrend", "spendingCategories",
         "creditCards", "topPayees", "incomeBreakdown", "balanceSheet", "currencyExposure"]},
-      "tabs": {"tabs": ["overview", "transactions", "accounts"]},
+      "tabs": {"tabs": ["overview", "transactions", "accounts"], "launch": "assistant"},
       "valuation": {"currency": "CNY"},
       "reminders": {
         "bookkeeping": {"enabled": true, "time": "21:30", "repeat": "daily", "days": [1, 2, 3, 4, 5, 6, 7],
@@ -150,6 +150,7 @@ final class LedgerAgentAppSettingsTests: XCTestCase {
         var target = snapshot(defaults)
         target.overview.sections = ["spendingCategories", "retention"]
         target.tabs.tabs = ["overview", "search"]
+        target.tabs.launch = "ledger"
         target.valuation.currency = "hkd"
         target.reminders.bookkeeping.enabled = false
         target.reminders.bookkeeping.time = "22:00"
@@ -172,6 +173,8 @@ final class LedgerAgentAppSettingsTests: XCTestCase {
         let now = store.host.snapshot()
         XCTAssertEqual(now.overview.sections, ["spendingCategories", "retention"])
         XCTAssertEqual(now.tabs.tabs, ["overview", "search"])
+        XCTAssertEqual(now.tabs.launch, "ledger")
+        XCTAssertEqual(LedgerLaunchPage.stored(in: defaults), .ledger)
         XCTAssertEqual(now.valuation.currency, "HKD")
         XCTAssertEqual(now.reminders.bookkeeping.time, "22:00")
         XCTAssertEqual(now.reminders.bookkeeping.days, [2, 3, 4, 5, 6])
@@ -337,6 +340,7 @@ final class LedgerAgentAppSettingsTests: XCTestCase {
             (.overview, { $0.overview.sections = ["retention", "retention"] }),
             (.tabs, { $0.tabs.tabs = [] }),
             (.tabs, { $0.tabs.tabs = ["settings"] }),
+            (.tabs, { $0.tabs.launch = "search" }),
             (.tabs, { $0.tabs.tabs = ["overview", "search", "accounts", "transactions"] }),
             (.valuation, { $0.valuation.currency = "元" }),
             (.reminders, { $0.reminders.bookkeeping.time = "9:00" }),
@@ -390,8 +394,9 @@ private final class FakeAppSettings {
                     switch try settings.plan(for: section, in: self.defaults) {
                     case let .overview(values):
                         self.defaults.set(values.map(\.rawValue), forKey: LedgerAgentAppSettings.Keys.overviewSections)
-                    case let .tabs(values):
+                    case let .tabs(values, launch):
                         self.defaults.set(values.map(\.rawValue), forKey: LedgerAgentAppSettings.Keys.compactTabs)
+                        launch?.store(in: self.defaults)
                     case let .valuation(code):
                         self.currency = code
                     case let .reminders(values):

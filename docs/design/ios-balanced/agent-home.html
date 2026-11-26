@@ -1,0 +1,534 @@
+<title>助手首页</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500&family=Noto+Serif+SC:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout: a design memo with rows of phone frames; the frames are drawn in the app's own 配色方案 tokens. */
+:root {
+  /* page around the frames */
+  --bg: #ECE9E2; --fg: #14100C; --fg-2: #453E36; --fg-3: #6F675A; --line: rgba(20,16,12,.14);
+  --pick: #0D5346; --warn: #96401F; --chip: rgba(20,16,12,.06);
+  /* phone tokens (暖纸 light by default; the scheme switcher swaps them) */
+  --p-page: #FBFAF8; --p-sunken: #F1EFE9; --p-ink: #14100C; --p-sec: #453E36; --p-meta: #6F675A;
+  --p-rule: #E2DED4; --p-card: #FFFFFF; --p-sel: #E6E2D9; --p-in: #0D5346; --p-out: #96401F;
+  --p-glass: rgba(251,250,248,.66); --p-glass-edge: rgba(255,255,255,.85); --p-glass-hi: rgba(255,255,255,.9);
+  --p-shadow: 0 8px 22px -10px rgba(20,16,12,.32), 0 1px 2px rgba(20,16,12,.08);
+  --p-bezel: #1d1a17; --p-ground: #E7E3DA;
+  --serif: "Source Serif 4", "Noto Serif SC", "Songti SC", Georgia, serif;
+  --sans: -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Noto Sans SC", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0c0b0a; --fg: #F6F3EE; --fg-2: #C4BCB0; --fg-3: #9A9086; --line: rgba(246,243,238,.14);
+  --pick: #4FBFAB; --warn: #CF7A52; --chip: rgba(246,243,238,.08);
+  --p-page: #121110; --p-sunken: #1B1918; --p-ink: #F6F3EE; --p-sec: #C4BCB0; --p-meta: #9A9086;
+  --p-rule: #2B2825; --p-card: #1B1918; --p-sel: #2B2825; --p-in: #4FBFAB; --p-out: #CF7A52;
+  --p-glass: rgba(43,40,37,.6); --p-glass-edge: rgba(255,255,255,.14); --p-glass-hi: rgba(255,255,255,.12);
+  --p-shadow: 0 10px 26px -10px rgba(0,0,0,.7); --p-bezel: #2e2b28; --p-ground: #070606; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0c0b0a; --fg: #F6F3EE; --fg-2: #C4BCB0; --fg-3: #9A9086; --line: rgba(246,243,238,.14);
+  --pick: #4FBFAB; --warn: #CF7A52; --chip: rgba(246,243,238,.08);
+  --p-page: #121110; --p-sunken: #1B1918; --p-ink: #F6F3EE; --p-sec: #C4BCB0; --p-meta: #9A9086;
+  --p-rule: #2B2825; --p-card: #1B1918; --p-sel: #2B2825; --p-in: #4FBFAB; --p-out: #CF7A52;
+  --p-glass: rgba(43,40,37,.6); --p-glass-edge: rgba(255,255,255,.14); --p-glass-hi: rgba(255,255,255,.12);
+  --p-shadow: 0 10px 26px -10px rgba(0,0,0,.7); --p-bezel: #2e2b28; --p-ground: #070606; color-scheme: dark; }
+
+/* the other two schemes, light; dark versions follow the page theme below */
+.s-neutral { --p-page:#FFFFFF; --p-sunken:#F2F2F5; --p-ink:#111113; --p-sec:#3C3C43; --p-meta:#6B6B72; --p-rule:#E5E5EA; --p-card:#F4F4F6; --p-sel:#E5E5EA; --p-glass: rgba(255,255,255,.66); --p-ground:#E9E9EE; }
+.s-slate { --p-page:#F7F8FA; --p-sunken:#ECEFF3; --p-ink:#0F1419; --p-sec:#38414D; --p-meta:#5C6776; --p-rule:#DDE2E8; --p-card:#FFFFFF; --p-sel:#E1E5EB; --p-glass: rgba(247,248,250,.66); --p-ground:#E3E7ED; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .s-neutral { --p-page:#000; --p-sunken:#161618; --p-ink:#F5F5F7; --p-sec:#C7C7CC; --p-meta:#98989F; --p-rule:#262628; --p-card:#161618; --p-sel:#2A2A2D; --p-glass: rgba(40,40,44,.6); --p-ground:#000; }
+  :root:not([data-theme="light"]) .s-slate { --p-page:#0F1115; --p-sunken:#181B21; --p-ink:#EEF1F5; --p-sec:#B8C0CC; --p-meta:#8C96A4; --p-rule:#252A31; --p-card:#181B21; --p-sel:#252A31; --p-glass: rgba(37,42,49,.6); --p-ground:#080a0d; } }
+:root[data-theme="dark"] .s-neutral { --p-page:#000; --p-sunken:#161618; --p-ink:#F5F5F7; --p-sec:#C7C7CC; --p-meta:#98989F; --p-rule:#262628; --p-card:#161618; --p-sel:#2A2A2D; --p-glass: rgba(40,40,44,.6); --p-ground:#000; }
+:root[data-theme="dark"] .s-slate { --p-page:#0F1115; --p-sunken:#181B21; --p-ink:#EEF1F5; --p-sec:#B8C0CC; --p-meta:#8C96A4; --p-rule:#252A31; --p-card:#181B21; --p-sel:#252A31; --p-glass: rgba(37,42,49,.6); --p-ground:#080a0d; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 80px; }
+main { max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 56px; }
+h1 { font-family: var(--serif); font-weight: 500; font-size: clamp(30px, 5vw, 44px); line-height: 1.15; margin: 0 0 12px; text-wrap: balance; }
+h2 { font-family: var(--serif); font-weight: 500; font-size: 26px; margin: 0 0 6px; text-wrap: balance; }
+h3 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+p { margin: 0; }
+.lede { max-width: 68ch; color: var(--fg-2); font-size: 16px; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; color: var(--fg-3); font-weight: 600; margin-bottom: 8px; }
+.tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 99px; background: var(--chip); color: var(--fg-2); vertical-align: middle; margin-left: 8px; font-family: var(--sans); }
+.tag.rec { background: color-mix(in srgb, var(--pick) 16%, transparent); color: var(--pick); }
+.head { display: flex; flex-direction: column; gap: 6px; max-width: 76ch; }
+.head p { color: var(--fg-2); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 18px; font-size: 13px; color: var(--fg-3); }
+.toolbar button { font: inherit; font-size: 13px; color: var(--fg); background: var(--chip); border: 0; border-radius: 99px; padding: 5px 12px; cursor: pointer; }
+.toolbar button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.toolbar button:focus-visible { outline: 2px solid var(--pick); outline-offset: 2px; }
+
+.row { display: flex; gap: 28px; overflow-x: auto; padding: 18px 4px 10px; margin: 0 -4px; scroll-snap-type: x proximity; }
+.cell { flex: none; width: 262px; display: flex; flex-direction: column; gap: 12px; scroll-snap-align: start; }
+.cap { font-size: 13.5px; color: var(--fg-2); line-height: 1.55; }
+.cap b { color: var(--fg); font-weight: 600; display: block; font-size: 14px; margin-bottom: 2px; }
+.arrow { flex: none; align-self: center; color: var(--fg-3); font-size: 20px; margin: 0 -14px 120px; }
+
+/* ------- phone ------- */
+.phone { position: relative; width: 262px; height: 566px; border-radius: 44px; background: var(--p-page); color: var(--p-ink);
+  border: 7px solid var(--p-bezel); overflow: hidden; font-family: var(--sans); font-size: 13px; line-height: 1.45; flex: none;
+  box-shadow: 0 20px 40px -24px rgba(0,0,0,.45); }
+.phone .status { position: absolute; top: 0; left: 0; right: 0; height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 6px 24px 0 28px; font-size: 12px; font-weight: 600; z-index: 9; }
+.phone .status i { width: 70px; height: 20px; border-radius: 12px; background: #000; position: absolute; left: 50%; top: 9px; transform: translateX(-50%); }
+.phone .status span:last-child { letter-spacing: 1px; font-size: 10px; }
+.g { background: var(--p-glass); -webkit-backdrop-filter: blur(14px) saturate(1.6); backdrop-filter: blur(14px) saturate(1.6);
+  border: .5px solid var(--p-glass-edge); box-shadow: inset 0 1px 0 var(--p-glass-hi), var(--p-shadow); }
+.topbar { position: absolute; top: 44px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: center; z-index: 5; }
+.cbtn { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: var(--p-ink); }
+.cap2 { height: 36px; border-radius: 18px; display: flex; align-items: center; padding: 0 2px; }
+.cap2 .cbtn { box-shadow: none; background: none; border: 0; }
+svg.i { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+svg.mk { display: block; }
+svg.mk .pg { fill: var(--p-ink); } svg.mk .ct { fill: var(--p-page); }
+
+.empty { position: absolute; left: 0; right: 0; top: 150px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 18px; text-align: center; }
+.greet { font-family: var(--serif); font-size: 25px; color: var(--p-sec); margin-top: 6px; }
+.sub { font-size: 12px; color: var(--p-meta); }
+.try { font-size: 10.5px; color: var(--p-meta); margin-top: 12px; font-weight: 500; }
+.pill { background: var(--p-sunken); border-radius: 99px; padding: 6px 12px; font-size: 11.5px; margin-top: 4px; }
+
+.composer { position: absolute; left: 10px; right: 10px; display: flex; gap: 6px; align-items: center; z-index: 6; }
+.composer .field { flex: 1; height: 40px; border-radius: 20px; display: flex; align-items: center; padding: 0 5px 0 13px; gap: 6px; color: var(--p-meta); font-size: 11.5px; white-space: nowrap; overflow: hidden; }
+.composer .field span { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.composer .plus { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--p-ink); flex: none; }
+.composer .send { width: 30px; height: 30px; border-radius: 50%; background: var(--p-ink); color: var(--p-page); display: grid; place-items: center; flex: none; }
+.composer .mic { width: 26px; display: grid; place-items: center; color: var(--p-sec); flex: none; }
+
+.tabbar { position: absolute; left: 10px; right: 10px; bottom: 16px; height: 52px; border-radius: 26px; display: flex; align-items: stretch; padding: 4px; z-index: 6; }
+.tabbar.withfloat { right: 60px; }
+.tab { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; font-size: 9px; color: var(--p-sec); border-radius: 22px; }
+.tab svg.i { width: 17px; height: 17px; }
+.tab.on { background: var(--p-sel); color: var(--p-ink); font-weight: 600; }
+.float { position: absolute; right: 10px; bottom: 16px; width: 44px; height: 52px; border-radius: 26px; display: grid; place-items: center; z-index: 6; color: var(--p-ink); }
+.homebar { position: absolute; left: 50%; bottom: 5px; width: 90px; height: 4px; border-radius: 3px; background: var(--p-ink); opacity: .8; transform: translateX(-50%); z-index: 9; }
+.tabbar.mini { right: auto; width: 52px; }
+/* icon-only bar (方案 A, round 2): 44pt row, no capsule, no labels */
+.fade { position: absolute; left: 0; right: 0; bottom: 0; height: 112px; z-index: 5; background: linear-gradient(to bottom, color-mix(in srgb, var(--p-page) 0%, transparent), var(--p-page) 38%); }
+.fade.short { height: 64px; }
+.iconbar { position: absolute; left: 18px; right: 18px; bottom: 14px; height: 30px; display: flex; justify-content: space-between; align-items: center; z-index: 6; }
+.ib { width: 38px; height: 24px; border-radius: 12px; display: grid; place-items: center; color: var(--p-meta); --p-ink-mark: var(--p-meta); }
+.ib svg.i { width: 15px; height: 15px; stroke-width: 1.9; }
+.ib { opacity: .55; }
+.ib.on { opacity: 1; color: var(--p-ink); }
+.ib.on svg.i { stroke-width: 2.2; }
+.ib .mk { width: 14px; height: 14px; }
+.phone.crop { height: 168px; border-radius: 0 0 44px 44px; border-top: 0; }
+.dim { position: absolute; right: 6px; font-size: 11px; font-weight: 600; color: var(--warn); z-index: 12; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 3px; }
+.dim::before { display: none; }
+.dim.ok { color: var(--pick); }
+.spec { display: grid; grid-template-columns: auto 1fr 1fr; gap: 0; margin-top: 16px; max-width: 760px; font-size: 13.5px; }
+.spec > div { padding: 8px 14px 8px 0; border-bottom: 1px solid var(--line); color: var(--fg-2); min-width: 0; }
+.spec > .h { font-size: 12px; font-weight: 600; color: var(--fg-3); }
+.spec > .k { color: var(--fg); white-space: nowrap; }
+
+/* conversation */
+.convo { position: absolute; top: 92px; left: 0; right: 0; bottom: 0; padding: 0 14px; display: flex; flex-direction: column; gap: 10px; }
+.q { align-self: flex-end; background: var(--p-sunken); border-radius: 16px; padding: 7px 11px; max-width: 80%; font-size: 12px; }
+.a { font-family: var(--serif); font-size: 12.5px; line-height: 1.55; color: var(--p-ink); }
+.a .num { font-family: var(--sans); font-variant-numeric: tabular-nums; font-weight: 600; }
+.steps { font-size: 10.5px; color: var(--p-meta); display: flex; align-items: center; gap: 5px; }
+.bars { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; background: var(--p-card); border-radius: 16px; border: .5px solid var(--p-rule); }
+.bar { display: grid; grid-template-columns: 38px 1fr 52px; gap: 6px; align-items: center; font-size: 10px; color: var(--p-sec); }
+.bar i { height: 6px; border-radius: 3px; background: var(--p-out); display: block; }
+.bar b { text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--p-ink); }
+
+/* drawer */
+.drawer-ground { position: absolute; inset: 0; background: var(--p-ground); }
+.drawer { position: absolute; top: 44px; left: 14px; right: 60px; bottom: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.drawer .dh { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.drawer .dh b { font-size: 15px; }
+.drawer .sec { font-size: 10px; color: var(--p-meta); letter-spacing: .06em; margin: 10px 0 2px; font-weight: 600; }
+.drawer .it { display: flex; gap: 10px; align-items: center; padding: 6px 2px; color: var(--p-ink); }
+.drawer .it svg.i { width: 16px; height: 16px; color: var(--p-sec); }
+.drawer .hist { padding: 5px 2px; color: var(--p-sec); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drawer .new { background: var(--p-sunken); }
+.card-pushed { position: absolute; top: 40px; bottom: 26px; left: 214px; width: 248px; border-radius: 28px; background: var(--p-page); box-shadow: -6px 0 24px -8px rgba(0,0,0,.25); overflow: hidden; }
+.card-pushed .mini-greet { position: absolute; top: 140px; left: 30px; font-family: var(--serif); font-size: 22px; color: var(--p-sec); }
+
+/* ledger pages */
+.ltitle { position: absolute; top: 88px; left: 16px; font-size: 24px; font-weight: 700; }
+.lbody { position: absolute; top: 128px; left: 12px; right: 12px; display: flex; flex-direction: column; gap: 10px; }
+.lcard { background: var(--p-card); border-radius: 22px; padding: 12px 14px; border: .5px solid var(--p-rule); }
+.lcard .k { font-size: 10.5px; color: var(--p-meta); }
+.lcard .v { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.lcard .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; font-size: 11px; color: var(--p-sec); }
+.lcard .two b { display: block; font-size: 14px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.in { color: var(--p-in); } .out { color: var(--p-out); }
+.txn { display: grid; grid-template-columns: 1fr auto; font-size: 11.5px; padding: 6px 0; border-bottom: .5px solid var(--p-rule); }
+.txn small { display: block; color: var(--p-meta); font-size: 10px; }
+.txn b { font-weight: 500; font-variant-numeric: tabular-nums; align-self: center; }
+.back { position: absolute; top: 44px; left: 12px; height: 36px; border-radius: 18px; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 8px; font-size: 12px; z-index: 5; }
+
+/* launch strip */
+.launch { position: absolute; inset: 0; display: grid; place-items: center; background: var(--p-page); }
+.launch .brand { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.launch .wm { font-size: 15px; font-weight: 600; letter-spacing: .3em; padding-left: .3em; }
+.faceid { position: absolute; left: 50%; top: 40%; transform: translate(-50%,-50%); width: 120px; height: 120px; border-radius: 26px; background: rgba(60,60,60,.72); color: #fff; display: grid; place-items: center; -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); font-size: 11px; }
+.faceid svg { width: 48px; height: 48px; stroke: #fff; fill: none; stroke-width: 1.6; }
+.ghost { opacity: .32; }
+.motion { position: absolute; left: 50%; width: 1.5px; background: repeating-linear-gradient(to bottom, var(--p-meta) 0 4px, transparent 4px 8px); }
+.slideup { position: absolute; left: 0; right: 0; top: 260px; bottom: 0; background: var(--p-page); border-radius: 26px 26px 0 0; box-shadow: 0 -12px 30px -12px rgba(0,0,0,.35); }
+.note-chip { position: absolute; left: 50%; transform: translateX(-50%); font-size: 10.5px; padding: 3px 9px; border-radius: 99px; background: var(--warn); color: #fff; white-space: nowrap; z-index: 12; }
+.note-chip.ok { background: var(--pick); }
+
+/* settings */
+.list { position: absolute; top: 128px; left: 12px; right: 12px; display: flex; flex-direction: column; gap: 4px; }
+.list .lh { font-size: 10px; color: var(--p-meta); letter-spacing: .06em; font-weight: 600; padding: 8px 8px 2px; }
+.list .grp { background: var(--p-card); border-radius: 16px; border: .5px solid var(--p-rule); }
+.list .li { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; font-size: 12.5px; border-bottom: .5px solid var(--p-rule); }
+.list .li:last-child { border-bottom: 0; }
+.list .li span { color: var(--p-meta); }
+.list .foot { font-size: 10.5px; color: var(--p-meta); padding: 4px 8px 6px; line-height: 1.5; }
+.menu { position: absolute; right: 18px; top: 196px; width: 160px; border-radius: 16px; padding: 4px; z-index: 8; }
+.menu div { padding: 8px 10px; font-size: 12px; display: flex; gap: 6px; align-items: center; border-radius: 10px; }
+.menu .ck { width: 12px; color: var(--p-ink); }
+.menu small { color: var(--p-meta); display: block; font-size: 10px; }
+.hl { outline: 2px solid var(--pick); outline-offset: -2px; border-radius: 12px; }
+
+/* text blocks */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 22px 34px; margin-top: 18px; }
+.cols > div { min-width: 0; }
+.cols p, .cols li { font-size: 14px; color: var(--fg-2); }
+.cols ul { margin: 4px 0 0; padding-left: 18px; }
+.verdict { border-top: 2px solid var(--fg); padding-top: 14px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px 34px; }
+.verdict > div { min-width: 0; }
+.tblwrap { overflow-x: auto; margin-top: 14px; }
+table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 13.5px; }
+th { text-align: left; font-weight: 600; font-size: 12px; color: var(--fg-3); padding: 8px 14px 8px 0; border-bottom: 1px solid var(--line); }
+td { padding: 10px 14px 10px 0; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--fg-2); }
+td:first-child { color: var(--fg); white-space: nowrap; }
+code { font-family: var(--mono); font-size: 12.5px; }
+.risk { display: grid; grid-template-columns: 64px 1fr; gap: 6px 14px; margin-top: 14px; font-size: 14px; color: var(--fg-2); }
+.risk b { font-size: 12px; font-weight: 600; padding-top: 2px; }
+.risk b.h { color: var(--warn); } .risk b.m { color: var(--fg); } .risk b.l { color: var(--fg-3); }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="mark" viewBox="8 8 48 48"><path style="fill:var(--p-ink)" d="M12 12H36V28H52V52H12Z"/><path style="fill:var(--p-page)" d="M22 22H28V40H42V46H22Z"/></symbol>
+    <symbol id="i-side" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="3.5"/><path d="M9.5 4.5v15"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-new" viewBox="0 0 24 24"><path d="M12 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6"/><path d="M17.5 3.5l3 3L12 15H9v-3z"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r=".9"/><circle cx="12" cy="12" r=".9"/><circle cx="18" cy="12" r=".9"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M6 10v4M9.5 7v10M13 9v6M16.5 6v12M20 10v4"/></symbol>
+    <symbol id="i-house" viewBox="0 0 24 24"><path d="M4 11l8-6.5 8 6.5"/><path d="M6 9.5V20h12V9.5"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r=".6"/><circle cx="4.5" cy="12" r=".6"/><circle cx="4.5" cy="18" r=".6"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 4.5h11a3 3 0 0 1 3 3V20H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></symbol>
+    <symbol id="i-ell" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.1"/><circle cx="12" cy="12" r="1.1"/><circle cx="18.5" cy="12" r="1.1"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20h16M7 16v-5M12 16V7M17 16v-8"/></symbol>
+    <symbol id="i-tray" viewBox="0 0 24 24"><path d="M4 14l2.5-8h11L20 14v5H4z"/><path d="M4 14h5l1 2h4l1-2h5"/></symbol>
+    <symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="M7 10l3 2.5L7 15M12.5 15H17"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.5l3 2"/></symbol>
+    <symbol id="i-stack" viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="11" rx="2.5"/><path d="M7.5 5h9"/></symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9 5a3 3 0 0 0-3 3 3 3 0 0 0-1 5.5A3 3 0 0 0 9 19h1V5zM15 5a3 3 0 0 1 3 3 3 3 0 0 1 1 5.5A3 3 0 0 1 15 19h-1V5z"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-face" viewBox="0 0 48 48"><path d="M6 15V10a4 4 0 0 1 4-4h5M33 6h5a4 4 0 0 1 4 4v5M42 33v5a4 4 0 0 1-4 4h-5M15 42h-5a4 4 0 0 1-4-4v-5"/><path d="M17 18v4M31 18v4M24 18v9h-2M18 32c3.5 3 8.5 3 12 0"/></symbol>
+  </defs>
+</svg>
+
+<main>
+
+<header>
+  <div class="eyebrow">结平 iOS · 设计稿 · 2026-11-26</div>
+  <h1>打开 App，就在账本助手里</h1>
+  <p class="lede">现在的「打开 App 时进入助手」是先把底部标签页装好，再把助手当整屏浮层从下往上盖上来，所以每次冷启动都会先闪一下概览，再看到一段上滑动画。这份稿子把助手改成真正的首页：启动画面直接落在助手的问候上，账本页面换个地方放。下面有两个方案，推荐 A。</p>
+  <div class="toolbar" role="group" aria-label="配色方案">
+    <span>配色方案</span>
+    <button type="button" id="s-paper" data-s="" aria-pressed="true">暖纸</button>
+    <button type="button" id="s-neutral" data-s="s-neutral" aria-pressed="false">纯净</button>
+    <button type="button" id="s-slate" data-s="s-slate" aria-pressed="false">冷灰</button>
+    <span>· 深色跟随系统外观</span>
+  </div>
+</header>
+
+<!-- ============ launch ============ -->
+<section>
+  <div class="head">
+    <div class="eyebrow">冷启动</div>
+    <h2>现在和之后</h2>
+    <p>问题不在助手页本身，在它出场的方式。改完以后，启动画面的标志就是助手问候上方的那个标志，标志上移、问候和输入框淡入，中间没有别的页面。</p>
+  </div>
+
+  <h3 style="margin-top:20px">现在</h3>
+  <div class="row">
+    <div class="cell">
+      <div class="phone schemed"><div class="status"><span>9:41</span><i></i><span>●●●</span></div>
+        <div class="launch"><div class="brand"><svg class="mk" width="54" height="54"><use href="#mark"/></svg><div class="wm">结平</div></div></div>
+        <div class="homebar"></div></div>
+      <p class="cap"><b>1 · 启动标志</b>标志折好，等账本读完（有 Face ID 时等解锁）。</p>
+    </div>
+    <div class="cell">
+      <div class="phone schemed"><div class="status"><span>9:41</span><i></i><span>●●●</span></div>
+        <div class="ltitle">财务概览</div>
+        <div class="lbody"><div class="lcard"><div class="k">本月结余</div><div class="v">¥ 8,412.60</div></div></div>
+        <div class="note-chip" style="top:300px">闪一下</div>
+        <div class="tabbar g withfloat"><div class="tab on"><svg class="i"><use href="#i-house"/></svg>概览</div><div class="tab"><svg class="i"><use href="#i-list"/></svg>流水</div><div class="tab"><svg class="i"><use href="#i-book"/></svg>账户</div><div class="tab"><svg class="i"><use href="#i-ell"/></svg>更多</div></div>
+        <div class="float g"><svg class="mk" width="18" height="18"><use href="#mark"/></svg></div>
+        <div class="homebar"></div></div>
+      <p class="cap"><b>2 · 标签页先出来</b>启动画面淡出后露出的是概览，因为助手要等标签页装好后的那个任务才打开。</p>
+    </div>
+    <div class="cell">
+      <div class="phone schemed"><div class="status"><span>9:41</span><i></i><span>●●●</span></div>
+        <div class="ltitle ghost">财务概览</div>
+        <div class="slideup"><div class="empty" style="top:40px"><svg class="mk" width="30" height="30"><use href="#mark"/></svg><div class="greet" style="font-size:20px">晚上好</div></div></div>
+        <div class="motion" style="top:270px;height:60px"></div>
+        <div class="homebar"></div></div>
+      <p class="cap"><b>3 · 助手整屏盖上来</b>整屏浮层的上滑动画，大约 0.35 秒。</p>
+    </div>
+    <div class="cell">
+      <div class="phone schemed"><div class="status"><span>9:41</span><i></i><span>●●●</span></div>
+        <div class="topbar"><div class="cbtn g"><svg class="i"><use href="#i-side"/></svg></div><div class="cap2 g"><div class="cbtn"><svg class="i"><use href="#i-more"/></svg></div><div class="cbtn"><svg class="i"><use href="#i-plus" transform="rotate(45 12 12)"/></svg></div></div></div>
+        <div class="empty"><svg class="mk" width="36" height="36"><use href="#mark"/></svg><div class="greet">晚上好</div><div class="sub">今天想查点什么？</div></div>
+        <div class="composer" style="bottom:22px"><div class="plus g"><svg class="i"><use href="#i-plus"/></svg></div><div class="field g"><span>问问账本，比如「上个月餐饮花了多少」</span><div class="mic"><svg class="i"><use href="#i-mic"/></svg></div></div></div>
+        <div class="homebar"></div></div>
+      <p class="cap"><b>4 · 助手</b>右上角有关闭按钮，关掉回到下面的标签页。助手是“盖在上面”的东西，不是首页。</p>
+    </div>
+  </div>
+
+  <h3 style="margin-top:28px">之后（两个方案都一样）</h3>
+  <div class="row">
+    <div class="cell">
+      <div class="phone schemed"><div class="status"><span>9:41</span><i></i><span>●●●</span></div>
+        <div class="launch"><div class="brand"><svg class="mk" width="54" height="54"><use href="#mark"/></svg><div class="wm">结平</div></div></div>
+        <div class="homebar"></div></div>
+      <p class="cap"><b>1 · 启动标志</b>不变。账本照旧在启动时预读（#590 的做法）。</p>
+    </div>
+    <div class="cell">
+      <div class="phone schemed"><div class="status"><span>9:41</span><i></i><span>●●●</span></div>
+        <div class="launch"><div class="brand"><svg class="mk" width="54" height="54"><use href="#mark"/></svg><div class="wm">结平</div></div></div>
+        <div class="faceid"><div style="display:grid;place-items:center;gap:6px"><svg viewBox="0 0 48 48"><use href="#i-face"/></svg>Face ID</div></div>
+        <div class="homebar"></div></div>
+      <p class="cap"><b>2 · Face ID（开了才有）</b>系统验证框盖在静止的标志上，标志不重播。没开 App 内锁就跳过这一步。</p>
+    </div>
+    <div class="cell">
+      <div class="phone schemed"><div class="status"><span>9:41</span><i></i><span>●●●</span></div>
+        <div class="empty"><svg class="mk" width="36" height="36"><use href="#mark"/></svg><div class="greet">晚上好</div><div class="sub ghost">今天想查点什么？</div></div>
+        <div class="motion" style="top:196px;height:70px"></div>
+        <div class="note-chip ok" style="top:300px">标志上移 · 问候淡入</div>
+        <div class="composer ghost" style="bottom:50px"><div class="plus g"><svg class="i"><use href="#i-plus"/></svg></div><div class="field g"><span>问问账本…</span></div></div>
+        <div class="homebar"></div></div>
+      <p class="cap"><b>3 · 同一个标志变成问候</b>启动标志从屏幕中间上移到问候上方的位置，字标淡出；问候、输入框和底栏淡入，0.22 秒，和现在启动画面退场一样长。减弱动态效果时直接切换。</p>
+    </div>
+    <div class="cell">
+      <div class="phone schemed" data-frame="A-home"></div>
+      <p class="cap"><b>4 · 助手首页</b>可以直接打字。没有关闭按钮，因为它就是首页。冷启动总是新对话，正在后台回答的对话从抽屉里接着看（和现在一样）。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ A ============ -->
+<section>
+  <div class="head">
+    <div class="eyebrow">方案 A</div>
+    <h2>助手是第一个标签<span class="tag rec">已选</span></h2>
+    <p>和截图里的 Claude 一样：助手是首页，输入框下面是一排只有图标的底栏。原来浮在右边的助手按钮收进底栏，成为第一个；后面是概览、流水、账户、更多，还是 5 个。底栏一直在，不折叠，也没有玻璃胶囊，直接画在页面上。只有远程账本（助手跑不了）保持现在的样子。</p>
+  </div>
+  <div class="row">
+    <div class="cell"><div class="phone schemed" data-frame="A-home"></div>
+      <p class="cap"><b>A1 · 启动首页</b>问候、试试、输入框，输入框下面一排图标。第一个是助手（结平标志），右边不再有浮动按钮。键盘弹出时底栏藏到键盘下，输入框跟着键盘走。</p></div>
+    <div class="cell"><div class="phone schemed" data-frame="A-chat"></div>
+      <p class="cap"><b>A2 · 对话中</b>底栏不折叠，翻动对话时也一直在原处。对话从输入框后面淡出，底栏下面是页面底色，不是玻璃。随时一下点到概览。</p></div>
+    <div class="cell"><div class="phone schemed" data-frame="A-drawer"></div>
+      <p class="cap"><b>A3 · 抽屉</b>和现在一样右滑打开。底栏是我们自己画的，所以在助手页上它是卡片的一部分，跟着卡片一起被推开，不用单独藏。抽屉内容不变。</p></div>
+    <div class="cell"><div class="phone schemed" data-frame="A-overview"></div>
+      <p class="cap"><b>A4 · 账本</b>概览、流水、账户都是原来的页面，底部同样的一排图标，选中的是概览。从这里点助手标签回去，回到刚才那段对话。小组件、通知、快捷指令打开的页面照旧在当前标签上弹出。</p></div>
+  </div>
+  <div class="cols">
+    <div><h3>好处</h3><ul><li>改动集中在根部的标签栏，概览、流水这些页面一行不用动。</li><li>账本永远一下点到，和现在一样快。</li><li>iPad 侧边栏本来就把助手当一个页面，手机和 iPad 终于是同一个结构。</li></ul></div>
+    <div><h3>代价</h3><ul><li>只有图标没有文字，第一次用的人要认一下图标。长按图标会浮出名字（系统的大字内容查看器），读屏照旧念名字。</li><li>系统标签栏要藏起来、换成自己画的这一排，iOS 26 标签栏自带的玻璃变形和切换动画就没了（这一版本来也不要玻璃）。</li></ul></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">方案 A · 底栏</div>
+    <h2>只留图标，底栏矮一截</h2>
+    <p>左边是上一版用的 iOS 26 系统标签栏（胶囊 + 文字），右边是这一版。同样从屏幕底边量到输入框顶部，省下大约 44pt，都给了对话区。</p>
+  </div>
+  <div class="row">
+    <div class="cell"><div class="phone schemed crop" data-frame="cmp-old"></div><p class="cap"><b>上一版 · 系统标签栏</b>62pt 的玻璃胶囊，图标下面有字，再加上输入框和间距。</p></div>
+    <div class="cell"><div class="phone schemed crop" data-frame="cmp-new"></div><p class="cap"><b>这一版 · 只有图标</b>44pt 一行，没有胶囊、没有文字，紧贴输入框下面。</p></div>
+  </div>
+  <div class="spec">
+    <div class="h">项目</div><div class="h">上一版</div><div class="h">这一版</div>
+    <div class="k">底栏高度</div><div>62pt 胶囊，离底边 16pt</div><div>44pt 一行，坐在 Home 指示条上方</div>
+    <div class="k">输入框到屏幕底边</div><div>约 172pt</div><div>约 128pt</div>
+    <div class="k">图标</div><div>系统符号 + 10pt 文字</div><div>22pt 图标，无文字；助手用结平标志</div>
+    <div class="k">选中态</div><div>胶囊里一块浅色底</div><div>没有背景垫块，只换颜色：选中的图标是墨色、线条稍粗；没选中的是浅灰（meta 色 55% 不透明）。点按区域仍是每格 44×44pt</div>
+    <div class="k">背景</div><div>玻璃</div><div>无。内容滚到底栏下面时用页面底色淡出（约 40pt 的渐变）</div>
+    <div class="k">折叠</div><div>往下翻时收成小圆</div><div>不折叠，一直在</div>
+    <div class="k">点按</div><div>系统反馈</div><div>轻触觉反馈；再点一次当前图标回到顶部（助手页上就是回到对话最下面）</div>
+  </div>
+</section>
+
+<!-- ============ B ============ -->
+<section>
+  <div class="head">
+    <div class="eyebrow">方案 B</div>
+    <h2>只有助手，账本放进抽屉</h2>
+    <p>更像 ChatGPT：首页没有底栏，整屏都是对话。账本的页面（概览、流水、账户、收支、导入）列在抽屉最上面，点进去是一个完整的账本页，左上角返回助手。</p>
+  </div>
+  <div class="row">
+    <div class="cell"><div class="phone schemed" data-frame="B-home"></div>
+      <p class="cap"><b>B1 · 启动首页</b>和现在的助手整屏一模一样，只是去掉了关闭按钮。输入框在屏幕最底部，对话区最高。</p></div>
+    <div class="cell"><div class="phone schemed" data-frame="B-drawer"></div>
+      <p class="cap"><b>B2 · 抽屉里有账本</b>「账本」一组放在最上面，下面是原来的助手工具和历史。</p></div>
+    <div class="cell"><div class="phone schemed" data-frame="B-overview"></div>
+      <p class="cap"><b>B3 · 账本页</b>点概览后整个换成原来的标签页（带底栏），左上角「助手」回去。账本和助手是两个并排的世界。</p></div>
+  </div>
+  <div class="cols">
+    <div><h3>好处</h3><ul><li>对话空间最大，首页最干净，最像聊天 App。</li></ul></div>
+    <div><h3>代价</h3><ul><li>看一眼余额要两下（右滑或点按钮，再点概览），记账类 App 里这是最常用的动作。</li><li>小组件、通知、快捷指令进来的路由都要先切到账本那一边，再打开页面，要重写一层。</li><li>两套导航叠在一起（抽屉切世界、底栏切页面），心智负担更重。</li></ul></div>
+  </div>
+</section>
+
+<!-- ============ settings ============ -->
+<section>
+  <div class="head">
+    <div class="eyebrow">设置</div>
+    <h2>启动时打开：账本助手 / 账本</h2>
+    <p>提供，放在 设置 › 导航，和「底部标签栏」在一起。原来 助手设置 里的「打开 App 时进入助手」开关删掉，旧值自动迁过来（关掉过的人会落在「账本」）。助手自己的改设置工具也能改这一项。</p>
+  </div>
+  <div class="row">
+    <div class="cell"><div class="phone schemed" data-frame="settings"></div>
+      <p class="cap"><b>设置 › 导航</b>选「账本」后，冷启动停在上次用的账本标签（默认概览），助手还在第一个标签里，一下就能点到。底部标签栏编辑页里，助手固定在第一格不能移走，其余 3 格照旧自选。</p></div>
+    <div class="cell" style="width:auto;max-width:420px;justify-content:center">
+      <div class="cols" style="grid-template-columns:1fr;margin-top:0">
+        <div><h3>什么时候不按这个设置走</h3><ul>
+          <li>从小组件、通知、快捷入口、分享面板、ledger:// 链接打开：去它要去的地方。</li>
+          <li>锁屏后解锁、从后台回来：停在离开时的页面，不重新跳回助手（现在的 <code>launchHandled</code> 规则保留）。</li>
+          <li>远程账本：助手跑不了，这一项灰掉，写明原因。</li>
+          <li>没有账本：仍然是全屏开账引导（LedgerSetupView），和这个设置无关。</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ code ============ -->
+<section>
+  <div class="head">
+    <div class="eyebrow">实现</div>
+    <h2>按方案 A，要改的地方</h2>
+    <p>都在 <code>App/LedgerMobile</code> 下。确认后一个 PR 做完；CI 不编译 SwiftUI 视图，所以需要你装到真机上看动画和抽屉。</p>
+  </div>
+  <div class="tblwrap"><table>
+    <thead><tr><th>位置</th><th>现在</th><th>改成</th></tr></thead>
+    <tbody>
+      <tr><td><code>Sources/RootView.swift</code> · <code>MainTabView</code></td><td>助手是 <code>.fullScreenCover(agentSheetBinding)</code>，<code>.task { openAgentAtLaunch() }</code> 在标签页装好后把它弹出来；<code>routeAgent</code> 把“选中助手标签”翻译成“弹浮层”。</td><td>删掉浮层和 <code>routeAgent</code> 的翻译；本地账本下继续用 <code>TabView</code> 管页面（保留每个标签的导航栈），但用 <code>.toolbarVisibility(.hidden, for: .tabBar)</code> 藏掉系统标签栏，换成新的 <code>LedgerIconTabBar</code>（5 个图标，助手第一）。初始选中项在第一帧就按启动设置定好，不再靠 task 事后切换。</td></tr>
+      <tr><td><code>Sources/LedgerSession.swift</code></td><td><code>agentPresented</code> / <code>agentSheetOnScreen</code> 管浮层，外部路由（通知、快捷入口、报表）会等浮层关掉再弹。</td><td>“打开助手”变成 <code>primaryDestinationID = agent</code>；等浮层的那段判断改成看当前标签，或直接去掉。约 20 处引用，加 <code>LedgerSessionTests</code> 里的用例。</td></tr>
+      <tr><td><code>Sources/LedgerModels.swift</code> · <code>LedgerDestination</code></td><td><code>compactDirectDestinations</code> 把助手当浮动按钮，不占标签。</td><td>本地账本时助手固定在第一格，不算在 3 个自选格里；远程账本保持原样。</td></tr>
+      <tr><td><code>Sources/LedgerAgentView.swift</code></td><td><code>onClose</code> 给浮层加关闭按钮；输入框贴屏幕底部。</td><td>作为标签时没有关闭按钮；输入框贴底栏上方（tab 的安全区自带）；空状态位置往上调，和启动标志对齐。<code>LedgerAgentLaunch</code> 的开关换成启动页设置。</td></tr>
+      <tr><td><code>Sources/LedgerAgentDrawerShell.swift</code></td><td>卡片推开时整屏都归它管。</td><td>助手页上的图标栏放进卡片里（页面自己画），跟卡片一起推开；其它标签页由外层画。</td></tr>
+      <tr><td><code>Sources/LedgerLaunchView.swift</code></td><td>退场：整体淡出加放大 1.04。</td><td>启动页是助手时，标志移到问候标志的位置再交给助手页，字标淡出；是账本时保持现在的退场。</td></tr>
+      <tr><td><code>Sources/SettingsView.swift</code>、<code>LedgerAgentSettingsView.swift</code></td><td>开关在 助手设置 › 显示。</td><td>设置 › 导航 加「启动时打开」；删旧开关；新键 <code>ledger.launch.page</code>，从 <code>ledger.agent.opensAtLaunch</code> 迁移。</td></tr>
+      <tr><td><code>Sources/LedgerAgentAppSettings.swift</code></td><td>助手能改 <code>tabs</code> 等设置。</td><td>加 <code>launchPage</code>；<code>tabs</code> 的校验知道助手占第一格。</td></tr>
+      <tr><td><code>UITests/</code>、fixture</td><td><code>isFixture</code> 让测试启动不弹助手；有的用例点浮动按钮、点 <code>ledger-agent-close</code>。</td><td>测试启动默认落在账本；点助手改成点第一个标签；不再有关闭按钮。</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <div class="head">
+    <div class="eyebrow">风险</div>
+    <h2>需要盯着的地方</h2>
+  </div>
+  <div class="risk">
+    <b class="h">较高</b><p>自己画底栏。系统标签栏藏起来以后，推入二级页面时要自己决定底栏在不在（建议二级页面不显示，和现在一样），iPad 仍用侧边栏不受影响。助手页一个图标栏、其它页一个图标栏，切换时位置必须分毫不差，不然会跳。</p>
+    <b class="h">较高</b><p>键盘、底栏、输入框三者的位置。输入框在图标栏上方，键盘出来时图标栏藏到键盘下、输入框要正好接住，不能跳一下。#740 修过的键盘卡顿要回归。</p>
+    <b class="m">中</b><p>外部路由。通知点进来要切到助手标签并打开某段对话，原来是“弹浮层”，现在是“切标签”，正在弹 sheet 时切标签的顺序要重新理一遍（#722 的崩溃就出在通知路径）。</p>
+    <b class="m">中</b><p>助手页底色。助手现在固定白底（<code>LedgerAgentPalette.page</code>），这次改成跟随配色方案（暖纸、纯净、冷灰各自的页面色），不然和概览来回切会有色差。助手里的气泡、卡片颜色要跟着检查一遍。</p>
+    <b class="l">低</b><p>保活和后台回答。对话状态本来就放在 <code>LedgerAgentSessions</code>，不跟页面走，标签切走不会打断。</p>
+    <b class="l">低</b><p>启动速度。少了一次浮层弹出，首屏只渲染助手的空状态，应该比现在快，不会更慢。</p>
+  </div>
+</section>
+
+<section class="verdict">
+  <div><div class="eyebrow">已定</div><h2>方案 A</h2><p style="color:var(--fg-2)">它就是参考截图的结构，改动只在根部，账本依旧一下点到。底栏只留图标以后矮了约 44pt，B 的好处（更大的对话区）A 也拿到了大半。</p></div>
+  <div><div class="eyebrow">一起定下的</div><ul style="margin:6px 0 0;padding-left:18px;color:var(--fg-2)"><li>底栏只有图标，不折叠；选中只加深颜色，不加背景。</li><li>助手页底色跟随配色方案。</li><li>「启动时打开」放在 设置 › 导航。</li></ul></div>
+</section>
+
+</main>
+
+<template id="tpl-status"><div class="status"><span>9:41</span><i></i><span>●●●</span></div></template>
+
+<script>
+(function () {
+  var S = '<div class="status"><span>9:41</span><i></i><span>●●●</span></div>';
+  var HB = '<div class="homebar"></div>';
+  function ic(id, extra) { return '<svg class="i"' + (extra || '') + '><use href="#' + id + '"/></svg>'; }
+  function mk(n) { return '<svg class="mk" width="' + n + '" height="' + n + '"><use href="#mark"/></svg>'; }
+  var topA = '<div class="topbar"><div class="cbtn g">' + ic('i-side') + '</div><div class="cap2 g"><div class="cbtn">' + ic('i-more') + '</div><div class="cbtn">' + ic('i-new') + '</div></div></div>';
+  var empty = '<div class="empty">' + mk(36) + '<div class="greet">晚上好</div><div class="sub">今天想查点什么？</div><div class="try">试试</div><div class="pill">这个月比上个月多花了多少</div><div class="pill">把这张小票记一笔</div></div>';
+  function composer(bottom) { return '<div class="composer" style="bottom:' + bottom + 'px"><div class="plus g">' + ic('i-plus') + '</div><div class="field g"><span>问问账本，比如「上个月餐饮花了多少」</span><div class="mic">' + ic('i-mic') + '</div><div class="send">' + ic('i-wave', ' style="width:15px;height:15px"') + '</div></div></div>'; }
+  function tabs(on) {
+    var t = [['a', '助手', null], ['o', '概览', 'i-house'], ['t', '流水', 'i-list'], ['c', '账户', 'i-book'], ['m', '更多', 'i-ell']];
+    return '<div class="tabbar g">' + t.map(function (x) {
+      return '<div class="tab' + (x[0] === on ? ' on' : '') + '">' + (x[2] ? ic(x[2]) : '<svg width="17" height="17" class="mk"><use href="#mark"/></svg>') + x[1] + '</div>';
+    }).join('') + '</div>';
+  }
+  function bar(on, cls) {
+    var t = [['a', null], ['o', 'i-house'], ['t', 'i-list'], ['c', 'i-book'], ['m', 'i-ell']];
+    return '<div class="iconbar' + (cls ? ' ' + cls : '') + '">' + t.map(function (x) {
+      var sel = x[0] === on;
+      var glyph = x[1] ? ic(x[1]) : '<svg class="mk" width="14" height="14" style="' + (sel ? '' : '--p-ink:var(--p-meta)') + '"><use href="#mark"/></svg>';
+      return '<div class="ib' + (sel ? ' on' : '') + '">' + glyph + '</div>';
+    }).join('') + '</div>';
+  }
+  var convo = '<div class="convo"><div class="q">这个月吃饭花了多少？比上个月呢</div>' +
+    '<div class="steps">' + ic('i-search', ' style="width:11px;height:11px"') + '查了 2 次账本 · 3 秒</div>' +
+    '<div class="a">11 月餐饮一共 <span class="num out">¥2,386.40</span>，比 10 月多 <span class="num">¥412</span>，主要是外卖多了 9 单。</div>' +
+    '<div class="bars"><div class="bar">外卖<i style="width:92%"></i><b>1,204.0</b></div><div class="bar">堂食<i style="width:58%"></i><b>761.5</b></div><div class="bar">咖啡<i style="width:30%"></i><b>420.9</b></div></div>' +
+    '<div class="a">要不要我把外卖单独拉一张最近三个月的趋势？</div></div>';
+  var drawerA = '<div class="drawer-ground"></div><div class="drawer"><div class="dh"><b>账本助手</b>' + ic('i-search') + '</div>' +
+    '<div class="it new" style="border-radius:12px;padding:7px 8px">' + ic('i-new') + '新对话</div>' +
+    '<div class="it">' + ic('i-term') + '终端</div><div class="it">' + ic('i-clock') + '定时任务</div><div class="it">' + ic('i-stack') + '产物</div><div class="it">' + ic('i-brain') + '记忆</div>' +
+    '<div class="sec">最近</div><div class="hist">11 月餐饮对比</div><div class="hist">招行信用卡对账</div><div class="hist">把小票记成流水</div><div class="hist">年终奖怎么记</div></div>' +
+    '<div class="card-pushed"><div class="mini-greet">晚上好</div></div>';
+  var drawerB = '<div class="drawer-ground"></div><div class="drawer"><div class="dh"><b>结平</b>' + ic('i-search') + '</div>' +
+    '<div class="sec" style="margin-top:2px">账本</div><div class="it">' + ic('i-house') + '概览</div><div class="it">' + ic('i-list') + '流水</div><div class="it">' + ic('i-book') + '账户</div><div class="it">' + ic('i-chart') + '收支分析</div><div class="it">' + ic('i-tray') + '导入</div>' +
+    '<div class="sec">助手</div><div class="it new" style="border-radius:12px;padding:7px 8px">' + ic('i-new') + '新对话</div><div class="it">' + ic('i-clock') + '定时任务</div><div class="it">' + ic('i-stack') + '产物</div>' +
+    '<div class="sec">最近</div><div class="hist">11 月餐饮对比</div><div class="hist">招行信用卡对账</div></div>' +
+    '<div class="card-pushed"><div class="mini-greet">晚上好</div></div>';
+  var overview = '<div class="ltitle">财务概览</div><div class="lbody">' +
+    '<div class="lcard"><div class="k">净资产</div><div class="v">¥ 186,402.18</div><div class="two"><div>本月收入<b class="in">+24,600.00</b></div><div>本月支出<b class="out">−16,187.40</b></div></div></div>' +
+    '<div class="lcard"><div class="k" style="margin-bottom:4px">最近流水</div>' +
+    '<div class="txn"><span>美团外卖<small>Expenses:Food:Delivery</small></span><b class="out">−38.50</b></div>' +
+    '<div class="txn"><span>工资<small>Income:Salary</small></span><b class="in">+24,600.00</b></div>' +
+    '<div class="txn" style="border:0"><span>瑞幸咖啡<small>Expenses:Food:Coffee</small></span><b class="out">−13.90</b></div></div></div>';
+  var settings = '<div class="ltitle">设置</div><div class="list">' +
+    '<div class="lh">导航</div><div class="grp"><div class="li hl">启动时打开<span>账本助手 ›</span></div><div class="li">底部标签栏<span>助手、概览、流水、账户</span></div><div class="li">首页模块<span>已显示 6/8</span></div></div>' +
+    '<div class="foot">冷启动时先看到的页面。从小组件或通知打开时去它要去的地方。</div>' +
+    '<div class="lh">外观</div><div class="grp"><div class="li">配色方案<span>暖纸 ›</span></div></div></div>' +
+    '<div class="menu g"><div><span class="ck">✓</span><span>账本助手<small>像聊天 App 一样，打开就问</small></span></div><div><span class="ck"></span><span>账本<small>停在上次用的标签</small></span></div></div>';
+  var F = {
+    'A-home': S + topA + empty + '<div class="fade"></div>' + composer(50) + bar('a') + HB,
+    'A-chat': S + topA + convo + '<div class="fade"></div>' + composer(50) + bar('a') + HB,
+    'A-drawer': S + drawerA.replace('<div class="mini-greet">晚上好</div>', '<div class="mini-greet">晚上好</div><div class="iconbar" style="left:14px;right:auto;bottom:-12px"><div class="ib on"><svg class="mk" width="14" height="14"><use href="#mark"/></svg></div></div>') + HB,
+    'A-overview': S + overview + '<div class="fade short"></div>' + bar('o') + HB,
+    'cmp-old': '<div class="composer" style="bottom:76px"><div class="plus g">' + ic('i-plus') + '</div><div class="field g"><span>问问账本…</span><div class="mic">' + ic('i-mic') + '</div><div class="send">' + ic('i-wave', ' style="width:15px;height:15px"') + '</div></div></div>' + tabs('a') + '<div class="dim" style="top:12px;left:16px;right:auto">输入框到底边 ≈ 172pt</div>' + HB,
+    'cmp-new': '<div class="fade"></div>' + composer(50) + bar('a') + '<div class="dim ok" style="top:12px;left:16px;right:auto">输入框到底边 ≈ 128pt</div>' + HB,
+    'B-home': S + topA + empty + composer(22) + HB,
+    'B-drawer': S + drawerB + HB,
+    'B-overview': S + '<div class="back g">' + ic('i-back', ' style="width:14px;height:14px"') + mk(14) + '助手</div>' + overview + tabs('o').replace('<div class="tab on"><svg width="17" height="17" class="mk"><use href="#mark"/></svg>助手</div>', '').replace(/<div class="tab"><svg width="17" height="17" class="mk"><use href="#mark"\/><\/svg>助手<\/div>/, '') + HB,
+    'settings': S + '<div class="back g">' + ic('i-back', ' style="width:14px;height:14px"') + '更多</div>' + settings + '<div class="fade short"></div>' + bar('m') + HB
+  };
+  document.querySelectorAll('[data-frame]').forEach(function (el) { el.innerHTML = F[el.getAttribute('data-frame')] || ''; });
+  // the empty state's convo stretch shouldn't cover the composer in A-chat
+  var buttons = document.querySelectorAll('.toolbar button');
+  function apply(cls) {
+    document.querySelectorAll('.phone').forEach(function (p) { p.classList.remove('s-neutral', 's-slate'); if (cls) p.classList.add(cls); });
+    buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-s') === cls)); });
+    try { localStorage.setItem('agentHomeScheme', cls); } catch (e) {}
+  }
+  buttons.forEach(function (b) { b.addEventListener('click', function () { apply(b.getAttribute('data-s')); }); });
+  try { var saved = localStorage.getItem('agentHomeScheme'); if (saved) apply(saved); } catch (e) {}
+})();
+</script>

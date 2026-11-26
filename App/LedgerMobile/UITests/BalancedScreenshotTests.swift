@@ -108,8 +108,8 @@ final class BalancedScreenshotTests: XCTestCase {
         app.launchArguments = ["--safe-preview"]
         app.launch()
 
-        XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 20), app.debugDescription)
-        app.tabBars.buttons["更多"].tap()
+        XCTAssertTrue(app.compactTab("更多").waitForExistence(timeout: 20), app.debugDescription)
+        app.compactTab("更多").tap()
         let categories = app.buttons["more-categories"]
         for _ in 0..<5 where !categories.isHittable { app.swipeUp() }
         XCTAssertTrue(categories.waitForExistence(timeout: 10), app.debugDescription)
@@ -145,7 +145,7 @@ final class BalancedScreenshotTests: XCTestCase {
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 40), app.debugDescription)
 
-        app.tabBars.buttons["更多"].tap()
+        app.compactTab("更多").tap()
         let settings = app.buttons["more-settings"]
         for _ in 0..<5 where !settings.isHittable { app.swipeUp() }
         XCTAssertTrue(settings.waitForExistence(timeout: 10), app.debugDescription)
@@ -194,7 +194,7 @@ final class BalancedScreenshotTests: XCTestCase {
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 40), app.debugDescription)
 
-        app.tabBars.buttons["更多"].tap()
+        app.compactTab("更多").tap()
         let settings = app.buttons["more-settings"]
         for _ in 0..<5 where !settings.isHittable { app.swipeUp() }
         XCTAssertTrue(settings.waitForExistence(timeout: 10), app.debugDescription)
@@ -226,7 +226,7 @@ final class BalancedScreenshotTests: XCTestCase {
         app.buttons["local-ledger-confirm-create"].tap()
         XCTAssertTrue(app.staticTexts["财务概览"].waitForExistence(timeout: 40), app.debugDescription)
 
-        app.tabBars.buttons["更多"].tap()
+        app.compactTab("更多").tap()
         let settings = app.buttons["more-settings"]
         for _ in 0..<5 where !settings.isHittable { app.swipeUp() }
         XCTAssertTrue(settings.waitForExistence(timeout: 10), app.debugDescription)

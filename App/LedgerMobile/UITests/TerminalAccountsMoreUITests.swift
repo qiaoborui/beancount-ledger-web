@@ -4,7 +4,7 @@ import XCTest
 final class TerminalAccountsMoreUITests: XCTestCase {
     func testAccountsAndMoreNavigation() {
         let app = launch()
-        app.tabBars.buttons["账户"].tap()
+        app.compactTab("账户").tap()
         XCTAssertTrue(app.collectionViews["accounts-list"].waitForExistence(timeout: 10), app.debugDescription)
         assertHeader(app)
         capture("terminal-accounts")
@@ -49,11 +49,11 @@ final class TerminalAccountsMoreUITests: XCTestCase {
 
     func testAccessibilityKeepsAccountFiltersAndMoreReachable() {
         let app = launch(category: "UICTContentSizeCategoryAccessibilityXXXL")
-        app.tabBars.buttons["账户"].tap()
+        app.compactTab("账户").tap()
         XCTAssertTrue(app.collectionViews["accounts-list"].waitForExistence(timeout: 5))
         assertHeader(app)
         capture("terminal-accounts-accessibility")
-        app.tabBars.buttons["更多"].tap()
+        app.compactTab("更多").tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5))
         capture("terminal-more-accessibility")
         let query = app.buttons["more-query"]
@@ -73,7 +73,7 @@ final class TerminalAccountsMoreUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--safe-preview", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN", "-UIPreferredContentSizeCategoryName", category]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["账户"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.compactTab("账户").waitForExistence(timeout: 15))
         return app
     }
     private func capture(_ name: String) {

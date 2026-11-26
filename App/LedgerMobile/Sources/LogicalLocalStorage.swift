@@ -65,6 +65,10 @@ protocol LogicalLocalStorage: Sendable {
     /// automation-runs branch, as a read-only folder; nil when the ledger is
     /// not synced with Git or the repository has no such branch.
     func automationRuns() async throws -> URL?
+    /// Merges the assistant's memory folder with the repository's
+    /// agent-memory branch, which the automation host shares; nil when the
+    /// ledger is not synced with Git.
+    func syncAgentMemory(folder: URL) async throws -> LedgerAgentMemorySyncResult?
 }
 
 extension LogicalLocalStorage {
@@ -75,6 +79,7 @@ extension LogicalLocalStorage {
         throw LocalStorageError.gitFailure(String(localized: "当前账本没有待处理的同步冲突"))
     }
     func automationRuns() async throws -> URL? { nil }
+    func syncAgentMemory(folder: URL) async throws -> LedgerAgentMemorySyncResult? { nil }
 }
 
 enum LocalStorageError: LocalizedError, Equatable {
