@@ -717,10 +717,12 @@ struct LedgerReportReceiptCard: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            // 豆豆, printed: the receipt is black ink on white.
             Image("LaunchMark")
                 .resizable()
                 .scaledToFit()
                 .frame(width: 36, height: 36)
+                .grayscale(1)
             Text(receipt.title).font(mono(16, .bold))
             Text(receipt.periodLabel).font(mono(12))
             ReceiptDashedRule()

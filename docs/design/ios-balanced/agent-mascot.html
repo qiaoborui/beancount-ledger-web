@@ -1,0 +1,484 @@
+<title>账本助手角色</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500&family=Noto+Serif+SC:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout: a design memo. Three character cards, then each character's sheet (states, sizes, schemes),
+   then phone frames that place the picked character, then the recommendation and the code map. */
+:root {
+  --bg: #F3F0EA; --fg: #14100C; --fg-2: #453E36; --fg-3: #6F675A; --line: rgba(20,16,12,.13);
+  --pick: #0D5346; --warm: #B5762A; --chip: rgba(20,16,12,.06); --tile: #FBFAF8;
+  --serif: "Source Serif 4", "Noto Serif SC", "Songti SC", Georgia, serif;
+  --sans: -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Noto Sans SC", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0E0D0C; --fg: #F6F3EE; --fg-2: #C4BCB0; --fg-3: #9A9086; --line: rgba(246,243,238,.13);
+  --pick: #4FBFAB; --warm: #E0A45A; --chip: rgba(246,243,238,.08); --tile: #1B1918; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0E0D0C; --fg: #F6F3EE; --fg-2: #C4BCB0; --fg-3: #9A9086; --line: rgba(246,243,238,.13);
+  --pick: #4FBFAB; --warm: #E0A45A; --chip: rgba(246,243,238,.08); --tile: #1B1918; color-scheme: dark; }
+
+/* phone scheme tokens, set per frame by class */
+.sch { --p-page:#FBFAF8; --p-sunken:#F1EFE9; --p-ink:#14100C; --p-sec:#453E36; --p-meta:#6F675A; --p-rule:#E2DED4; --p-card:#FFFFFF; --p-sel:#E6E2D9; --p-out:#96401F;
+  --p-glass: rgba(251,250,248,.7); --p-glass-edge: rgba(255,255,255,.85); --p-glass-hi: rgba(255,255,255,.9); --p-shadow: 0 8px 22px -10px rgba(20,16,12,.32), 0 1px 2px rgba(20,16,12,.08); --p-bezel:#1d1a17; }
+.sch.paper.dk { --p-page:#121110; --p-sunken:#1B1918; --p-ink:#F6F3EE; --p-sec:#C4BCB0; --p-meta:#9A9086; --p-rule:#2B2825; --p-card:#1B1918; --p-sel:#2B2825; --p-out:#CF7A52; --p-glass: rgba(43,40,37,.62); --p-glass-edge: rgba(255,255,255,.14); --p-glass-hi: rgba(255,255,255,.12); --p-shadow: 0 10px 26px -10px rgba(0,0,0,.7); --p-bezel:#2e2b28; }
+.sch.neutral { --p-page:#FFFFFF; --p-sunken:#F2F2F5; --p-ink:#111113; --p-sec:#3C3C43; --p-meta:#6B6B72; --p-rule:#E5E5EA; --p-card:#F4F4F6; --p-sel:#E5E5EA; --p-glass: rgba(255,255,255,.7); }
+.sch.neutral.dk { --p-page:#000000; --p-sunken:#161618; --p-ink:#F5F5F7; --p-sec:#C7C7CC; --p-meta:#98989F; --p-rule:#262628; --p-card:#161618; --p-sel:#2A2A2D; --p-out:#CF7A52; --p-glass: rgba(40,40,44,.62); --p-glass-edge: rgba(255,255,255,.14); --p-glass-hi: rgba(255,255,255,.12); --p-shadow: 0 10px 26px -10px rgba(0,0,0,.7); --p-bezel:#2e2e30; }
+.sch.slate { --p-page:#F7F8FA; --p-sunken:#ECEFF3; --p-ink:#0F1419; --p-sec:#38414D; --p-meta:#5C6776; --p-rule:#DDE2E8; --p-card:#FFFFFF; --p-sel:#E1E5EB; --p-glass: rgba(247,248,250,.7); }
+.sch.slate.dk { --p-page:#0F1115; --p-sunken:#181B21; --p-ink:#EEF1F5; --p-sec:#B8C0CC; --p-meta:#8C96A4; --p-rule:#252A31; --p-card:#181B21; --p-sel:#252A31; --p-out:#CF7A52; --p-glass: rgba(37,42,49,.62); --p-glass-edge: rgba(255,255,255,.14); --p-glass-hi: rgba(255,255,255,.12); --p-shadow: 0 10px 26px -10px rgba(0,0,0,.7); --p-bezel:#2b3038; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 80px; }
+main { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 64px; }
+h1 { font-family: var(--serif); font-weight: 500; font-size: clamp(30px, 5vw, 44px); line-height: 1.15; margin: 0 0 12px; text-wrap: balance; }
+h2 { font-family: var(--serif); font-weight: 500; font-size: 26px; margin: 0 0 6px; text-wrap: balance; }
+h3 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+p { margin: 0; }
+.lede { max-width: 68ch; color: var(--fg-2); font-size: 16px; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; color: var(--fg-3); font-weight: 600; margin-bottom: 8px; }
+.tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 99px; background: var(--chip); color: var(--fg-2); vertical-align: middle; margin-left: 8px; font-family: var(--sans); }
+.tag.rec { background: color-mix(in srgb, var(--pick) 16%, transparent); color: var(--pick); }
+.head { display: flex; flex-direction: column; gap: 6px; max-width: 76ch; }
+.head p { color: var(--fg-2); }
+.muted { color: var(--fg-3); font-size: 13px; }
+
+/* hero: three characters */
+.trio { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin-top: 26px; }
+.who { background: var(--tile); border-radius: 28px; padding: 22px 22px 24px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.who .stage { height: 190px; display: grid; place-items: center; }
+.who h2 { font-size: 28px; margin: 0; }
+.who h2 small { font-family: var(--sans); font-size: 13px; color: var(--fg-3); font-weight: 500; margin-left: 6px; }
+.who p { color: var(--fg-2); font-size: 14px; }
+.who ul { margin: 2px 0 0; padding-left: 18px; color: var(--fg-2); font-size: 13.5px; }
+.who li { margin: 2px 0; }
+
+/* character sheet */
+.sheet { display: flex; flex-direction: column; gap: 22px; }
+.states { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.st { background: var(--tile); border-radius: 22px; padding: 12px 8px 14px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; min-width: 0; }
+.st svg { width: 100%; max-width: 112px; height: auto; }
+.st b { font-size: 13.5px; }
+.st span { font-size: 12px; color: var(--fg-3); line-height: 1.45; }
+@media (max-width: 720px) { .states { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.twocol { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 18px; }
+@media (max-width: 860px) { .twocol { grid-template-columns: minmax(0, 1fr); } }
+.box { background: var(--tile); border-radius: 22px; padding: 16px 18px; min-width: 0; }
+.box h3 { margin-bottom: 10px; }
+.ladder { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.ladder figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.ladder figcaption { font-size: 11.5px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.ladder .monos { display: flex; gap: 8px; padding: 8px 10px; border-radius: 14px; }
+.schemes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 520px) { .schemes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.sw { border-radius: 16px; padding: 12px 6px 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; background: var(--p-page); color: var(--p-ink); border: .5px solid var(--p-rule); min-width: 0; }
+.sw .g1 { font-family: var(--serif); font-size: 17px; color: var(--p-sec); }
+.sw .g2 { font-size: 10.5px; color: var(--p-meta); }
+.sw .nm { font-size: 10px; color: var(--p-meta); margin-top: 4px; letter-spacing: .04em; }
+
+/* switcher */
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; font-size: 13px; color: var(--fg-3); }
+.toolbar button { font: inherit; font-size: 13px; color: var(--fg); background: var(--chip); border: 0; border-radius: 99px; padding: 5px 12px; cursor: pointer; }
+.toolbar button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.toolbar button:focus-visible { outline: 2px solid var(--pick); outline-offset: 2px; }
+.toolbar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+
+/* phones */
+.row { display: flex; gap: 26px; overflow-x: auto; padding: 18px 4px 10px; margin: 0 -4px; scroll-snap-type: x proximity; }
+.cell { flex: none; width: 262px; display: flex; flex-direction: column; gap: 12px; scroll-snap-align: start; }
+.cap { font-size: 13.5px; color: var(--fg-2); line-height: 1.55; }
+.cap b { color: var(--fg); font-weight: 600; display: block; font-size: 14px; margin-bottom: 2px; }
+.phone { position: relative; width: 262px; height: 566px; border-radius: 44px; background: var(--p-page); color: var(--p-ink);
+  border: 7px solid var(--p-bezel); overflow: hidden; font-family: var(--sans); font-size: 13px; line-height: 1.45; flex: none; box-shadow: 0 20px 40px -24px rgba(0,0,0,.45); }
+.phone .status { position: absolute; top: 0; left: 0; right: 0; height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 6px 24px 0 28px; font-size: 12px; font-weight: 600; z-index: 9; }
+.phone .status i { width: 70px; height: 20px; border-radius: 12px; background: #000; position: absolute; left: 50%; top: 9px; transform: translateX(-50%); }
+.phone .status span:last-child { letter-spacing: 1px; font-size: 10px; }
+.g { background: var(--p-glass); -webkit-backdrop-filter: blur(14px) saturate(1.6); backdrop-filter: blur(14px) saturate(1.6);
+  border: .5px solid var(--p-glass-edge); box-shadow: inset 0 1px 0 var(--p-glass-hi), var(--p-shadow); }
+.topbar { position: absolute; top: 44px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: center; z-index: 5; }
+.cbtn { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; color: var(--p-ink); }
+.ttl { font-size: 12.5px; font-weight: 600; color: var(--p-ink); }
+svg.i { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.empty { position: absolute; left: 0; right: 0; top: 140px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 0 18px; text-align: center; }
+.greet { font-family: var(--serif); font-size: 25px; color: var(--p-sec); }
+.sub { font-size: 12px; color: var(--p-meta); }
+.try { font-size: 10.5px; color: var(--p-meta); margin-top: 14px; font-weight: 500; }
+.pill { background: var(--p-sunken); border-radius: 99px; padding: 6px 12px; font-size: 11.5px; margin-top: 5px; }
+.composer { position: absolute; left: 10px; right: 10px; bottom: 58px; display: flex; gap: 6px; align-items: center; z-index: 6; }
+.composer .field { flex: 1; height: 40px; border-radius: 20px; display: flex; align-items: center; padding: 0 5px 0 13px; gap: 6px; color: var(--p-meta); font-size: 11.5px; white-space: nowrap; overflow: hidden; }
+.composer .field span { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.composer .plus { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--p-ink); flex: none; }
+.composer .send { width: 30px; height: 30px; border-radius: 50%; background: var(--p-ink); color: var(--p-page); display: grid; place-items: center; flex: none; }
+.composer .send.stop i { width: 9px; height: 9px; border-radius: 2px; background: var(--p-page); display: block; }
+.fade { position: absolute; left: 0; right: 0; bottom: 0; height: 120px; z-index: 5; background: linear-gradient(to bottom, color-mix(in srgb, var(--p-page) 0%, transparent), var(--p-page) 40%); }
+.iconbar { position: absolute; left: 18px; right: 18px; bottom: 16px; height: 30px; display: flex; justify-content: space-between; align-items: center; z-index: 6; }
+.ib { width: 38px; height: 26px; display: grid; place-items: center; color: var(--p-meta); opacity: .55; }
+.ib svg.i { width: 15px; height: 15px; stroke-width: 1.9; }
+.ib.on { opacity: 1; color: var(--p-ink); }
+.homebar { position: absolute; left: 50%; bottom: 5px; width: 90px; height: 4px; border-radius: 3px; background: var(--p-ink); opacity: .8; transform: translateX(-50%); z-index: 9; }
+.convo { position: absolute; top: 92px; left: 0; right: 0; bottom: 0; padding: 0 14px; display: flex; flex-direction: column; gap: 10px; }
+.q { align-self: flex-end; background: var(--p-sunken); border-radius: 16px; padding: 7px 11px; max-width: 80%; font-size: 12px; }
+.a { font-family: var(--serif); font-size: 12.5px; line-height: 1.55; color: var(--p-ink); }
+.a .num { font-family: var(--sans); font-variant-numeric: tabular-nums; font-weight: 600; }
+.steps { font-size: 10.5px; color: var(--p-meta); display: flex; align-items: center; gap: 5px; }
+.live { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--p-meta); margin-left: -2px; }
+.live .shim { background: linear-gradient(90deg, var(--p-meta) 30%, var(--p-ink) 50%, var(--p-meta) 70%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shim 1.8s linear infinite; }
+@keyframes shim { from { background-position: 120% 0 } to { background-position: -120% 0 } }
+.bars { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; background: var(--p-card); border-radius: 16px; border: .5px solid var(--p-rule); }
+.bar { display: grid; grid-template-columns: 38px 1fr 52px; gap: 6px; align-items: center; font-size: 10px; color: var(--p-sec); }
+.bar i { height: 6px; border-radius: 3px; background: var(--p-out); display: block; }
+.bar b { text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--p-ink); }
+.errcard { display: flex; gap: 8px; align-items: center; background: var(--p-sunken); border-radius: 16px; padding: 8px 10px; font-size: 11.5px; color: var(--p-sec); }
+.errcard b { color: var(--p-ink); font-weight: 600; display: block; font-size: 12px; }
+.retry { margin-left: auto; font-size: 11px; font-weight: 600; background: var(--p-ink); color: var(--p-page); border-radius: 99px; padding: 4px 10px; flex: none; }
+.launch { position: absolute; inset: 0; display: grid; place-items: center; background: var(--p-page); }
+.launch .brand { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: -30px; }
+.launch .wm { font-family: var(--serif); font-size: 20px; color: var(--p-ink); }
+.launch .rule { width: 28px; height: 2px; border-radius: 2px; background: var(--p-ink); }
+.lock { position: absolute; inset: 0; background: radial-gradient(120% 70% at 30% 10%, #6B5B7A 0%, #2D3446 55%, #151821 100%); color: #fff; }
+.lock .time { position: absolute; top: 70px; left: 0; right: 0; text-align: center; font-size: 58px; font-weight: 600; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+.lock .date { position: absolute; top: 56px; left: 0; right: 0; text-align: center; font-size: 13px; font-weight: 600; opacity: .85; }
+.la { position: absolute; left: 10px; right: 10px; border-radius: 22px; background: rgba(20,20,22,.86); padding: 12px 14px; display: flex; gap: 10px; align-items: center; }
+.la b { font-size: 12.5px; display: block; }
+.la span { font-size: 11px; opacity: .7; }
+.la .prog { height: 4px; border-radius: 2px; background: rgba(255,255,255,.18); margin-top: 6px; overflow: hidden; }
+.la .prog i { display: block; height: 100%; width: 62%; background: #EFC48E; border-radius: 2px; }
+.nt { position: absolute; left: 10px; right: 10px; border-radius: 20px; background: rgba(245,245,247,.82); color: #111; padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start; -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+.nt .ic { width: 30px; height: 30px; border-radius: 8px; flex: none; overflow: hidden; }
+.nt b { font-size: 12px; display: block; }
+.nt span { font-size: 11.5px; color: #333; }
+.nt small { position: absolute; right: 12px; top: 10px; font-size: 10.5px; color: #777; }
+.di { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); height: 26px; width: 118px; border-radius: 14px; background: #000; display: flex; align-items: center; justify-content: space-between; padding: 0 6px; z-index: 10; }
+.di span { font-size: 9.5px; color: #EFC48E; font-weight: 600; }
+
+/* motion strip */
+.strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+@media (max-width: 720px) { .strip { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.frame { background: var(--tile); border-radius: 18px; height: 150px; position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 10px; min-width: 0; }
+.frame .t { font-size: 11.5px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.frame .m { position: absolute; left: 50%; top: 50%; }
+.frame .gh { position: absolute; left: 0; right: 0; top: 68px; text-align: center; font-family: var(--serif); font-size: 14px; color: var(--fg-2); }
+
+/* icons */
+.icons { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-end; }
+.icons figure { margin: 0; display: flex; flex-direction: column; gap: 6px; align-items: center; font-size: 12px; color: var(--fg-3); }
+.appicon { width: 92px; height: 92px; border-radius: 21px; overflow: hidden; box-shadow: 0 6px 16px -8px rgba(0,0,0,.4); display: grid; place-items: center; }
+
+/* text */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 22px 34px; margin-top: 18px; }
+.cols > div { min-width: 0; }
+.cols p, .cols li { font-size: 14px; color: var(--fg-2); }
+.cols ul { margin: 4px 0 0; padding-left: 18px; }
+.verdict { border-top: 2px solid var(--fg); padding-top: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px 34px; }
+.verdict > div { min-width: 0; }
+.verdict p { color: var(--fg-2); font-size: 14.5px; }
+.tblwrap { overflow-x: auto; margin-top: 14px; }
+table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 13.5px; }
+th { text-align: left; font-weight: 600; font-size: 12px; color: var(--fg-3); padding: 8px 14px 8px 0; border-bottom: 1px solid var(--line); }
+td { padding: 9px 14px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--fg-2); }
+td:first-child { color: var(--fg); width: 27%; }
+td:nth-child(2) { width: 25%; }
+code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .86em; background: var(--chip); padding: 1px 5px; border-radius: 5px; }
+
+/* mascot motion */
+.mascot { overflow: visible; display: block; }
+.mascot.anim .m-all { transform-box: view-box; transform-origin: 32px 58px; }
+.mascot.anim .m-eyes { transform-box: fill-box; transform-origin: center; animation: blink 4.6s infinite; }
+.mascot.anim.s-idle .m-all { animation: breathe 3.4s ease-in-out infinite; }
+.mascot.anim.s-idle.m-bean .m-sprout { transform-box: view-box; transform-origin: 32px 19px; animation: sway 3.4s ease-in-out infinite; }
+.mascot.anim.s-idle.m-cat .m-tail { transform-box: view-box; transform-origin: 49px 53px; animation: tail 2.6s ease-in-out infinite; }
+.mascot.anim.s-idle.m-book .m-ribbon { transform-box: view-box; transform-origin: 44px 54px; animation: sway 2.8s ease-in-out infinite; }
+.mascot.anim .m-dots circle { animation: dot 1.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.mascot.anim .m-dots .d1 { animation-delay: .18s; } .mascot.anim .m-dots .d2 { animation-delay: .36s; }
+.mascot.anim.s-thinking.m-bean .m-sprout { transform-box: view-box; transform-origin: 32px 19px; animation: ponder 1.6s ease-in-out infinite; }
+.mascot.anim.s-thinking.m-cat .m-ear-l { transform-box: view-box; transform-origin: 22px 31px; animation: twitch 2.2s ease-in-out infinite; }
+.mascot.anim.s-thinking.m-book .m-fold { animation: flap 1.6s ease-in-out infinite; }
+.mascot.anim.s-thinking .m-all { animation: tilt 3.2s ease-in-out infinite; }
+.mascot.anim.s-tool .m-tool { transform-box: view-box; transform-origin: 47px 44px; animation: sweep 1.2s ease-in-out infinite; }
+.mascot.anim.s-tool.m-book .m-tool { transform-origin: 49px 42px; animation: scribble .5s ease-in-out infinite; }
+.mascot.anim.s-tool.m-cat .m-eyes { animation: scan 1.8s ease-in-out infinite; }
+.mascot.anim.s-tool .m-all { animation: busy 1.2s ease-in-out infinite; }
+.mascot.anim.s-success .m-all { animation: hop 1.6s cubic-bezier(.3,.7,.4,1) infinite; }
+.mascot.anim.s-success .m-spark path { transform-box: fill-box; transform-origin: center; animation: twinkle 1.6s ease-in-out infinite; }
+.mascot.anim.s-success .m-spark path:nth-child(2) { animation-delay: .3s; } .mascot.anim.s-success .m-spark path:nth-child(3) { animation-delay: .6s; }
+.mascot.anim.s-success .m-bloom { transform-box: view-box; transform-origin: 32.6px 11.2px; animation: bloom 1.6s ease-out infinite; }
+.mascot.anim.s-success .m-coin { transform-box: view-box; transform-origin: 54px 21px; animation: coin 1.6s ease-out infinite; }
+.mascot.anim.s-error .m-all { animation: shiver 2.4s ease-in-out infinite; }
+.mascot.anim.s-error .m-sweat { animation: drip 2.4s ease-in infinite; }
+@keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 94.5% { transform: scaleY(.12); } }
+@keyframes breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.018, .982); } }
+@keyframes sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+@keyframes tail { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-10deg); } }
+@keyframes ponder { 0%, 100% { transform: rotate(-9deg); } 50% { transform: rotate(9deg); } }
+@keyframes twitch { 0%, 70%, 100% { transform: rotate(0); } 78% { transform: rotate(-12deg); } 86% { transform: rotate(4deg); } }
+@keyframes flap { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@keyframes tilt { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-3deg); } }
+@keyframes dot { 0%, 100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: scale(1.1); } }
+@keyframes sweep { 0%, 100% { transform: rotate(-6deg) translate(0, 0); } 50% { transform: rotate(8deg) translate(-1px, 1px); } }
+@keyframes scribble { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(-1.2px, .8px); } 75% { transform: translate(1px, -.6px); } }
+@keyframes scan { 0%, 100% { transform: translateX(-1px); } 50% { transform: translateX(1.2px); } }
+@keyframes busy { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-.8px); } }
+@keyframes hop { 0%, 55%, 100% { transform: translateY(0) scale(1, 1); } 8% { transform: translateY(0) scale(1.06, .92); } 24% { transform: translateY(-5px) scale(.97, 1.04); } 40% { transform: translateY(0) scale(1.04, .96); } }
+@keyframes twinkle { 0%, 100% { transform: scale(.6); opacity: .4; } 40% { transform: scale(1.15); opacity: 1; } }
+@keyframes bloom { 0% { transform: scale(.4) rotate(-30deg); opacity: 0; } 25% { transform: scale(1.1) rotate(0); opacity: 1; } 40%, 100% { transform: scale(1) rotate(0); opacity: 1; } }
+@keyframes coin { 0% { transform: translateY(8px) scale(.5); opacity: 0; } 22% { transform: translateY(-2px) scale(1.08); opacity: 1; } 36%, 100% { transform: translateY(0) scale(1); opacity: 1; } }
+@keyframes shiver { 0%, 60%, 100% { transform: translateX(0); } 64% { transform: translateX(-1px); } 68% { transform: translateX(1px); } 72% { transform: translateX(-1px); } 76% { transform: translateX(0); } }
+@keyframes drip { 0% { transform: translateY(-2px); opacity: 0; } 20% { opacity: 1; } 80% { transform: translateY(3px); opacity: 1; } 100% { transform: translateY(4px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .mascot.anim * , .mascot.anim .m-all { animation: none !important; } .live .shim { animation: none; color: var(--p-meta); } }
+</style>
+
+<main>
+  <header class="head">
+    <div class="eyebrow">账本助手 · 角色形象设计稿 · 2026-11-26</div>
+    <h1>给账本助手一个会动的小伙伴</h1>
+    <p class="lede">现在问候语上方、启动页和 Tab 栏里是一张带 L 缺口的纸页标志。这里换成一个角色：它站在问候语上面跟你打招呼，在对话里替你思考、查账，做完了会开心，出错了会冒汗。下面是三个方案，每个都画了五种状态、从 120pt 到 18pt 的尺寸梯度、三种配色方案的日夜效果，以及放进 App 里的样子。</p>
+    <p class="muted" style="margin-top:6px">所有角色都是 64 单位网格上的矢量图，所以能直接移植成 SwiftUI Path。页面里的动作是示意，真机上会按 SwiftUI 的弹簧重新调。</p>
+  </header>
+
+  <section>
+    <div class="eyebrow">三个方案</div>
+    <h2>豆豆、本本、团子</h2>
+    <div class="trio" id="trio"></div>
+  </section>
+
+  <section class="sheet" id="sheets"></section>
+
+  <section>
+    <div class="eyebrow">放进 App</div>
+    <h2>它出现在哪里</h2>
+    <p class="lede" style="font-size:15px">一个对话里只有一个角色，永远站在“最新的那一行”：没提问时在问候语上面，提问后跟在回答末尾，按当前步骤换表情，回答完跳一下然后安静下来。回答本身不加头像，保持现在克制的阅读版式。</p>
+    <div class="toolbar" role="group" aria-label="切换">
+      <span>角色</span>
+      <button type="button" data-kind="bean" aria-pressed="true">豆豆</button>
+      <button type="button" data-kind="book" aria-pressed="false">本本</button>
+      <button type="button" data-kind="cat" aria-pressed="false">团子</button>
+      <span class="sep"></span>
+      <span>配色</span>
+      <button type="button" data-sch="paper" aria-pressed="true">暖纸</button>
+      <button type="button" data-sch="neutral" aria-pressed="false">纯净</button>
+      <button type="button" data-sch="slate" aria-pressed="false">冷灰</button>
+      <span class="sep"></span>
+      <button type="button" data-dk="0" aria-pressed="true">日间</button>
+      <button type="button" data-dk="1" aria-pressed="false">夜间</button>
+    </div>
+    <div class="row" id="phones"></div>
+  </section>
+
+  <section>
+    <div class="eyebrow">启动过渡</div>
+    <h2>落地、眨眼、跳到问候语上</h2>
+    <p class="lede" style="font-size:15px">系统启动屏（LaunchScreen.storyboard）先显示静止的角色，SwiftUI 启动页接手后播放入场，再沿用现在的 <code>LedgerLaunchHandoff</code> 把它移到问候语的位置并缩小。总时长和现在一样，不增加等待。</p>
+    <div class="strip" id="strip"></div>
+  </section>
+
+  <section>
+    <div class="eyebrow">可选</div>
+    <h2>App 图标要不要一起换</h2>
+    <p class="lede" style="font-size:15px">图标是另一个决定，可以先只换 App 内的形象。如果一起换，建议用角色的大脸贴满，背景跟暖纸走，主屏幕上一眼能认出来。</p>
+    <div class="icons" id="icons" style="margin-top:16px"></div>
+  </section>
+
+  <section>
+    <div class="eyebrow">建议</div>
+    <div class="verdict">
+      <div>
+        <h2>推荐豆豆<span class="tag rec">推荐</span></h2>
+        <p>Beancount 的名字就是“数豆子”，账本助手是一颗会帮你数豆子的豆子，这层意思用户一看就懂，也是别的记账 App 没有的。它的轮廓是一个圆豆加两片叶子，缩到 18pt 的 Tab 图标和 Live Activity 里还认得出来；叶子还是一个额外的“表情通道”：思考时摇、出错时蔫、完成时开花，脸很小的时候也能看出状态。</p>
+      </div>
+      <div>
+        <h3>另外两个什么时候选</h3>
+        <p><b>团子</b>是三个里最萌的，飞机耳和戴眼镜查账都很有戏，但猫做吉祥物的 App 很多，辨识度靠花纹和尾巴撑。<b>本本</b>延续了现在标志的折角，品牌最连贯，但长方形的身体可爱度最低，适合想要稳重一点的方向。</p>
+        <p style="margin-top:8px">也可以混：豆豆当助手，本本的折角留给账本页的空状态插画。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">实现时改哪里（选定后再做）</div>
+    <h2>代码改动位置</h2>
+    <div class="tblwrap">
+      <table>
+        <thead><tr><th>位置</th><th>现在</th><th>换成</th></tr></thead>
+        <tbody>
+          <tr><td>新增 <code>Sources/LedgerMascot.swift</code></td><td>无</td><td><code>LedgerMascotState</code>（idle / thinking / tool / success / error）和 <code>LedgerMascotView(state:size:)</code>。按这里的 64 网格把路径搬成 <code>Path</code>，部件（叶子、耳朵、眼睛）各自一个 Shape，旋转和缩放用可动画属性，状态切换走 <code>.spring(response: 0.35, dampingFraction: 0.6)</code>。眨眼和呼吸用 <code>TimelineView(.animation)</code>，只在可见且非“减弱动态效果”时跑。18–28pt 用 small 细节档。</td></tr>
+          <tr><td><code>Sources/LedgerMarkView.swift</code></td><td><code>LedgerTabMarkShape</code> 纸页剪影，渲染成 Tab 模板图</td><td><code>LedgerTabMark.rendered()</code> 改画角色的单色剪影（眼睛镂空），仍是模板图，系统着色逻辑不变。<code>Tests/LedgerMarkTests.swift</code> 的几何断言跟着改。</td></tr>
+          <tr><td><code>Sources/LedgerLaunchView.swift</code></td><td><code>LedgerMarkCanvas(progress:)</code> 描边、填充、折角落下；<code>LedgerLaunchBrand</code> 下面是 “Ledger” 字标</td><td>换成 <code>LedgerMascotEntrance(progress:)</code>：0–0.4 从 0.6 倍落下并挤压回弹（现有 <code>LedgerLaunchCurve.backOut</code>），0.4–0.65 叶子弹出，0.65–0.85 眨一次眼。<code>onMarkFrame</code> 和 <code>LedgerLaunchHandoff.motion</code> 原样保留，所以飞到问候语的那段不用重写。字标可以保留或换成角色名。</td></tr>
+          <tr><td><code>Resources/Assets.xcassets/LaunchMark</code> + <code>LaunchScreen.storyboard</code></td><td>纸页位图，96×96</td><td>导出角色 idle 的 PNG（日夜两套外观），尺寸不变，冷启动第一帧和 SwiftUI 启动页对得上。<code>LaunchResourceTests</code> 不用改。<code>LedgerReportView.swift:720</code> 也用这张图，会一起换掉。</td></tr>
+          <tr><td><code>Sources/LedgerAgentView.swift</code> 空状态（约 1100 行）</td><td><code>LedgerMarkCanvas(progress: 1)</code>，60pt</td><td><code>LedgerMascotView(state: .idle, size: 64)</code>，位置上报给 <code>LedgerLaunchHandoff.greetingMark</code> 不变。点它一下做一次 success 小跳作为彩蛋。</td></tr>
+          <tr><td><code>Sources/LedgerSetupView.swift:198</code></td><td>同上</td><td>引导页用 idle，账本连上或建好时播一次 success。</td></tr>
+          <tr><td><code>Sources/LedgerAgentTimelineView.swift</code>（<code>LedgerAgentLiveTimeline</code>）</td><td>步骤标题闪烁“正在思考…”“正在执行工具…”</td><td>实时那一行前面加 20pt 角色：模型在想时 thinking，调用工具时 tool，结束时 success 一次再回 idle，失败或中断用 error。状态从现有的 step 类型推出来，不加新的数据。只有实时那一行在动，历史消息里不画角色，列表滚动不受影响。</td></tr>
+          <tr><td><code>WidgetExtension/WidgetDesign.swift</code>（<code>LedgerMark</code>）、<code>LedgerAgentLiveActivity.swift</code></td><td>纸页加彩色折角</td><td><code>LedgerMascotGlyph(state:)</code> 静态五态，Live Activity 按 phase 换图（系统不让灵动岛跑自定义循环动画，换图时用内容过渡）。扩展里要再写一份几何，和现在 <code>LedgerMark</code> 的做法一样。</td></tr>
+          <tr><td>通知</td><td>只有 App 图标</td><td>可选：“回答好了”“出错了”的通知带一张角色状态小图（<code>UNNotificationAttachment</code>）。</td></tr>
+          <tr><td><code>Supporting/AppIcon/*.svg</code></td><td>纸页图标</td><td>可选，另外决定。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script src="mascot/mascots.js"></script>
+<script>
+(function () {
+  const M = window.Mascot;
+  const NAMES = { bean: '豆豆', book: '本本', cat: '团子' };
+  const STATE_INFO = {
+    idle: ['待机', '问候语上方，呼吸和眨眼'],
+    thinking: ['思考中', '模型在想，冒小圆点'],
+    tool: ['调用工具', '查流水、改草稿时'],
+    success: ['完成', '回答好了，跳一下'],
+    error: ['出错', '失败或中断，冒汗'],
+  };
+  const PER = {
+    bean: {
+      line: 'Beancount 的“豆”，头顶一株小芽',
+      blurb: '一颗圆滚滚的豆子，侧面有豆子特有的小凹口和豆脐。叶子是它的第二张脸。',
+      points: ['思考时叶子左右摇，完成时开一朵小花，出错时叶子蔫下来', '查账时举放大镜', '轮廓最简单，18pt 也认得出'],
+      tool: '举着放大镜查账', success: '叶间开出小花', error: '叶子蔫了，冒汗',
+    },
+    book: {
+      line: '一本会走路的小账本，留着现在标志的折角',
+      blurb: '深色书脊、米白封面、右上角金色折角就是现在的 Logo，书签丝带当尾巴。',
+      points: ['思考时折角翘起来', '调用工具时拿铅笔写', '出错时封面滴了一块墨'],
+      tool: '拿铅笔记一笔', success: '举手欢呼', error: '封面滴了墨',
+    },
+    cat: {
+      line: '一只面包坐姿的橘白猫，账房小管家',
+      blurb: '橘色头顶带三道虎斑，尾巴卷在身边，小爪子收在前面。',
+      points: ['查账时戴上圆眼镜', '完成时蹦出一枚铜钱', '出错时飞机耳'],
+      tool: '戴上圆眼镜查账', success: '蹦出一枚铜钱', error: '飞机耳，冒汗',
+    },
+  };
+  const SCH = [['paper', '暖纸'], ['neutral', '纯净'], ['slate', '冷灰']];
+  const SCH_TOKENS = {
+    paper: [['#FBFAF8', '#14100C'], ['#121110', '#F6F3EE']],
+    neutral: [['#FFFFFF', '#111113'], ['#000000', '#F5F5F7']],
+    slate: [['#F7F8FA', '#0F1419'], ['#0F1115', '#EEF1F5']],
+  };
+  const pageDark = () => document.documentElement.dataset.theme === 'dark' ||
+    (document.documentElement.dataset.theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+
+  // hero
+  function trio() {
+    const dk = pageDark();
+    document.getElementById('trio').innerHTML = Object.keys(NAMES).map(k => `
+      <article class="who">
+        <div class="stage">${M.svg(k, { px: 176, anim: true, dark: dk })}</div>
+        <h2>${NAMES[k]}${k === 'bean' ? '<span class="tag rec">推荐</span>' : ''}</h2>
+        <p><b>${PER[k].line}</b></p>
+        <p>${PER[k].blurb}</p>
+        <ul>${PER[k].points.map(x => `<li>${x}</li>`).join('')}</ul>
+      </article>`).join('');
+  }
+
+  // character sheets
+  function sheets() {
+    const dk = pageDark();
+    document.getElementById('sheets').innerHTML = Object.keys(NAMES).map(k => {
+      const info = Object.assign({}, STATE_INFO, { tool: ['调用工具', PER[k].tool], success: ['完成', PER[k].success], error: ['出错', PER[k].error] });
+      const states = M.STATES.map(s => `<div class="st">${M.svg(k, { state: s, px: 112, anim: true, dark: dk })}<b>${info[s][0]}</b><span>${s === 'idle' || s === 'thinking' ? STATE_INFO[s][1] : info[s][1]}</span></div>`).join('');
+      const ink = dk ? '#F6F3EE' : '#14100C', ground = dk ? '#1B1918' : '#FBFAF8';
+      const ladder = [[120, false], [64, false], [32, true], [24, true], [18, true]].map(([px, small]) =>
+        `<figure>${M.svg(k, { px, small, dark: dk })}<figcaption>${px}pt</figcaption></figure>`).join('') +
+        `<figure><div class="monos" style="background:${dk ? '#121110' : '#F1EFE9'}">${M.svg(k, { px: 22, small: true, mono: true, ink, ground: dk ? '#121110' : '#F1EFE9' })}${M.svg(k, { px: 22, small: true, mono: true, ink, ground: dk ? '#121110' : '#F1EFE9', state: 'thinking' })}${M.svg(k, { px: 22, small: true, mono: true, ink, ground: dk ? '#121110' : '#F1EFE9', state: 'success' })}</div><figcaption>单色 · Tab / 灵动岛</figcaption></figure>`;
+      const sw = SCH.flatMap(([id, nm]) => [0, 1].map(d => `
+        <div class="sch ${id}${d ? ' dk' : ''} sw">${M.svg(k, { px: 56, dark: !!d })}
+          <div class="g1">晚上好</div><div class="g2">今天想查点什么？</div><div class="nm">${nm} · ${d ? '夜' : '日'}</div></div>`)).join('');
+      return `<div class="sheet">
+        <div class="head"><div class="eyebrow">方案 · ${NAMES[k]}</div><h2>${NAMES[k]}：${PER[k].line}</h2></div>
+        <div class="states">${states}</div>
+        <div class="twocol">
+          <div class="box"><h3>尺寸梯度</h3><p class="muted" style="margin-bottom:10px">32pt 以下换 small 细节档：去掉高光、胡须、标签，线条加粗，眼睛放大。</p><div class="ladder">${ladder}</div></div>
+          <div class="box"><h3>三种配色 · 日 / 夜</h3><p class="muted" style="margin-bottom:10px">角色自带颜色，不跟配色走；夜间只把身体压暗一点，深色描边让它在纯黑上也有轮廓。</p><div class="schemes">${sw}</div></div>
+        </div></div>`;
+    }).join('');
+  }
+
+  // phones
+  const I = {
+    menu: '<svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h16"/></svg>',
+    edit: '<svg class="i" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
+    plus: '<svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+    up: '<svg class="i" viewBox="0 0 24 24" style="width:14px;height:14px;stroke-width:2.4"><path d="M12 19V6M6 11l6-6 6 6"/></svg>',
+    home: '<svg class="i" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
+    list: '<svg class="i" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>',
+    card: '<svg class="i" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/></svg>',
+    more: '<svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>',
+  };
+  const state = { kind: 'bean', sch: 'paper', dk: 0 };
+  function status(light) { return `<div class="status" style="${light ? 'color:#fff' : ''}"><span>9:41</span><i></i><span>●●● ▮</span></div>`; }
+  function bar(k, dk, ink, ground) {
+    return `<div class="iconbar"><div class="ib on">${M.svg(k, { px: 20, small: true, mono: true, ink, ground })}</div><div class="ib">${I.home}</div><div class="ib">${I.list}</div><div class="ib">${I.card}</div><div class="ib">${I.more}</div></div>`;
+  }
+  function phones() {
+    const { kind: k, sch, dk } = state;
+    const [ground, ink] = SCH_TOKENS[sch][dk];
+    const cls = `sch ${sch}${dk ? ' dk' : ''}`;
+    const top = `<div class="topbar"><div class="cbtn g">${I.menu}</div><div class="ttl"></div><div class="cbtn g">${I.edit}</div></div>`;
+    const composer = (stop, text) => `<div class="composer"><div class="plus g">${I.plus}</div><div class="field g"><span>${text || '问问账本…'}</span><div class="send${stop ? ' stop' : ''}">${stop ? '<i></i>' : I.up}</div></div></div>`;
+    const chrome = (stop, text) => `<div class="fade"></div>${composer(stop, text)}${bar(k, dk, ink, ground)}<div class="homebar"></div>`;
+    const mas = (s, px) => M.svg(k, { state: s, px, anim: true, dark: !!dk, small: px < 30 });
+    const q = '<div class="q">这个月外卖花了多少？</div>';
+    const answer = `<div class="a">11 月外卖一共 <span class="num">¥1,286.40</span>，比 10 月少 <span class="num">¥214</span>。美团占了大头：</div>
+      <div class="bars"><div class="bar"><span>美团</span><i style="width:100%"></i><b>¥842.10</b></div><div class="bar"><span>饿了么</span><i style="width:44%"></i><b>¥371.30</b></div><div class="bar"><span>其他</span><i style="width:9%"></i><b>¥73.00</b></div></div>`;
+    const cells = [
+      ['助手首页', '角色 64pt 站在问候语上面，呼吸、眨眼、叶子轻摇。Tab 栏第一个图标是它的单色剪影。',
+        `${status()}${top}<div class="empty">${mas('idle', 72)}<div class="greet">下午好</div><div class="sub">今天想查点什么？</div><div class="try">试试</div><div class="pill">这个月外卖花了多少</div><div class="pill">帮我对一下招行信用卡</div></div>${chrome()}`],
+      ['思考中', '提问后，角色移到回答的位置，20pt，替换掉现在只有文字闪烁的那一行。',
+        `${status()}${top}<div class="convo">${q}<div class="live">${mas('thinking', 26)}<span class="shim">正在思考…</span></div></div>${chrome(true, '')}`],
+      ['调用工具', '模型开始调用工具时换成工具表情，旁边仍是现在的步骤文字。',
+        `${status()}${top}<div class="convo">${q}<div class="steps">✓ 想了 4 秒</div><div class="live">${mas('tool', 26)}<span class="shim">正在查流水 · 11 月 · 外卖</span></div></div>${chrome(true, '')}`],
+      ['回答好了', '回答写完，角色跳一下（完成表情约 1.6 秒），然后回到待机，安静地待在最新回答下面。',
+        `${status()}${top}<div class="convo">${q}<div class="steps">✓ 想了 4 秒 · 查了 2 次流水</div>${answer}<div class="live">${mas('success', 26)}</div></div>${chrome()}`],
+      ['出错', '网络断了、模型报错或被中断时，冒汗的表情加现有的重试按钮。',
+        `${status()}${top}<div class="convo">${q}<div class="errcard">${mas('error', 30)}<div><b>没连上模型</b>网络好像断了</div><span class="retry">重试</span></div></div>${chrome()}`],
+      ['锁屏与灵动岛', 'Live Activity 用彩色角色按状态换图，灵动岛用单色小剪影；通知图标还是 App 图标。',
+        `<div class="lock">${status(true)}<div class="di">${M.svg(k, { px: 18, small: true, mono: true, ink: '#EFC48E', ground: '#000', state: 'tool' })}<span>查账中</span></div><div class="date">11月26日 星期三</div><div class="time">16:41</div>
+          <div class="la" style="top:180px">${M.svg(k, { px: 40, state: 'tool', dark: true })}<div style="flex:1;min-width:0"><b>账本助手</b><span>正在整理 11 月外卖流水</span><div class="prog"><i></i></div></div></div>
+          <div class="nt" style="top:262px"><div class="ic" style="background:#FBFAF8;display:grid;place-items:center">${M.svg(k, { px: 30, small: true })}</div><div><b>账本助手</b><span>回答好了：11 月外卖 ¥1,286.40</span></div><small>现在</small></div>
+          <div class="homebar" style="background:#fff"></div></div>`],
+    ];
+    document.getElementById('phones').innerHTML = cells.map(([t, c, inner]) => `<div class="cell"><div class="phone ${cls}">${inner}</div><p class="cap"><b>${t}</b>${c}</p></div>`).join('');
+  }
+
+  // launch strip
+  function strip() {
+    const dk = pageDark();
+    const k = state.kind;
+    const fr = [
+      ['0 ms', 'storyboard 静止帧', 1, 'idle', 0, false],
+      ['120 ms', '缩小一点再落下', .72, 'idle', 0, false],
+      ['260 ms', '着地挤压', 1.06, 'idle', 0, false, 'scale(1.1,.88)'],
+      ['420 ms', '叶子弹起、眨眼', 1, 'success', 0, false],
+      ['620 ms', '移向问候语', .78, 'idle', -26, true],
+      ['820 ms', '交给首页', .62, 'idle', -40, true],
+    ];
+    document.getElementById('strip').innerHTML = fr.map(([t, d, sc, s, dy, gh, extra]) => `
+      <div class="frame">${gh ? `<div class="gh" style="opacity:${dy < -30 ? 1 : .45}">下午好</div>` : ''}
+        <div class="m" style="transform:translate(-50%,calc(-50% + ${dy - 12}px)) scale(${sc}) ${extra || ''}">${M.svg(k, { px: 76, state: s === 'success' ? 'success' : 'idle', dark: dk })}</div>
+        <div class="t">${t} · ${d}</div></div>`).join('');
+  }
+
+  function icons() {
+    const cur = `<svg viewBox="0 0 1024 1024" width="92" height="92"><path fill="#F5F6F4" d="M0 0h1024v1024H0z"/><g transform="translate(128 128) scale(12)"><path fill="#202B2E" fill-rule="evenodd" d="M12 12H36V28H52V52H12Z M22 22H28V40H42V46H22Z"/><path fill="#855300" d="M40 12L52 24H40Z"/></g></svg>`;
+    const one = (k, bg) => `<div class="appicon" style="background:${bg}"><div style="transform:translateY(3px)">${M.svg(k, { px: 84 })}</div></div>`;
+    document.getElementById('icons').innerHTML =
+      `<figure><div class="appicon">${cur}</div>现在</figure>` +
+      Object.keys(NAMES).map(k => `<figure>${one(k, '#F4EEE2')}${NAMES[k]} · 暖纸</figure>`).join('') +
+      `<figure>${one('bean', 'linear-gradient(160deg,#9CC48A,#6E9E5E)')}豆豆 · 嫩芽绿</figure>`;
+  }
+
+  function wire() {
+    document.querySelectorAll('.toolbar button').forEach(b => b.addEventListener('click', () => {
+      const grp = b.dataset.kind ? 'kind' : b.dataset.sch ? 'sch' : 'dk';
+      state[grp] = grp === 'dk' ? +b.dataset.dk : b.dataset[grp];
+      document.querySelectorAll(`.toolbar button[data-${grp}]`).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      phones(); if (grp === 'kind') strip();
+    }));
+  }
+  function all() { trio(); sheets(); phones(); strip(); icons(); }
+  all(); wire();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', all);
+  new MutationObserver(all).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+</script>

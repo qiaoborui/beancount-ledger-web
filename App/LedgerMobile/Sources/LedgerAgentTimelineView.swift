@@ -112,9 +112,16 @@ struct LedgerAgentLiveTimeline: View {
             let slow = context.date.timeIntervalSince(quietSince) >= Self.slowAfter
             // Both hints are laid out and one is shown, so the longer slow
             // hint wrapping cannot grow the page and then shrink it.
-            ZStack(alignment: .topLeading) {
-                Text(Self.leaveHint).opacity(slow ? 0 : 1)
-                Text(Self.slowHint).opacity(slow ? 1 : 0)
+            VStack(alignment: .leading, spacing: 4) {
+                // 豆豆 at the live edge, under what is written so far, as
+                // Claude keeps its mark under a streaming reply: thinking
+                // while the model writes, the magnifier while a tool runs.
+                LedgerMascotView(state: turn.running.isEmpty ? .thinking : .tool, size: 40)
+                    .padding(.leading, -6)
+                ZStack(alignment: .topLeading) {
+                    Text(Self.leaveHint).opacity(slow ? 0 : 1)
+                    Text(Self.slowHint).opacity(slow ? 1 : 0)
+                }
             }
             .balancedFont(size: 12.5).foregroundStyle(LedgerAgentPalette.meta)
             .accessibilityElement(children: .ignore)

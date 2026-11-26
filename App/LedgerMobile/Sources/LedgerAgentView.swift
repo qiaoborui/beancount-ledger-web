@@ -645,6 +645,8 @@ private struct LedgerAgentChatScreen: View {
     @State private var conversationRevision = LedgerAgentRevision()
     /// When the empty state last read the clock for its greeting.
     @State private var greetingNow = Date()
+    /// 豆豆 over the greeting hops after a tap, for its hop's length.
+    @State private var mascotCheer = false
 
     /// The rows of the conversation, each with what it shows, so the list
     /// draws again only those that changed.
@@ -857,6 +859,9 @@ private struct LedgerAgentChatScreen: View {
             // No context menu over the answer: a long press there selects
             // its text, tool sources and errors, as everywhere else.
             answerActions(message)
+            if message.id == conversation.messages.last?.id && !conversation.isRunning {
+                LedgerAgentDoneMascot()
+            }
         }
     }
 
@@ -1095,27 +1100,27 @@ private struct LedgerAgentChatScreen: View {
     /// A recap is written when the user comes back after this long.
     private static let recapAfterAbsence: TimeInterval = 10 * 60
 
-    /// The page before the first question: the app's own mark, a greeting
-    /// for the time of day, one question that carries it on, and the starters
-    /// as pills, all on one centre line. The mark is the launch screen's
-    /// (`LedgerMarkCanvas`, drawn finished), not a model provider's. The
+    /// The page before the first question: 豆豆, a greeting for the time of
+    /// day, one question that carries it on, and the starters as pills, all
+    /// on one centre line. 豆豆 is the launch screen's, landed here. The
     /// starters, and the refresh beside them, follow the 显示推荐问题 switch.
     private var emptyState: some View {
         VStack(spacing: 8) {
-            // The mark fills the middle 40 of its 64-unit canvas, centred, so
-            // a 60pt frame draws it about 38pt across and leaves 11pt of its
-            // own margin above the greeting; the negative padding takes back
-            // the stack's spacing so that margin is the whole gap. A fixed
-            // size: it is a mark, not text, and a centred column keeps it
-            // over the greeting at any type size.
-            LedgerMarkCanvas(progress: 1)
-                .frame(width: 60, height: 60)
+            // 豆豆 at the launch screen's size, so the hand-off only moves
+            // it. It stands in the middle of its 64-unit square, about 8pt
+            // above its frame's foot; the negative padding takes most of
+            // that back. A fixed size: it is a character, not
+            // text, and a centred column keeps it over the greeting at any
+            // type size. Tapping it gets a hop.
+            LedgerMascotView(state: mascotCheer ? .success : .idle, size: 96)
+                .contentShape(Rectangle())
+                .onTapGesture { cheerMascot() }
                 // Where the launch cover's mark lands (`LedgerLaunchHandoff`).
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                     LedgerLaunchHandoff.greetingMark = tabSelected ? frame : nil
                 }
                 .onDisappear { LedgerLaunchHandoff.greetingMark = nil }
-                .padding(.bottom, -8)
+                .padding(.bottom, -6)
                 .accessibilityHidden(true)
             Text(BalancedReading.serifified(Self.greeting(at: greetingNow), size: 30, relativeTo: .title))
                 // The reading serif, as claude.ai sets its replies: Source
@@ -1182,10 +1187,24 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
+    /// A tap on 豆豆: one hop and a flower, then back to waiting.
+    private func cheerMascot() {
+        guard !mascotCheer else { return }
+        mascotCheer = true
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.6))
+            mascotCheer = false
+        }
+    }
+
     private func failure(_ error: LedgerAgentError, question: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(error.headline)
-                .balancedFont(size: 15, weight: .medium).foregroundStyle(LedgerAgentPalette.expense)
+            HStack(spacing: 8) {
+                LedgerMascotView(state: .error, size: 36)
+                Text(error.headline)
+                    .balancedFont(size: 15, weight: .medium).foregroundStyle(LedgerAgentPalette.expense)
+            }
             Text(failureDetail(error)).balancedFont(size: 13.5).foregroundStyle(LedgerAgentPalette.secondary)
                 .textSelection(.enabled)
             HStack(spacing: 10) {
@@ -2598,8 +2617,10 @@ private struct LedgerAgentRunning: View {
     private static let slowAfter = LedgerAgentLiveTimeline.slowAfter
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            ProgressView().controlSize(.small).tint(LedgerAgentPalette.meta).padding(.top, 2)
+        HStack(alignment: .top, spacing: 8) {
+            LedgerMascotView(state: .thinking, size: 40)
+                .padding(.leading, -6)
+                .padding(.top, -6)
             TimelineView(.periodic(from: since, by: 1)) { context in
                 let elapsed = Int(context.date.timeIntervalSince(since).rounded(.down))
                 let quiet = context.date.timeIntervalSince(stepSince)
@@ -2626,6 +2647,22 @@ private struct LedgerAgentRunning: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("ledger-agent-running")
+    }
+}
+
+/// 豆豆 under the latest answer, as Claude leaves its mark under its last
+/// reply: one hop and a flower when the answer lands, then it waits.
+private struct LedgerAgentDoneMascot: View {
+    @State private var cheering = true
+
+    var body: some View {
+        LedgerMascotView(state: cheering ? .success : .idle, size: 40)
+            .padding(.leading, -6)
+            .task {
+                try? await Task.sleep(for: .seconds(1.8))
+                cheering = false
+            }
+            .accessibilityHidden(true)
     }
 }
 
