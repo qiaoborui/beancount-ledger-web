@@ -592,15 +592,11 @@ private struct LedgerAgentChatScreen: View {
     /// It is never taken out of the layout: it folds to nothing as the
     /// keyboard comes up, in the keyboard's own spring, so the composer
     /// rides one motion instead of two.
+    /// The keyboard is read in the slot alone: read here, every keyboard
+    /// change would draw the whole page again as the animation starts.
     @ViewBuilder private var iconBar: some View {
         if let tabBar {
-            let folded = keyboardInset.keyboard > 0
-            LedgerIconTabBar(model: tabBar)
-                .frame(height: folded ? 0 : LedgerIconTabBar.height, alignment: .top)
-                .clipped()
-                .opacity(folded ? 0 : 1)
-                .allowsHitTesting(!folded)
-                .accessibilityHidden(folded)
+            LedgerAgentIconBarSlot(model: tabBar, inset: keyboardInset)
         }
     }
 
@@ -1315,9 +1311,10 @@ private struct LedgerAgentChatScreen: View {
             }
         }
         // The dock is anchored to the bottom, so the second row opens upward
-        // under the field. Only this change is animated here; the keyboard
-        // moves the inset with the system's own animation.
-        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: composerExpanded)
+        // under the field. Only this change is animated here, in the
+        // keyboard's spring: focus opens the row as the keyboard comes up,
+        // and two springs at once read as a stutter.
+        .animation(LedgerAgentKeyboardInset.motion, value: composerExpanded)
         .onChange(of: composerFocused) { _, focused in if focused { rowPinned = false } }
         // The chip's menu is done with once a model or an effort is chosen.
         .onChange(of: settings.modelTitle) { _, _ in rowPinned = false }
@@ -2923,6 +2920,23 @@ final class LedgerAgentKeyboardInset {
         let rect = window.convert(frame, from: nil)
         guard rect.maxY >= window.bounds.maxY - 1 else { return 0 }
         return max(0, window.bounds.maxY - rect.minY)
+    }
+}
+
+/// The icon bar under the composer, folded away while the keyboard is up.
+/// Its own view, so a keyboard change redraws this row and not the page.
+private struct LedgerAgentIconBarSlot: View {
+    let model: LedgerIconTabBarModel
+    let inset: LedgerAgentKeyboardInset
+
+    var body: some View {
+        let folded = inset.keyboard > 0
+        LedgerIconTabBar(model: model)
+            .frame(height: folded ? 0 : LedgerIconTabBar.height, alignment: .top)
+            .clipped()
+            .opacity(folded ? 0 : 1)
+            .allowsHitTesting(!folded)
+            .accessibilityHidden(folded)
     }
 }
 
