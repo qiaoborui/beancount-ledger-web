@@ -859,6 +859,9 @@ private struct LedgerAgentChatScreen: View {
             // No context menu over the answer: a long press there selects
             // its text, tool sources and errors, as everywhere else.
             answerActions(message)
+            if message.id == conversation.messages.last?.id && !conversation.isRunning {
+                LedgerAgentDoneMascot()
+            }
         }
     }
 
@@ -1103,12 +1106,13 @@ private struct LedgerAgentChatScreen: View {
     /// starters, and the refresh beside them, follow the 显示推荐问题 switch.
     private var emptyState: some View {
         VStack(spacing: 8) {
-            // 豆豆 stands in the middle of its 64-unit square and reaches
-            // about 5pt from its foot, so the negative padding leaves a few
-            // points over the greeting. A fixed size: it is a character, not
+            // 豆豆 at the launch screen's size, so the hand-off only moves
+            // it. It stands in the middle of its 64-unit square, about 8pt
+            // above its frame's foot; the negative padding takes most of
+            // that back. A fixed size: it is a character, not
             // text, and a centred column keeps it over the greeting at any
             // type size. Tapping it gets a hop.
-            LedgerMascotView(state: mascotCheer ? .success : .idle, size: 64)
+            LedgerMascotView(state: mascotCheer ? .success : .idle, size: 96)
                 .contentShape(Rectangle())
                 .onTapGesture { cheerMascot() }
                 // Where the launch cover's mark lands (`LedgerLaunchHandoff`).
@@ -1116,7 +1120,7 @@ private struct LedgerAgentChatScreen: View {
                     LedgerLaunchHandoff.greetingMark = tabSelected ? frame : nil
                 }
                 .onDisappear { LedgerLaunchHandoff.greetingMark = nil }
-                .padding(.bottom, -4)
+                .padding(.bottom, -6)
                 .accessibilityHidden(true)
             Text(BalancedReading.serifified(Self.greeting(at: greetingNow), size: 30, relativeTo: .title))
                 // The reading serif, as claude.ai sets its replies: Source
@@ -2613,8 +2617,10 @@ private struct LedgerAgentRunning: View {
     private static let slowAfter = LedgerAgentLiveTimeline.slowAfter
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            ProgressView().controlSize(.small).tint(LedgerAgentPalette.meta).padding(.top, 2)
+        HStack(alignment: .top, spacing: 8) {
+            LedgerMascotView(state: .thinking, size: 40)
+                .padding(.leading, -6)
+                .padding(.top, -6)
             TimelineView(.periodic(from: since, by: 1)) { context in
                 let elapsed = Int(context.date.timeIntervalSince(since).rounded(.down))
                 let quiet = context.date.timeIntervalSince(stepSince)
@@ -2641,6 +2647,22 @@ private struct LedgerAgentRunning: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("ledger-agent-running")
+    }
+}
+
+/// 豆豆 under the latest answer, as Claude leaves its mark under its last
+/// reply: one hop and a flower when the answer lands, then it waits.
+private struct LedgerAgentDoneMascot: View {
+    @State private var cheering = true
+
+    var body: some View {
+        LedgerMascotView(state: cheering ? .success : .idle, size: 40)
+            .padding(.leading, -6)
+            .task {
+                try? await Task.sleep(for: .seconds(1.8))
+                cheering = false
+            }
+            .accessibilityHidden(true)
     }
 }
 

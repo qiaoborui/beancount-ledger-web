@@ -195,8 +195,8 @@ struct LedgerSetupView: View {
     private var welcome: some View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
-                LedgerMascotView(size: 64)
-                    .padding(.bottom, -4)
+                LedgerMascotView(size: 96)
+                    .padding(.bottom, -6)
                     .accessibilityHidden(true)
                 Text("你好，我是账本助手")
                     .font(BalancedReading.font(.regular, size: 28, relativeTo: .title))
