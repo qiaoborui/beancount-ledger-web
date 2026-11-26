@@ -116,6 +116,17 @@ struct LedgerAgentView: View {
             }, onAsk: { question in
                 drawer.route = nil
                 drawer.ask(question)
+            }, onCreate: { request in
+                // A new artifact gets a conversation of its own, unless one
+                // is answering.
+                drawer.route = nil
+                if !sessions.current.isRunning, !sessions.busyElsewhere { sessions.startNew() }
+                sessions.queuedQuestion = request
+            }, onMenu: {
+                // Back to the conversation, then the drawer over it, as
+                // Claude's menu button opens its sidebar.
+                drawer.route = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { drawer.open() }
             })
         }
     }
