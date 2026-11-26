@@ -296,7 +296,7 @@ private struct BalancedPushedBarLayout: Layout {
 
 /// A custom compact header must not disable UINavigationController's edge-swipe pop.
 /// Scope the delegate to the visible destination and restore UIKit's delegate on exit.
-private struct TerminalBackGestureBridge: UIViewControllerRepresentable {
+struct TerminalBackGestureBridge: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> Controller { Controller() }
     func updateUIViewController(_ controller: Controller, context: Context) { controller.installIfVisible() }
     static func dismantleUIViewController(_ controller: Controller, coordinator: ()) { controller.restore() }
