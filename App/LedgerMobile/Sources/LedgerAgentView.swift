@@ -1312,7 +1312,7 @@ private struct LedgerAgentChatScreen: View {
         // under the field. Only this change is animated here, in the
         // keyboard's spring: focus opens the row as the keyboard comes up,
         // and two springs at once read as a stutter.
-        .animation(LedgerAgentKeyboardInset.motion, value: composerExpanded)
+        .animation(LedgerAgentKeyboardInset.motion(duration: 0.3), value: composerExpanded)
         .onChange(of: composerFocused) { _, focused in if focused { rowPinned = false } }
         // The chip's menu is done with once a model or an effort is chosen.
         .onChange(of: settings.modelTitle) { _, _ in rowPinned = false }
@@ -1324,11 +1324,13 @@ private struct LedgerAgentChatScreen: View {
         // inset the dock is laid out with can lag behind a shorter keyboard.
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
             guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+            let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
             let height = LedgerAgentKeyboardInset.height(of: frame)
-            withAnimation(LedgerAgentKeyboardInset.motion) { keyboardInset.keyboard = height }
+            withAnimation(LedgerAgentKeyboardInset.motion(duration: duration)) { keyboardInset.keyboard = height }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            withAnimation(LedgerAgentKeyboardInset.motion) { keyboardInset.keyboard = 0 }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { note in
+            let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+            withAnimation(LedgerAgentKeyboardInset.motion(duration: duration)) { keyboardInset.keyboard = 0 }
         }
         .modifier(LedgerAgentKeyboardSlack(inset: keyboardInset))
         // What was typed in a conversation waits there while the user looks
@@ -2897,9 +2899,15 @@ final class LedgerAgentKeyboardInset {
     /// home indicator's when it is down.
     var page: CGFloat = 0
 
-    /// The keyboard's own spring (UIKit's keyboard curve), so what moves with
-    /// the keyboard moves in step with it and with SwiftUI's avoidance.
-    static let motion = Animation.interpolatingSpring(mass: 3, stiffness: 1000, damping: 500, initialVelocity: 0)
+    /// The keyboard's curve over the keyboard's own duration, so what moves
+    /// with the keyboard moves in step with it. Bounded on purpose: the
+    /// keyboard's true spring (mass 3, stiffness 1000, damping 500) is
+    /// overdamped, and as a SwiftUI animation it ran on for seconds after
+    /// the keyboard had settled; a reply streaming in that time had its list
+    /// insets and rows animated with every frame, and bounced.
+    static func motion(duration: TimeInterval = 0.25) -> Animation {
+        .timingCurve(0.38, 0.7, 0.125, 1, duration: max(duration, 0.1))
+    }
     /// The room the page kept for a keyboard taller than the one now on
     /// screen, given back under the dock.
     var slack: CGFloat {

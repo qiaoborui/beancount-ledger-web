@@ -203,7 +203,9 @@ final class LedgerAgentListView: UIView, UICollectionViewDelegate, UIGestureReco
     // MARK: Insets
 
     func setInsets(_ new: UIEdgeInsets, animated: Bool) {
-        guard new != insets else { return }
+        // Less than half a point is an animation's in-between value, not a
+        // new bar or composer: setting it would lay the rows out again.
+        guard abs(new.top - insets.top) >= 0.5 || abs(new.bottom - insets.bottom) >= 0.5 else { return }
         let atEnd = following || distanceToEnd <= Self.slack
         let grew = abs(new.bottom - insets.bottom) > 40
         insets = new
