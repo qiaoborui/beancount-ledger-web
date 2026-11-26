@@ -588,51 +588,24 @@ struct LedgerGlyphImage: View {
     }
 }
 
-/// The app's mark, Supporting/AppIcon/ledger-mark.svg: a page with an L cut
-/// out of it and an accent corner fold. Drawn as shapes, so it stays crisp at
-/// Dynamic Island sizes without an asset catalog in the extension. The ink is
-/// the mark's dark-appearance colour, as Live Activities sit on black or glass.
+/// 账本助手's character, 豆豆, thinking: the running agent in the Dynamic
+/// Island and on the lock screen. The drawing is the app's own
+/// (`LedgerMascotCanvas`, Sources/LedgerMascotShapes.swift, compiled into the
+/// extension), in its night colours, as Live Activities sit on black or
+/// glass. Below 30pt it takes the small detail; a Live Activity cannot run
+/// the app's loops, so it is the still pose.
 struct LedgerMark: View {
-    var ink: Color = LedgerGlass.markInk
+    var state: LedgerMascotState = .thinking
+    /// Kept for callers that tint the old mark's fold; the character keeps
+    /// its own colours.
     var accent: Color = LedgerGlass.gold
 
     var body: some View {
-        ZStack {
-            LedgerMarkShape(part: .page).fill(ink, style: FillStyle(eoFill: true))
-            LedgerMarkShape(part: .fold).fill(accent)
+        GeometryReader { proxy in
+            LedgerMascotCanvas(state: state, palette: .dark, small: min(proxy.size.width, proxy.size.height) < 30)
         }
         .aspectRatio(1, contentMode: .fit)
         .accessibilityHidden(true)
-    }
-}
-
-/// One path of the mark. The svg's 64-unit view box has the mark in its
-/// 40-unit middle (12...52); that square is fitted to the rect, centred.
-struct LedgerMarkShape: Shape {
-    enum Part { case page, fold }
-    let part: Part
-
-    func path(in rect: CGRect) -> Path {
-        let scale = min(rect.width, rect.height) / 40
-        let originX = rect.midX - 20 * scale
-        let originY = rect.midY - 20 * scale
-        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-            CGPoint(x: originX + (x - 12) * scale, y: originY + (y - 12) * scale)
-        }
-        var path = Path()
-        switch part {
-        case .page:
-            // M12 12H36V28H52V52H12Z, less the L: M22 22H28V40H42V46H22Z.
-            path.addLines([point(12, 12), point(36, 12), point(36, 28), point(52, 28), point(52, 52), point(12, 52)])
-            path.closeSubpath()
-            path.addLines([point(22, 22), point(28, 22), point(28, 40), point(42, 40), point(42, 46), point(22, 46)])
-            path.closeSubpath()
-        case .fold:
-            // M40 12L52 24H40Z
-            path.addLines([point(40, 12), point(52, 24), point(40, 24)])
-            path.closeSubpath()
-        }
-        return path
     }
 }
 

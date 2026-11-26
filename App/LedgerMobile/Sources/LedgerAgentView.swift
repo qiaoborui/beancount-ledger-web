@@ -645,6 +645,8 @@ private struct LedgerAgentChatScreen: View {
     @State private var conversationRevision = LedgerAgentRevision()
     /// When the empty state last read the clock for its greeting.
     @State private var greetingNow = Date()
+    /// 豆豆 over the greeting hops after a tap, for its hop's length.
+    @State private var mascotCheer = false
 
     /// The rows of the conversation, each with what it shows, so the list
     /// draws again only those that changed.
@@ -1095,27 +1097,26 @@ private struct LedgerAgentChatScreen: View {
     /// A recap is written when the user comes back after this long.
     private static let recapAfterAbsence: TimeInterval = 10 * 60
 
-    /// The page before the first question: the app's own mark, a greeting
-    /// for the time of day, one question that carries it on, and the starters
-    /// as pills, all on one centre line. The mark is the launch screen's
-    /// (`LedgerMarkCanvas`, drawn finished), not a model provider's. The
+    /// The page before the first question: 豆豆, a greeting for the time of
+    /// day, one question that carries it on, and the starters as pills, all
+    /// on one centre line. 豆豆 is the launch screen's, landed here. The
     /// starters, and the refresh beside them, follow the 显示推荐问题 switch.
     private var emptyState: some View {
         VStack(spacing: 8) {
-            // The mark fills the middle 40 of its 64-unit canvas, centred, so
-            // a 60pt frame draws it about 38pt across and leaves 11pt of its
-            // own margin above the greeting; the negative padding takes back
-            // the stack's spacing so that margin is the whole gap. A fixed
-            // size: it is a mark, not text, and a centred column keeps it
-            // over the greeting at any type size.
-            LedgerMarkCanvas(progress: 1)
-                .frame(width: 60, height: 60)
+            // 豆豆 stands in the middle of its 64-unit square and reaches
+            // about 5pt from its foot, so the negative padding leaves a few
+            // points over the greeting. A fixed size: it is a character, not
+            // text, and a centred column keeps it over the greeting at any
+            // type size. Tapping it gets a hop.
+            LedgerMascotView(state: mascotCheer ? .success : .idle, size: 64)
+                .contentShape(Rectangle())
+                .onTapGesture { cheerMascot() }
                 // Where the launch cover's mark lands (`LedgerLaunchHandoff`).
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                     LedgerLaunchHandoff.greetingMark = tabSelected ? frame : nil
                 }
                 .onDisappear { LedgerLaunchHandoff.greetingMark = nil }
-                .padding(.bottom, -8)
+                .padding(.bottom, -4)
                 .accessibilityHidden(true)
             Text(BalancedReading.serifified(Self.greeting(at: greetingNow), size: 30, relativeTo: .title))
                 // The reading serif, as claude.ai sets its replies: Source
@@ -1182,10 +1183,24 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
+    /// A tap on 豆豆: one hop and a flower, then back to waiting.
+    private func cheerMascot() {
+        guard !mascotCheer else { return }
+        mascotCheer = true
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.6))
+            mascotCheer = false
+        }
+    }
+
     private func failure(_ error: LedgerAgentError, question: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(error.headline)
-                .balancedFont(size: 15, weight: .medium).foregroundStyle(LedgerAgentPalette.expense)
+            HStack(spacing: 8) {
+                LedgerMascotView(state: .error, size: 36)
+                Text(error.headline)
+                    .balancedFont(size: 15, weight: .medium).foregroundStyle(LedgerAgentPalette.expense)
+            }
             Text(failureDetail(error)).balancedFont(size: 13.5).foregroundStyle(LedgerAgentPalette.secondary)
                 .textSelection(.enabled)
             HStack(spacing: 10) {

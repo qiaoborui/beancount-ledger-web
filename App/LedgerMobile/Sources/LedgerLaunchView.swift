@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Draw the mark, drop the fold, then settle the wordmark. Skip its optional static hold when
+/// Land 豆豆, then settle the wordmark. Skip its optional static hold when
 /// authenticated content is ready; loading always runs concurrently.
 enum LedgerLaunchTiming {
     static let foldDuration: TimeInterval = 0.5
@@ -151,13 +151,13 @@ struct LedgerLaunchBrand: View {
     var onMarkFrame: ((CGRect) -> Void)? = nil
 
     var body: some View {
-        let mark = LedgerLaunchCurve.easeOut(LedgerLaunchCurve.slice(progress, 0, 0.6))
         let title = LedgerLaunchCurve.easeOut(LedgerLaunchCurve.slice(progress, 0.5, 0.9))
         let rule = LedgerLaunchCurve.easeOut(LedgerLaunchCurve.slice(progress, 0.65, 1))
         VStack(spacing: 24) {
-            LedgerMarkCanvas(progress: progress)
+            // 豆豆 lands: crouch, hop, squash, the sprout springs, a blink.
+            // It starts and ends as the storyboard's still picture.
+            LedgerMascotEntrance(progress: progress)
                 .frame(width: 96, height: 96)
-                .scaleEffect(0.86 + 0.14 * mark)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                     onMarkFrame?(frame)
                 }
@@ -191,67 +191,5 @@ enum LedgerLaunchCurve {
         let c1: CGFloat = 1.6
         let c3 = c1 + 1
         return 1 + c3 * pow(t - 1, 3) + c1 * pow(t - 1, 2)
-    }
-}
-
-struct LedgerMarkCanvas: View, @MainActor Animatable {
-    var progress: CGFloat
-    var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    var body: some View {
-        Canvas { context, size in
-            let scale = min(size.width, size.height) / 64
-            let origin = CGPoint(x: (size.width - 64 * scale) / 2, y: (size.height - 64 * scale) / 2)
-            func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-                CGPoint(x: origin.x + x * scale, y: origin.y + y * scale)
-            }
-            var page = Path()
-            page.move(to: point(12, 12))
-            page.addLine(to: point(36, 12))
-            page.addLine(to: point(36, 28))
-            page.addLine(to: point(52, 28))
-            page.addLine(to: point(52, 52))
-            page.addLine(to: point(12, 52))
-            page.closeSubpath()
-            var cut = Path()
-            cut.move(to: point(22, 22))
-            cut.addLine(to: point(28, 22))
-            cut.addLine(to: point(28, 40))
-            cut.addLine(to: point(42, 40))
-            cut.addLine(to: point(42, 46))
-            cut.addLine(to: point(22, 46))
-            cut.closeSubpath()
-
-            let draw = LedgerLaunchCurve.easeOut(LedgerLaunchCurve.slice(progress, 0, 0.45))
-            let fill = LedgerLaunchCurve.easeOut(LedgerLaunchCurve.slice(progress, 0.3, 0.6))
-            let drop = LedgerLaunchCurve.slice(progress, 0.45, 0.85)
-
-            if fill < 1 {
-                let stroke = StrokeStyle(lineWidth: 1.5 * scale, lineCap: .round, lineJoin: .round)
-                context.drawLayer { layer in
-                    layer.opacity = 1 - fill
-                    layer.stroke(page.trimmedPath(from: 0, to: draw), with: .color(TerminalPalette.ink), style: stroke)
-                    layer.stroke(cut.trimmedPath(from: 0, to: draw), with: .color(TerminalPalette.ink), style: stroke)
-                }
-            }
-            page.addPath(cut)
-            context.drawLayer { layer in
-                layer.opacity = fill
-                layer.fill(page, with: .color(TerminalPalette.ink), style: FillStyle(eoFill: true))
-            }
-
-            guard drop > 0 else { return }
-            let travel = -8 * (1 - LedgerLaunchCurve.backOut(drop))
-            var fold = Path()
-            fold.move(to: point(40, 12 + travel))
-            fold.addLine(to: point(52, 24 + travel))
-            fold.addLine(to: point(40, 24 + travel))
-            fold.closeSubpath()
-            context.opacity = min(drop * 2, 1)
-            context.fill(fold, with: .color(TerminalPalette.accent))
-        }
     }
 }

@@ -168,6 +168,7 @@ targets:
     sources:
       - WidgetExtension
       - path: Sources/LedgerSharedAccess.swift
+      - path: Sources/LedgerMascotShapes.swift
       - path: Sources/LedgerWidgetSnapshot.swift
       - path: Sources/LedgerWidgetCredentialStore.swift
       - path: Sources/LedgerWidgetRefreshClient.swift
@@ -289,6 +290,7 @@ targets:
     sources:
       - WidgetTests
       - path: Sources/LedgerSharedAccess.swift
+      - path: Sources/LedgerMascotShapes.swift
       - path: WidgetExtension/AccountBalanceWidget.swift
       - path: WidgetExtension/ExpenseOverviewWidget.swift
       - path: WidgetExtension/ExpenseCalendarWidget.swift

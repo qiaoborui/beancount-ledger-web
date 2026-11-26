@@ -40,6 +40,7 @@ let package = Package(
                 "LedgerColorThemeViews.swift",
                 "RootView.swift",
                 "LedgerMarkView.swift",
+                "LedgerMascotShapes.swift",
                 "LedgerIconTabBar.swift",
                 "SafePreviewLedgerAPI.swift",
                 "SettingsView.swift",
