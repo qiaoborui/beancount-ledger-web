@@ -261,6 +261,28 @@ arm64/x86_64. Mac Catalyst requires additional compatible slices and packaging
 work. Use the iOS or simulator destinations for this local build. `project.yml`
 retains historical Catalyst settings; local Catalyst support remains pending.
 
+### Install a dev build on a phone
+
+`make install-dev` (from the repository root) builds the app signed with the
+paid team in `project.yml` and installs it on the first connected physical
+iPhone through `xcrun devicectl`, then opens it. Nothing is tagged, archived
+or uploaded.
+
+```bash
+make install-dev                     # this checkout, uncommitted edits included
+make install-dev PR=748              # a pull request, in a separate worktree
+make install-dev REF=origin/main
+make install-dev DEVICE=Xiaomi WAIT=600
+```
+
+A pull request or ref is checked out under `~/Library/Caches/ledger-dev-install`
+(`LEDGER_DEV_CACHE`), so the current checkout is left alone. The Beancount
+runtime and built-in Linux frameworks are copied from the main checkout's
+`server/.build`, and each framework is rebuilt only when its sources
+(`server/`, `App/LedgerMobile/Runtime`, `App/LedgerMobile/Linux`) changed. A
+locked or unreachable phone (CoreDevice error 4016) is retried for `WAIT`
+seconds, 300 by default.
+
 ## Local integration and UI tests
 
 After building the three dependencies and generating the project, run the real
