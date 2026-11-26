@@ -73,10 +73,18 @@ struct LedgerIconTabBar: View {
 /// What the bar shows and how it changes tabs. The shell hands it to every
 /// tab: the ledger pages draw the bar under themselves, and 账本助手 draws it
 /// under its composer, inside the card the history drawer pushes aside.
-struct LedgerIconTabBarModel {
+struct LedgerIconTabBarModel: Equatable {
     var destinations: [LedgerDestination]
     var selection: LedgerDestination
     var select: @MainActor (LedgerDestination) -> Void
+
+    /// What the bar shows. The shell builds a new model, with a new closure,
+    /// each time it draws; compared by what it shows, the model left in the
+    /// environment changes only with the tabs or the selection, and a page
+    /// that reads it (账本助手, mid-reply) is not drawn again for nothing.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.destinations == rhs.destinations && lhs.selection == rhs.selection
+    }
 }
 
 private struct LedgerIconTabBarKey: EnvironmentKey {
