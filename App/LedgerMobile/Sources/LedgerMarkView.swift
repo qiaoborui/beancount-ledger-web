@@ -74,12 +74,30 @@ enum LedgerTabMark {
     /// The glyph as a bitmap, which the geometry test reads too. Rendered at 4x
     /// rather than a device's scale: the detached button can draw the label
     /// above its 25pt canvas, and the headroom keeps that from going soft.
+    ///
+    /// The ink and the face are rendered apart and the face is cut out with
+    /// Core Graphics: SwiftUI's destination-out blending, in a Canvas or on a
+    /// view, left the eyes filled under ImageRenderer.
     static func rendered() -> UIImage? {
-        let content = LedgerMascotCanvas(state: .idle, palette: .mono(.black), small: true)
+        func pass(_ pass: LedgerMascotDrawing.Pass) -> UIImage? {
+            let palette: LedgerMascotPalette = pass == .holes ? .mono(.clear) : .mono(.black)
+            let content = Canvas { context, size in
+                LedgerMascotDrawing(state: .idle, palette: palette, small: true, pose: .rest, pass: pass)
+                    .draw(in: context, size: size)
+            }
             .frame(width: mark, height: mark)
             .frame(width: canvas, height: canvas)
-        let renderer = ImageRenderer(content: content)
-        renderer.scale = 4
-        return renderer.uiImage
+            let renderer = ImageRenderer(content: content)
+            renderer.scale = 4
+            return renderer.uiImage
+        }
+        guard let ink = pass(.ink), let holes = pass(.holes) else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 4
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: ink.size, format: format).image { _ in
+            ink.draw(at: .zero)
+            holes.draw(at: .zero, blendMode: .destinationOut, alpha: 1)
+        }
     }
 }
