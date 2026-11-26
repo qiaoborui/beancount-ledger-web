@@ -406,8 +406,9 @@ extension View {
 /// bar is not used: every tab draws `LedgerIconTabBar` itself, so on
 /// 账本助手 the bar is part of the page the history drawer pushes aside.
 ///
-/// Changing tab slides the pages sideways, as Claude's do: the new one in
-/// from the side of its icon, the old one out the other way. The bar stays
+/// Changing tab slides the pages sideways, as Claude's do: side by side, as
+/// one strip, the new one in from the side of its icon and the old one out
+/// the other way at the same pace, neither covering the other. The bar stays
 /// still: while the pages move they hide their own and the shell draws one
 /// over both.
 struct LedgerIconTabShell<Content: View>: View {
@@ -440,7 +441,7 @@ struct LedgerIconTabShell<Content: View>: View {
                         .opacity(shown ? 1 : 0)
                         .allowsHitTesting(selected)
                         .accessibilityHidden(!selected)
-                        .zIndex(selected ? 2 : shown ? 1 : 0)
+                        .zIndex(shown ? 1 : 0)
                 }
             }
         }
@@ -478,7 +479,7 @@ struct LedgerIconTabShell<Content: View>: View {
             guard current == slideCount else { return }
             withAnimation(Self.motion) {
                 offsets[new] = 0
-                offsets[old] = -direction * width * 0.3
+                offsets[old] = -direction * width
             } completion: {
                 guard current == slideCount else { return }
                 leaving = nil
