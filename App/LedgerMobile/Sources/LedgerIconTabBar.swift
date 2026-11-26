@@ -4,19 +4,33 @@ import SwiftUI
 /// The bottom bar of a local ledger, the way the Claude app draws its own: a
 /// 44pt row of icons under the content, no capsule, no glass and no names.
 /// 账本助手 is the first icon, then the chosen tabs and 更多. The selected
-/// icon is drawn in ink with a slightly heavier weight; the others are a
-/// light grey. Nothing sits behind the selected one.
+/// icon is drawn in ink with a slightly heavier weight on a soft rounded
+/// ground; the others are a light grey.
 ///
-/// The bar never minimizes. Long-pressing an icon with a large accessibility
-/// text size shows its name (the large content viewer), and VoiceOver reads
-/// the name. Design: `docs/design/ios-balanced/agent-home.html`.
+/// As in Claude's bar, a finger sliding along the row carries the ground
+/// with it and names the icon under it in a dark tip above the bar; letting
+/// go there changes tab. Holding an icon opens a card of shortcuts over the
+/// bar (`LedgerIconTabMenu`, drawn by the shell so it can lie over the
+/// page). The bar never minimizes. VoiceOver reads each icon's name.
+/// Design: `docs/design/ios-balanced/agent-home.html`.
 struct LedgerIconTabBar: View {
     let model: LedgerIconTabBarModel
-    /// The row's width, for finding the icon under a dragging finger.
+    @Environment(LedgerIconTabMenu.self) private var menu: LedgerIconTabMenu?
+    /// The row's width, for finding the icon under a finger.
     @State private var width: CGFloat = 0
+    /// The icon a sliding finger is over; the ground follows it.
+    @State private var target: LedgerDestination?
+    @State private var press: Press?
 
     static let height: CGFloat = 44
     private static let inset: CGFloat = 12
+    private static let holdDelay: Duration = .milliseconds(420)
+
+    private struct Press {
+        var sliding = false
+        var held = false
+        var timer: Task<Void, Never>?
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -26,20 +40,59 @@ struct LedgerIconTabBar: View {
         }
         .padding(.horizontal, Self.inset)
         .frame(height: Self.height)
+        .contentShape(Rectangle())
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-        // A finger sliding along the row changes tab as it passes each icon,
-        // as Claude's bar does. Alongside the buttons, so a tap and a long
-        // press still reach them.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 8)
-                .onChanged { drag in
-                    guard let destination = destination(at: drag.location.x) else { return }
-                    select(destination)
-                }
-        )
+        .gesture(touch)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("标签栏")
         .accessibilityIdentifier("ledger-icon-tab-bar")
+    }
+
+    /// One touch drives all three: a tap selects, a hold opens the menu, a
+    /// slide names the icon under the finger and selects it on release.
+    private var touch: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { drag in
+                if press == nil { began(at: drag.startLocation.x) }
+                guard var current = press, !current.held else { return }
+                if !current.sliding, abs(drag.translation.width) > 6 || abs(drag.translation.height) > 10 {
+                    current.sliding = true
+                    current.timer?.cancel()
+                    press = current
+                }
+                guard current.sliding, let over = destination(at: drag.location.x) else { return }
+                if over != target {
+                    LedgerFeedback.selection()
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { target = over }
+                }
+                menu?.tip = .init(title: over.barTitle, x: center(of: over))
+            }
+            .onEnded { drag in
+                defer { ended() }
+                guard let current = press, !current.held else { return }
+                let over = current.sliding ? target : destination(at: drag.location.x)
+                if let over { select(over) }
+            }
+    }
+
+    private func began(at x: CGFloat) {
+        let pressed = destination(at: x)
+        let timer = Task { @MainActor in
+            try? await Task.sleep(for: Self.holdDelay)
+            guard !Task.isCancelled, let pressed, var current = press, !current.sliding else { return }
+            current.held = true
+            press = current
+            LedgerFeedback.light()
+            menu?.show(model.shortcuts(pressed), from: center(of: pressed), open: model.open)
+        }
+        press = Press(timer: timer)
+    }
+
+    private func ended() {
+        press?.timer?.cancel()
+        press = nil
+        menu?.tip = nil
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { target = nil }
     }
 
     private func destination(at x: CGFloat) -> LedgerDestination? {
@@ -50,6 +103,14 @@ struct LedgerIconTabBar: View {
         return model.destinations[min(max(index, 0), count - 1)]
     }
 
+    /// An icon's centre along the row; the row spans the screen, so this is
+    /// also where it is on screen.
+    private func center(of destination: LedgerDestination) -> CGFloat {
+        let count = CGFloat(max(model.destinations.count, 1))
+        let index = CGFloat(model.destinations.firstIndex(of: destination) ?? 0)
+        return Self.inset + (width - Self.inset * 2) / count * (index + 0.5)
+    }
+
     private func select(_ destination: LedgerDestination) {
         guard destination != model.selection else { return }
         LedgerFeedback.selection()
@@ -58,30 +119,24 @@ struct LedgerIconTabBar: View {
 
     private func item(_ destination: LedgerDestination) -> some View {
         let selected = destination == model.selection
-        return Button {
-            select(destination)
-        } label: {
-            glyph(destination, selected: selected)
-                .foregroundStyle(selected ? BalancedPalette.ink : BalancedPalette.meta.opacity(0.55))
-                .frame(maxWidth: .infinity)
-                .frame(height: Self.height)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        // A long press offers the shortcuts that tab leads to: on 更多, the
-        // pages that are not in the bar.
-        .contextMenu {
-            ForEach(model.shortcuts(destination), id: \.self) { link in
-                Button(link.title, systemImage: link.systemImage) { model.open(link.url) }
+        let grounded = destination == (target ?? model.selection)
+        return glyph(destination, selected: selected)
+            .foregroundStyle(selected || grounded ? BalancedPalette.ink : BalancedPalette.meta.opacity(0.55))
+            .frame(width: 52, height: 34)
+            .background {
+                if grounded {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(BalancedPalette.selected)
+                }
             }
-        }
-        .accessibilityLabel(destination.barTitle)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
-        .accessibilityIdentifier("ledger-tab-\(destination.barTitle)")
-        .accessibilityShowsLargeContentViewer {
-            glyph(destination, selected: selected)
-            Text(destination.barTitle)
-        }
+            .frame(maxWidth: .infinity)
+            .frame(height: Self.height)
+            .contentShape(Rectangle())
+            .accessibilityElement()
+            .accessibilityLabel(destination.barTitle)
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
+            .accessibilityAction { select(destination) }
+            .accessibilityIdentifier("ledger-tab-\(destination.barTitle)")
     }
 
     @ViewBuilder private func glyph(_ destination: LedgerDestination, selected: Bool) -> some View {
@@ -100,6 +155,123 @@ struct LedgerIconTabBar: View {
                 .font(.system(size: 19, weight: selected ? .semibold : .regular))
                 .frame(width: 25, height: 25)
         }
+    }
+}
+
+/// What floats over the page from the icon bar: the tip naming the icon
+/// under a sliding finger, and the card of shortcuts a held icon opens. The
+/// shell owns it and draws both over every tab, so they are not clipped by
+/// the bar (on 账本助手 it folds away under the keyboard) and a tap
+/// anywhere else can close the card.
+@MainActor @Observable
+final class LedgerIconTabMenu {
+    struct Tip: Equatable {
+        var title: String
+        var x: CGFloat
+    }
+
+    struct Card {
+        var items: [LedgerQuickLink]
+        var x: CGFloat
+        var open: @MainActor (URL) -> Void
+    }
+
+    var tip: Tip?
+    var card: Card?
+
+    func show(_ items: [LedgerQuickLink], from x: CGFloat, open: @escaping @MainActor (URL) -> Void) {
+        guard !items.isEmpty else { return }
+        tip = nil
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) { card = Card(items: items, x: x, open: open) }
+    }
+
+    func close() {
+        withAnimation(.easeOut(duration: 0.18)) { card = nil }
+    }
+}
+
+/// The tip and the card, over the shell, above the bar's row.
+private struct LedgerIconTabMenuLayer: View {
+    let menu: LedgerIconTabMenu
+    private static let cardWidth: CGFloat = 248
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .bottomLeading) {
+                if menu.card != nil {
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture { menu.close() }
+                        .gesture(DragGesture(minimumDistance: 0).onEnded { _ in menu.close() })
+                        .accessibilityHidden(true)
+                }
+                if let card = menu.card {
+                    cardView(card)
+                        .padding(.leading, min(max(card.x - 44, 16), proxy.size.width - Self.cardWidth - 16))
+                        .padding(.bottom, LedgerIconTabBar.height + 6)
+                        .transition(.scale(scale: 0.92, anchor: .bottomLeading).combined(with: .opacity))
+                }
+                if let tip = menu.tip {
+                    Text(tip.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(BalancedPalette.page)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(BalancedPalette.ink))
+                        .fixedSize()
+                        .position(x: tip.x, y: proxy.size.height - LedgerIconTabBar.height - 6)
+                        .allowsHitTesting(false)
+                        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: tip)
+                        .accessibilityHidden(true)
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .bottomLeading)
+        }
+        .ignoresSafeArea(.keyboard)
+    }
+
+    private func cardView(_ card: LedgerIconTabMenu.Card) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(card.items, id: \.self) { link in
+                Button {
+                    menu.close()
+                    card.open(link.url)
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: link.systemImage)
+                            .font(.system(size: 17, weight: .regular))
+                            .frame(width: 24)
+                        Text(link.title).balancedFont(size: 16)
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(BalancedPalette.ink)
+                    .padding(.horizontal, 18)
+                    .frame(height: 46)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("ledger-tab-menu-\(link.rawValue)")
+            }
+        }
+        .padding(.vertical, 8)
+        .frame(width: Self.cardWidth)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(BalancedPalette.card)
+                .shadow(color: .black.opacity(0.12), radius: 24, y: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(BalancedPalette.edge.opacity(0.6), lineWidth: 0.5)
+        )
+    }
+}
+
+extension View {
+    /// The icon bar's tip and shortcut card, drawn over this view.
+    func ledgerIconTabMenuLayer(_ menu: LedgerIconTabMenu) -> some View {
+        overlay { LedgerIconTabMenuLayer(menu: menu) }
+            .environment(menu)
     }
 }
 
@@ -185,6 +357,7 @@ struct LedgerIconTabShell<Content: View>: View {
     @ViewBuilder var content: (LedgerDestination) -> Content
     /// The tabs opened so far; they stay mounted behind the selected one.
     @State private var opened: Set<LedgerDestination> = []
+    @State private var menu = LedgerIconTabMenu()
 
     var body: some View {
         ZStack {
@@ -204,6 +377,7 @@ struct LedgerIconTabShell<Content: View>: View {
         .onChange(of: model.selection, initial: true) { _, selection in
             opened.insert(selection)
         }
+        .ledgerIconTabMenuLayer(menu)
     }
 }
 #endif
