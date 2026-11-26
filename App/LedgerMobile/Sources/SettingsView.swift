@@ -6,6 +6,8 @@ struct SettingsView: View {
     @ObservedObject private var colorThemes = LedgerColorThemeStore.shared
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var compactTabConfigurationPresented = false
+    /// 启动时打开; read once, written through `LedgerLaunchPage.store`.
+    @State private var launchPage = LedgerLaunchPage.stored()
     @State private var overviewSectionsPresented = false
     /// Re-read on appear: the report settings screen saves to UserDefaults.
     @State private var reportSettings = LedgerReportSettings.load()
@@ -23,7 +25,10 @@ struct SettingsView: View {
                 Section { StatusBanner(message: error, onDismiss: session.dismissError) }
             }
             Section {
-                SettingsRow(title: String(localized: "底部标签栏"), value: session.compactTabDestinations.map { $0 == .transactions ? String(localized: "流水") : $0.compactTitle }.joined(separator: String(localized: "、"))) {
+                if session.agentIsTab {
+                    launchPageRow
+                }
+                SettingsRow(title: String(localized: "底部标签栏"), value: compactTabSummary) {
                     compactTabConfigurationPresented = true
                 }
                 .accessibilityIdentifier("settings-compact-tabs")
@@ -287,7 +292,8 @@ struct SettingsView: View {
             .ledgerPrivacyProtectedSheet()
         }
         .sheet(isPresented: $compactTabConfigurationPresented) {
-            CompactTabConfigurationView(initialDestinations: session.compactTabDestinations) { destinations in
+            CompactTabConfigurationView(initialDestinations: session.compactTabDestinations,
+                                        agentIsTab: session.agentIsTab) { destinations in
                 session.setCompactTabDestinations(destinations)
             }
             .ledgerPrivacyProtectedSheet()
@@ -420,13 +426,17 @@ private struct CompactTabConfigurationView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var destinations: [LedgerDestination]
 
+    /// 账本助手 is the bar's fixed first tab (a local ledger).
+    let agentIsTab: Bool
     let onSave: ([LedgerDestination]) -> Void
 
     init(
         initialDestinations: [LedgerDestination],
+        agentIsTab: Bool,
         onSave: @escaping ([LedgerDestination]) -> Void
     ) {
         _destinations = State(initialValue: LedgerDestination.normalizedCompactTabs(initialDestinations))
+        self.agentIsTab = agentIsTab
         self.onSave = onSave
     }
 
@@ -475,7 +485,9 @@ private struct CompactTabConfigurationView: View {
                         .listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                 } footer: {
-                    Text("拖动右侧排序控件调整显示顺序，底栏固定保留“更多”和右侧的浮出按钮。")
+                    Text(agentIsTab
+                         ? String(localized: "拖动右侧排序控件调整显示顺序。底栏最左边固定是账本助手，最右边固定是“更多”。")
+                         : String(localized: "拖动右侧排序控件调整显示顺序，底栏固定保留“更多”和右侧的浮出按钮。"))
                         .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                         .listRowBackground(BalancedPalette.page)
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
@@ -700,6 +712,48 @@ struct OverviewSectionConfigurationView: View {
 
 /// `.row row--tap` with a trailing `--ink-3` value and an `--edge` chevron —
 /// the settings rows that open a picker or editor (底部标签栏, 自动锁定, 名称).
+private extension SettingsView {
+    /// The bar's tabs as the row lists them; 助手 is always first where it runs.
+    var compactTabSummary: String {
+        let tabs = (session.agentIsTab ? [LedgerDestination.agent] : []) + session.compactTabDestinations
+        return tabs.map(\.barTitle).joined(separator: String(localized: "、"))
+    }
+
+    /// 启动时打开: 账本助手 or 账本, as a menu on the row.
+    var launchPageRow: some View {
+        Menu {
+            Picker(selection: Binding(get: { launchPage }, set: { page in
+                launchPage = page
+                page.store()
+            })) {
+                ForEach(LedgerLaunchPage.allCases) { page in
+                    Text(page.title).tag(page)
+                }
+            } label: {
+                Text("启动时打开")
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Text("启动时打开").balancedFont(size: 15, weight: .text).foregroundStyle(BalancedPalette.ink)
+                Spacer(minLength: 8)
+                Text(launchPage.title).balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(BalancedPalette.edge)
+            }
+            .frame(minHeight: 44)
+            .overlay(alignment: .bottom) { BalancedPalette.rule.frame(height: 1) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .accessibilityIdentifier("settings-launch-page")
+        .accessibilityValue(launchPage.title)
+    }
+}
+
 private struct SettingsRow: View {
     let title: String
     let value: String

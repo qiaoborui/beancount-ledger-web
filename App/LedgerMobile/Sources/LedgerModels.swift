@@ -66,8 +66,13 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
         }
     }
 
-    /// 账本助手 floats beside the tab bar instead of being a tab; search is an
-    /// ordinary tab choice.
+    /// The name under a bottom tab: 交易账本 is 流水 there.
+    var barTitle: String {
+        self == .transactions ? String(localized: "流水") : compactTitle
+    }
+
+    /// 账本助手 is not a tab choice: where it can run it is always the first
+    /// tab, and elsewhere it lives in 更多. Search is an ordinary tab choice.
     static var compactTabCandidates: [LedgerDestination] {
         allCases.filter { $0 != .settings && $0 != .agent }
     }
@@ -80,16 +85,24 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
         return normalized.isEmpty ? defaultCompactTabs : Array(normalized)
     }
 
-    /// A saved tab list from before the assistant floated beside the tab bar puts
+    /// A saved tab list from before the assistant left the tab choices puts
     /// search where 助手 was, so the bar keeps the same number of tabs.
     static func migratedCompactTabs(_ destinations: [LedgerDestination]) -> [LedgerDestination] {
         normalizedCompactTabs(destinations.map { $0 == .agent ? .search : $0 })
     }
 
-    /// The destinations a compact tab selects directly. Where the assistant can't
-    /// run, search keeps its floating button beside the tab bar.
-    static func compactDirectDestinations(_ tabs: [LedgerDestination], agentFloats: Bool) -> [LedgerDestination] {
-        agentFloats || tabs.contains(.search) ? tabs : tabs + [.search]
+    /// The destinations a compact tab selects directly. Where the assistant
+    /// runs it is the first of them; where it can't, search keeps its
+    /// floating button beside the tab bar.
+    static func compactDirectDestinations(_ tabs: [LedgerDestination], agentIsTab: Bool) -> [LedgerDestination] {
+        if agentIsTab { return [.agent] + tabs }
+        return tabs.contains(.search) ? tabs : tabs + [.search]
+    }
+
+    /// The icon bar of a local ledger, left to right: 助手, the chosen tabs
+    /// and 更多.
+    static func iconBarDestinations(_ tabs: [LedgerDestination]) -> [LedgerDestination] {
+        [.agent] + tabs + [.settings]
     }
 
     /// Pages that aren't tabs open from 更多.
@@ -103,6 +116,60 @@ enum LedgerDestination: String, CaseIterable, Codable, Hashable, Identifiable, S
 
     static func stored(_ rawValue: String) -> LedgerDestination {
         LedgerDestination(rawValue: rawValue) ?? .overview
+    }
+}
+
+/// 启动时打开: where a cold launch lands when 账本助手 can run. The assistant
+/// is the first tab, so either way it is one tap away.
+enum LedgerLaunchPage: String, CaseIterable, Identifiable, Sendable {
+    /// 账本助手, the way a chat app opens on its chat.
+    case assistant
+    /// The first ledger tab (概览 unless the bar was changed).
+    case ledger
+
+    static let defaultsKey = "ledger.launch.page"
+    /// The switch 助手设置 had before this setting: 打开 App 时进入助手.
+    static let legacyDefaultsKey = "ledger.agent.opensAtLaunch"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .assistant: String(localized: "账本助手")
+        case .ledger: String(localized: "账本")
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .assistant: String(localized: "像聊天 App 一样，打开就能问")
+        case .ledger: String(localized: "打开就是底部的第一个账本页面")
+        }
+    }
+
+    /// The saved choice; someone who turned 打开 App 时进入助手 off lands on
+    /// the ledger.
+    static func stored(in defaults: UserDefaults = .standard) -> LedgerLaunchPage {
+        if let raw = defaults.string(forKey: defaultsKey), let page = LedgerLaunchPage(rawValue: raw) {
+            return page
+        }
+        if defaults.object(forKey: legacyDefaultsKey) != nil {
+            return defaults.bool(forKey: legacyDefaultsKey) ? .assistant : .ledger
+        }
+        return .assistant
+    }
+
+    func store(in defaults: UserDefaults = .standard) {
+        defaults.set(rawValue, forKey: Self.defaultsKey)
+        defaults.removeObject(forKey: Self.legacyDefaultsKey)
+    }
+
+    /// The tab a cold launch selects, given the bar's tabs.
+    func destination(tabs: [LedgerDestination]) -> LedgerDestination {
+        switch self {
+        case .assistant: .agent
+        case .ledger: tabs.first ?? .overview
+        }
     }
 }
 

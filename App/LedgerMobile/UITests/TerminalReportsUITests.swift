@@ -29,7 +29,7 @@ final class TerminalReportsUITests: XCTestCase {
 
     func testTransactionSearchSelectionAndDetail() {
         let app = launch()
-        app.tabBars.buttons["流水"].tap()
+        app.compactTab("流水").tap()
         let search = app.textFields["transaction-quick-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 10), app.debugDescription)
         assertHeader(app)
@@ -102,7 +102,7 @@ final class TerminalReportsUITests: XCTestCase {
         app.launchArguments = ["--safe-preview", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN",
             "-UIPreferredContentSizeCategoryName", category]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.compactTab("更多").waitForExistence(timeout: 15))
         return app
     }
     private func capture(_ name: String) {

@@ -98,14 +98,12 @@ struct MoreView: View {
     }
 
     private var directDestinations: [LedgerDestination] {
-        LedgerDestination.compactDirectDestinations(session.compactTabDestinations, agentFloats: session.agentFloatsInTabBar)
+        LedgerDestination.compactDirectDestinations(session.compactTabDestinations, agentIsTab: session.agentIsTab)
     }
 
     private func restoreOverflowRoute() {
         let destination = LedgerDestination.stored(session.primaryDestinationID)
         guard destination.isCompactOverflow(in: directDestinations) else { return }
-        // Where the assistant floats, MainTabView opens it as a sheet instead.
-        if destination == .agent, session.agentFloatsInTabBar { return }
         overflowDestination = destination
     }
 

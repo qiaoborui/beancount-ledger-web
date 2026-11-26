@@ -7,6 +7,31 @@ enum LedgerLaunchTiming {
     static let exitStartsAt: TimeInterval = 0.66
     static let exitDuration: TimeInterval = 0.22
     static let reducedMotionDuration: TimeInterval = 0.16
+    /// The mark's move onto 账本助手's greeting.
+    static let handoffDuration: TimeInterval = 0.34
+}
+
+/// The launch cover's hand-off to 账本助手: the empty conversation reports
+/// where its greeting's mark is, and the cover moves its own mark there
+/// before it lifts, so the two read as one mark. Without a greeting on
+/// screen (the ledger tabs, the intro before a model is set) the cover
+/// leaves as it always did.
+@MainActor
+enum LedgerLaunchHandoff {
+    struct Motion: Equatable {
+        var offset: CGSize
+        var scale: CGFloat
+    }
+
+    /// The greeting's mark in global coordinates, while the empty
+    /// conversation is on screen; nil otherwise.
+    static var greetingMark: CGRect?
+
+    static func motion(from mark: CGRect?) -> Motion? {
+        guard let mark, let target = greetingMark, mark.width > 0, target.width > 0 else { return nil }
+        return Motion(offset: CGSize(width: target.midX - mark.midX, height: target.midY - mark.midY),
+                      scale: target.width / mark.width)
+    }
 }
 
 /// Only the foreground presentation clock drives the decorative transition.
@@ -22,6 +47,11 @@ struct LedgerLaunchView: View {
     @State private var holdFinished = false
     @State private var fading = false
     @State private var startedAt: Date?
+    /// Where the brand's mark is on screen, for the hand-off to 账本助手.
+    @State private var markFrame: CGRect?
+    /// The mark's move onto the greeting's mark, and the title fading, while
+    /// the launch lands on 账本助手.
+    @State private var handoff: LedgerLaunchHandoff.Motion?
 
     var body: some View {
         ZStack {
@@ -33,11 +63,15 @@ struct LedgerLaunchView: View {
                                     paused: reduceMotion || scenePhase != .active || foldFinished)) { timeline in
                 let elapsed = startedAt.map { max(0, timeline.date.timeIntervalSince($0)) } ?? 0
                 let linear = min(elapsed / LedgerLaunchTiming.foldDuration, 1)
-                LedgerLaunchBrand(progress: reduceMotion || scenePhase != .active || foldFinished ? 1 : linear)
+                LedgerLaunchBrand(progress: reduceMotion || scenePhase != .active || foldFinished ? 1 : linear,
+                                  motion: handoff,
+                                  onMarkFrame: { markFrame = $0 })
             }
         }
         .opacity(fading ? 0 : 1)
-        .scaleEffect(fading && !reduceMotion ? 1.04 : 1)
+        // A hand-off moves the mark instead; zooming the whole cover would
+        // pull it off the greeting's mark.
+        .scaleEffect(fading && !reduceMotion && handoff == nil ? 1.04 : 1)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .task(id: scenePhase) {
@@ -73,6 +107,19 @@ struct LedgerLaunchView: View {
         .task(id: canFinish) {
             guard canFinish else { return }
             do {
+                // Landing on 账本助手: the mark moves onto the greeting's own
+                // mark and shrinks to its size while the title goes, and the
+                // cover fades over the second half, so the page is there
+                // when it lifts.
+                if !reduceMotion, scenePhase == .active, let motion = LedgerLaunchHandoff.motion(from: markFrame) {
+                    let duration = LedgerLaunchTiming.handoffDuration
+                    withAnimation(.easeInOut(duration: duration)) { handoff = motion }
+                    withAnimation(.easeIn(duration: duration / 2).delay(duration / 2)) { fading = true }
+                    try await Task.sleep(for: .seconds(duration))
+                    try Task.checkCancellation()
+                    onFinished()
+                    return
+                }
                 let duration = reduceMotion ? LedgerLaunchTiming.reducedMotionDuration : LedgerLaunchTiming.exitDuration
                 withAnimation(reduceMotion ? .linear(duration: duration) : .easeIn(duration: duration)) {
                     fading = true
@@ -98,6 +145,10 @@ struct LedgerLaunchView: View {
 /// the default of 1 always renders the settled brand.
 struct LedgerLaunchBrand: View {
     var progress: CGFloat = 1
+    /// The hand-off to 账本助手's greeting, while it runs.
+    var motion: LedgerLaunchHandoff.Motion? = nil
+    /// Reports the mark's frame on screen.
+    var onMarkFrame: ((CGRect) -> Void)? = nil
 
     var body: some View {
         let mark = LedgerLaunchCurve.easeOut(LedgerLaunchCurve.slice(progress, 0, 0.6))
@@ -107,6 +158,11 @@ struct LedgerLaunchBrand: View {
             LedgerMarkCanvas(progress: progress)
                 .frame(width: 96, height: 96)
                 .scaleEffect(0.86 + 0.14 * mark)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    onMarkFrame?(frame)
+                }
+                .scaleEffect(motion?.scale ?? 1)
+                .offset(motion?.offset ?? .zero)
             VStack(spacing: 10) {
                 Text("Ledger")
                     .font(.system(size: 20, weight: .semibold, design: .monospaced))
@@ -118,6 +174,7 @@ struct LedgerLaunchBrand: View {
                     .frame(width: 28 * rule, height: 2)
                     .frame(width: 28, height: 2)
             }
+            .opacity(motion == nil ? 1 : 0)
         }
     }
 }
