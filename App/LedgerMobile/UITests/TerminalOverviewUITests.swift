@@ -70,7 +70,7 @@ final class TerminalOverviewUITests: XCTestCase {
     func testPrivacyMasksOverviewAmountsAndCategoryPercentages() {
         let app = launch()
         XCTAssertTrue(app.buttons["navigation-time-range"].waitForExistence(timeout: 15))
-        app.tabBars.buttons["账户"].tap()
+        app.compactTab("账户").tap()
         let hide = app.buttons["隐藏金额"]
         XCTAssertTrue(hide.waitForExistence(timeout: 5))
         hide.tap()
@@ -88,7 +88,7 @@ final class TerminalOverviewUITests: XCTestCase {
         XCTAssertTrue(app.buttons["navigation-time-range"].waitForExistence(timeout: 15))
         // Search floats beside the native tab bar on a server ledger.
         XCTAssertTrue(app.tabBars.firstMatch.exists)
-        let search = app.tabBars.buttons["搜索"]
+        let search = app.compactTab("搜索")
         XCTAssertTrue(search.waitForExistence(timeout: 5), app.debugDescription)
         search.tap()
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
@@ -98,7 +98,7 @@ final class TerminalOverviewUITests: XCTestCase {
 
     func testNativeTabsScrollAndSearchNavigation() {
         let app = launch()
-        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.compactTab("概览").waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertEqual(app.tabBars.buttons.count, 5)
         capture("native-tabs-expanded")
         app.swipeUp()
@@ -112,7 +112,7 @@ final class TerminalOverviewUITests: XCTestCase {
         more.tap()
         XCTAssertTrue(app.collectionViews["more-list"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["navigation-time-range"].exists)
-        app.tabBars.buttons["搜索"].tap()
+        app.compactTab("搜索").tap()
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
         XCTAssertEqual(app.tabBars.buttons.count, 5)
         capture("native-tabs-search")

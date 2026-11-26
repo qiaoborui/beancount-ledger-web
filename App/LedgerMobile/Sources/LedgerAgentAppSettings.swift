@@ -23,6 +23,9 @@ struct LedgerAgentAppSettings: Codable, Equatable, Sendable {
     struct Tabs: Codable, Equatable, Sendable {
         /// The tabs beside 更多, one to three of them.
         var tabs: [String]
+        /// 启动时打开: `assistant` or `ledger` (`LedgerLaunchPage`). Optional,
+        /// so a snapshot from before the setting still decodes.
+        var launch: String? = nil
     }
 
     struct Valuation: Codable, Equatable, Sendable {
@@ -188,7 +191,7 @@ struct LedgerAgentAppSettingsApply: Equatable, Sendable {
 /// value that does not fit fails the whole section instead of half of it.
 enum LedgerAgentAppSettingsPlan {
     case overview([OverviewSection])
-    case tabs([LedgerDestination])
+    case tabs([LedgerDestination], LedgerLaunchPage?)
     case valuation(String)
     case reminders(LedgerReminderSettings)
     case reports(LedgerReportSettings)
@@ -203,7 +206,8 @@ extension LedgerAgentAppSettings {
         let reports = LedgerReportSettings.load(from: defaults)
         return LedgerAgentAppSettings(
             overview: .init(sections: overviewSections(defaults: defaults).map(\.rawValue)),
-            tabs: .init(tabs: compactTabs(defaults: defaults).map(\.rawValue)),
+            tabs: .init(tabs: compactTabs(defaults: defaults).map(\.rawValue),
+                        launch: LedgerLaunchPage.stored(in: defaults).rawValue),
             valuation: .init(currency: valuationCurrency),
             reminders: .init(bookkeeping: .init(enabled: reminders.bookkeeping.isEnabled,
                                                time: reminders.bookkeeping.time.text,
@@ -314,7 +318,14 @@ extension LedgerAgentAppSettings {
                 }
                 values.append(value)
             }
-            return .tabs(LedgerDestination.normalizedCompactTabs(values))
+            var launch: LedgerLaunchPage?
+            if let raw = tabs.launch {
+                guard let page = LedgerLaunchPage(rawValue: raw) else {
+                    throw LedgerAgentAppSettingsError(String(localized: "启动时打开只能是 assistant（账本助手）或 ledger（账本）"))
+                }
+                launch = page
+            }
+            return .tabs(LedgerDestination.normalizedCompactTabs(values), launch)
 
         case .valuation:
             let currency = valuation.currency.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -461,8 +472,9 @@ extension LedgerAgentAppSettingsHost {
                     switch try settings.plan(for: section, in: defaults) {
                     case let .overview(values):
                         session.setOverviewSections(values)
-                    case let .tabs(values):
+                    case let .tabs(values, launch):
                         session.setCompactTabDestinations(values)
+                        launch?.store(in: defaults)
                     case let .valuation(currency):
                         // The currency is a display choice the session re-reads
                         // the ledger for; nothing else writes it.

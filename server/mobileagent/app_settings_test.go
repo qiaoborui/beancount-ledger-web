@@ -16,7 +16,7 @@ import (
 const appSettingsJSON = `{
   "overview": {"sections": ["retention", "periodStats", "spendingTrend", "spendingCategories",
     "creditCards", "topPayees", "incomeBreakdown", "balanceSheet", "currencyExposure"]},
-  "tabs": {"tabs": ["overview", "transactions", "accounts"]},
+  "tabs": {"tabs": ["overview", "transactions", "accounts"], "launch": "assistant"},
   "valuation": {"currency": "CNY"},
   "reminders": {
     "bookkeeping": {"enabled": true, "time": "21:30", "repeat": "daily", "days": [1, 2, 3, 4, 5, 6, 7],
@@ -93,6 +93,12 @@ func TestAppSettingsUpdateAcceptsEverySection(t *testing.T) {
 			func(t *testing.T, settings appSettingsV1) {
 				if strings.Join(settings.Tabs.Tabs, ",") != "overview,search" {
 					t.Fatalf("tabs = %v", settings.Tabs.Tabs)
+				}
+			}},
+		{"tabs", `{"tabs": {"launch": "ledger"}}`,
+			func(t *testing.T, settings appSettingsV1) {
+				if settings.Tabs.Launch != "ledger" || strings.Join(settings.Tabs.Tabs, ",") != "overview,transactions,accounts" {
+					t.Fatalf("tabs = %+v", settings.Tabs)
 				}
 			}},
 		{"valuation", `{"valuation": {"currency": "usd"}}`,
@@ -186,6 +192,7 @@ func TestAppSettingsUpdateRejectsUnknownFieldsAndBadValues(t *testing.T) {
 		"duplicate overview section": `{"overview": {"sections": ["retention", "retention"]}}`,
 		"too many tabs":              `{"tabs": {"tabs": ["overview", "transactions", "accounts", "search"]}}`,
 		"settings tab":               `{"tabs": {"tabs": ["settings"]}}`,
+		"unknown launch page":        `{"tabs": {"launch": "search"}}`,
 		"missing report section":     `{"reports": {"sections": [{"id": "overview", "visible": true}]}}`,
 		"unknown report section":     `{"reports": {"sections": [{"id": "summary", "visible": true}]}}`,
 	}

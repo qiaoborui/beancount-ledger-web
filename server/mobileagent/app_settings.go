@@ -41,9 +41,12 @@ type appOverviewV1 struct {
 	Sections []string `json:"sections"`
 }
 
-// appTabsV1 is the three tabs beside 更多.
+// appTabsV1 is the three tabs beside 更多, and the page a cold launch opens
+// on (启动时打开): "assistant" or "ledger". Launch is empty in a snapshot from
+// a shell that predates the setting.
 type appTabsV1 struct {
-	Tabs []string `json:"tabs"`
+	Tabs   []string `json:"tabs"`
+	Launch string   `json:"launch,omitempty"`
 }
 
 // appValuationV1 is the currency amounts are converted to.
@@ -124,7 +127,8 @@ type appOverviewUpdateV1 struct {
 }
 
 type appTabsUpdateV1 struct {
-	Tabs *[]string `json:"tabs,omitempty"`
+	Tabs   *[]string `json:"tabs,omitempty"`
+	Launch *string   `json:"launch,omitempty"`
 }
 
 type appValuationUpdateV1 struct {
@@ -177,12 +181,13 @@ var (
 	appOverviewSections = []string{"retention", "periodStats", "spendingTrend", "spendingCategories",
 		"creditCards", "topPayees", "incomeBreakdown", "balanceSheet", "currencyExposure"}
 	// 更多 and 账本助手 are not tab choices: 更多 holds the pages that are not
-	// tabs and the assistant floats beside the bar.
+	// tabs and the assistant is always the first tab.
 	appCompactTabs    = []string{"overview", "incomeExpense", "investments", "currencies", "query", "imports", "transactions", "accounts", "search"}
 	appReportSections = []string{"overview", "categories", "daily", "largest", "coverage", "assistant"}
 	appRepeats        = []string{"daily", "weekdays", "custom"}
 	appCadences       = []string{"weekly", "monthly"}
 	appSettingsNames  = []string{"overview", "tabs", "valuation", "reminders", "reports"}
+	appLaunchPages    = []string{"assistant", "ledger"}
 )
 
 // appSettingsNameTitles name the sections as the chat shows them.
@@ -201,7 +206,7 @@ const appSettingsPrompt = `
 
 App 设置：
 - 除了账本文件，App 自身的设置也能改：get_app_settings 读取当前值，update_app_settings 修改。它们存在本机，不在账本里，不要用文件工具去找。
-- 用户提出这类要求时直接改，不必先问：说「每天晚上提醒我记账」「提醒改到 22 点、只在工作日」就改 reminders；「首页别显示预算」「首页先看支出分类」改 overview；「底部标签换成…」改 tabs；「周报改到周日发」「月报关掉」改 reports；「用美元看资产」改 valuation。
+- 用户提出这类要求时直接改，不必先问：说「每天晚上提醒我记账」「提醒改到 22 点、只在工作日」就改 reminders；「首页别显示预算」「首页先看支出分类」改 overview；「底部标签换成…」改 tabs.tabs；「打开 App 直接进账本／先进助手」改 tabs.launch；「周报改到周日发」「月报关掉」改 reports；「用美元看资产」改 valuation。
 - 只改用户说的那一项，用局部更新；拿不准当前值就先 get_app_settings。时间用 24 小时制 HH:MM。星期用 1=周日 … 7=周六。
 - 改完在回答末尾用一句话说改了什么，例如「已把记账提醒改到每天 22:00，只在周一到周五」。App 会在回答下显示一行改动记录，用户可以撤销。
 - 这些设置以外的东西（模型、API Key、隐私锁、通知权限）不能改；用户要改就说明在设置页里改。`
@@ -298,6 +303,9 @@ func validateTabs(tabs appTabsV1) error {
 			return fmt.Errorf("tabs.tabs 里的 %q 出现了两次", tab)
 		}
 		seen[tab] = true
+	}
+	if tabs.Launch != "" && !contains(appLaunchPages, tabs.Launch) {
+		return fmt.Errorf("tabs.launch %q 不对；只能是 assistant（打开就是账本助手）或 ledger（打开就是账本）", tabs.Launch)
 	}
 	return nil
 }
@@ -419,6 +427,9 @@ func (s appSettingsV1) merge(update appSettingsUpdateV1) appSettingsV1 {
 	}
 	if section := update.Tabs; section != nil && section.Tabs != nil {
 		s.Tabs.Tabs = append([]string{}, (*section.Tabs)...)
+	}
+	if section := update.Tabs; section != nil && section.Launch != nil {
+		s.Tabs.Launch = *section.Launch
 	}
 	if section := update.Valuation; section != nil && section.Currency != nil {
 		s.Valuation.Currency = strings.ToUpper(strings.TrimSpace(*section.Currency))
@@ -598,7 +609,7 @@ func sameSection(name string, before, after appSettingsV1) bool {
 	case "overview":
 		return sameStrings(before.Overview.Sections, after.Overview.Sections)
 	case "tabs":
-		return sameStrings(before.Tabs.Tabs, after.Tabs.Tabs)
+		return sameStrings(before.Tabs.Tabs, after.Tabs.Tabs) && before.Tabs.Launch == after.Tabs.Launch
 	case "valuation":
 		return before.Valuation == after.Valuation
 	case "reminders":
@@ -762,8 +773,8 @@ func appSettingsGuide() map[string]any {
 	return map[string]any{
 		"overview": map[string]any{"sections": appOverviewSections,
 			"hint": "首页显示哪些分区，顺序就是显示顺序；没列出的分区不显示，至少要留一个"},
-		"tabs": map[string]any{"tabs": appCompactTabs, "max": maxCompactTabs,
-			"hint": "底部标签栏的 1 到 3 个标签，顺序就是显示顺序；更多和账本助手不在其中"},
+		"tabs": map[string]any{"tabs": appCompactTabs, "max": maxCompactTabs, "launch": appLaunchPages,
+			"hint": "tabs 是底部标签栏的 1 到 3 个标签，顺序就是显示顺序；账本助手固定在最左、更多固定在最右，不在其中。launch 是启动时打开：assistant 打开就是账本助手，ledger 打开就是第一个账本标签"},
 		"valuation": map[string]any{"currency": "三字母货币代码，如 CNY、USD、HKD",
 			"hint": "资产和统计换算成这个币种显示"},
 		"reminders": map[string]any{
@@ -804,6 +815,8 @@ func appSettingsUpdateSchema() map[string]any {
 			"tabs": map[string]any{"type": "array", "minItems": 1, "maxItems": maxCompactTabs,
 				"items":       map[string]any{"type": "string", "enum": appCompactTabs},
 				"description": "底部标签栏的标签，1 到 3 个，顺序就是显示顺序"},
+			"launch": map[string]any{"type": str, "enum": appLaunchPages,
+				"description": "启动时打开：assistant 打开就是账本助手，ledger 打开就是第一个账本标签"},
 		}),
 		"valuation": objectParameters(map[string]any{
 			"currency": field(str, "三字母货币代码，如 CNY、USD"),
@@ -861,7 +874,7 @@ func appSettingsToolSchema(update bool) ai.ToolSchema {
 	}
 	return ai.ToolSchema{Name: "update_app_settings",
 		Description: "修改 App 自身的设置（不是账本文件）。只传要改的分区与字段，没传的保持不变；每个分区都校验，错了会说明怎么改。可以改：" +
-			"overview 首页分区与顺序；tabs 底部标签（≤3 个）；valuation 估值币种；" +
+			"overview 首页分区与顺序；tabs 底部标签（≤3 个）与启动时打开；valuation 估值币种；" +
 			"reminders 记账提醒（开关、时间、每天/工作日/自定义星期、记过账就跳过）与导入账单提醒（开关、每周星期几或每月几号、时间）；" +
 			"reports 周报与月报（开关、星期几/几号、时间、报告分区、是否出报告前提醒导入）。" +
 			"改完用一句话告诉用户改了什么；用户可以在回答下撤销。凭据、隐私锁和模型设置不在其中。",

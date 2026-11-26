@@ -180,9 +180,10 @@ final class LedgerSession: ObservableObject {
         if case .local = location { return true }
         return false
     }
-    /// 账本助手 runs on the local ledger only. Where it does, it takes the
-    /// floating button beside the compact tab bar from search.
-    var agentFloatsInTabBar: Bool { isLocal }
+    /// 账本助手 runs on the local ledger only. Where it does, it is the first
+    /// tab of the bar (`LedgerIconTabBar`) and the page a cold launch can
+    /// land on (`LedgerLaunchPage`).
+    var agentIsTab: Bool { isLocal }
     var currentLocalLedgerDescriptor: LocalLedgerDescriptor? {
         guard case let .local(id) = location else { return nil }
         return localLedgers.first(where: { $0.id == id })
@@ -201,14 +202,12 @@ final class LedgerSession: ObservableObject {
     @Published var pendingTransactionFilter: LedgerTransactionFilter?
     @Published private(set) var pendingWidgetExpenseDay: String?
     @Published private(set) var compactTabDestinations = LedgerDestination.defaultCompactTabs
-    /// The assistant sheet opened from the floating button or an external
-    /// route, over whichever tab is open. Closing it leaves the conversation
-    /// running in `LedgerAgentSessions`.
+    /// A request to show 账本助手, from an external route, a shortcut or a
+    /// report. The shell answers it by selecting the assistant's tab (or its
+    /// page in the iPad sidebar) and sets it back to false.
     @Published var agentPresented = false
-    /// True from the assistant sheet's appearance until its dismissal has
-    /// finished. Another sheet asked for meanwhile (a day's transactions from
-    /// a link in a reply, a quick entry) waits for it, since UIKit drops a
-    /// presentation requested while another is still going away.
+    /// True while a full-screen assistant is on screen. The assistant is a
+    /// tab now, so nothing sets it; the routes that wait for it still read it.
     @Published var agentSheetOnScreen = false
     /// True while AI 开账's sheet is up. Its 确认创建 hands the fresh ledger to
     /// the assistant, which can only be covered in once this sheet is gone.

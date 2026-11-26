@@ -468,9 +468,8 @@ private struct MainTabView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @State private var moreDestination: LedgerDestination?
-    @AppStorage(LedgerAgentLaunch.storageKey) private var agentOpensAtLaunch = true
-    /// The app has decided once whether to open on 账本助手; a shell rebuilt
-    /// after a lock or a size change does not open it again.
+    /// The app has chosen the page a cold launch lands on; a shell rebuilt
+    /// after a lock, a size change or a new 配色方案 keeps the page it had.
     @MainActor private static var launchHandled = false
 
     private var selection: Binding<LedgerDestination> {
@@ -480,17 +479,18 @@ private struct MainTabView: View {
         )
     }
 
-    /// 账本助手 takes the floating button from search where it can run.
-    private var agentFloats: Bool { session.agentFloatsInTabBar }
+    /// 账本助手 is the first tab where it can run (a local ledger); the tab
+    /// bar is then the app's own icon bar.
+    private var agentIsTab: Bool { session.agentIsTab }
 
-    /// The configured tabs shown in the bar. Where search keeps its floating
-    /// button, it isn't drawn twice.
+    /// The configured tabs shown in the system bar of a remote ledger, where
+    /// search keeps its floating button and isn't drawn twice.
     private var barDestinations: [LedgerDestination] {
-        agentFloats ? session.compactTabDestinations : session.compactTabDestinations.filter { $0 != .search }
+        session.compactTabDestinations.filter { $0 != .search }
     }
 
     private var directDestinations: [LedgerDestination] {
-        LedgerDestination.compactDirectDestinations(session.compactTabDestinations, agentFloats: agentFloats)
+        LedgerDestination.compactDirectDestinations(session.compactTabDestinations, agentIsTab: agentIsTab)
     }
 
     private var compactSelection: Binding<LedgerDestination> {
@@ -500,12 +500,6 @@ private struct MainTabView: View {
                     .compactSelection(in: directDestinations)
             },
             set: { destination in
-                // The assistant's button opens its sheet over the current tab
-                // and never becomes the selected tab.
-                if destination == .agent, agentFloats {
-                    session.agentPresented = true
-                    return
-                }
                 let overflow = moreDestination.flatMap {
                     $0.isCompactOverflow(in: directDestinations) ? $0 : nil
                 }
@@ -514,6 +508,14 @@ private struct MainTabView: View {
                     : destination.rawValue
             }
         )
+    }
+
+    private var iconBar: LedgerIconTabBarModel {
+        let selection = compactSelection
+        return LedgerIconTabBarModel(
+            destinations: LedgerDestination.iconBarDestinations(session.compactTabDestinations),
+            selection: selection.wrappedValue,
+            select: { selection.wrappedValue = $0 })
     }
 
     private func quickEntryBinding(_ kind: LedgerQuickEntryRequest.Kind) -> Binding<LedgerQuickEntryRequest?> {
@@ -542,37 +544,21 @@ private struct MainTabView: View {
         )
     }
 
-    private var agentSheetBinding: Binding<Bool> {
-        Binding(
-            get: { session.agentPresented && agentFloats && horizontalSizeClass != .regular },
-            set: { if !$0 { session.agentPresented = false } }
-        )
-    }
-
-    /// The assistant is a sheet on compact layouts with the local ledger and a
-    /// page everywhere else (the iPad sidebar, a remote ledger's 更多). A
-    /// request for one becomes the other here, so every entry point — the
-    /// floating button, a shortcut, a notification, a restored page — lands
-    /// on whichever this layout has.
-    private func routeAgent(previous: String? = nil) {
-        let compactSheet = agentFloats && horizontalSizeClass != .regular
-        if compactSheet, session.primaryDestinationID == LedgerDestination.agent.rawValue {
-            var fallback = barDestinations.first ?? .overview
-            if let previous, LedgerDestination.stored(previous) != .agent {
-                fallback = LedgerDestination.stored(previous)
-            }
-            session.primaryDestinationID = fallback.rawValue
-            session.agentPresented = true
-        } else if !compactSheet, session.agentPresented {
-            session.agentPresented = false
-            session.primaryDestinationID = LedgerDestination.agent.rawValue
-        }
+    /// Every request for the assistant (a shortcut, a notification, a link,
+    /// a report's 问账本助手) selects its page: the first tab on a phone, its
+    /// row in the iPad sidebar, its page in 更多 on a remote ledger.
+    private func routeAgent() {
+        guard session.agentPresented else { return }
+        session.agentPresented = false
+        session.primaryDestinationID = LedgerDestination.agent.rawValue
     }
 
     var body: some View {
         Group {
             if horizontalSizeClass == .regular {
                 LedgerRegularShell(selection: selection)
+            } else if agentIsTab {
+                iconTabs
             } else {
                 if #available(iOS 26.0, *) {
                     nativeTabs.tabBarMinimizeBehavior(.onScrollDown)
@@ -602,41 +588,19 @@ private struct MainTabView: View {
             }
             .ledgerPrivacyProtectedSheet()
         }
-        // 账本助手 covers the whole screen, without the tab bar, so its composer
-        // sits at the bottom of the screen. A cover rather than a sheet: a
-        // downward drag scrolls the conversation instead of dismissing it, and
-        // only the close button leaves. Closing it keeps the conversation, and
-        // a running reply, in `LedgerAgentSessions`.
-        .fullScreenCover(isPresented: agentSheetBinding, onDismiss: {
-            session.agentSheetOnScreen = false
-            LedgerCrashLog.shared.record("账本助手整屏：关闭")
-            // A route that arrived while the cover was going away can present
-            // now instead of asking SwiftUI to present during the dismissal.
-            Task { await session.applyPendingExternalRoute() }
-        }) {
-            NavigationStack {
-                LedgerAgentView(isRoot: true, onClose: { session.agentPresented = false })
-            }
-            .ledgerPrivacyProtectedSheet()
-            .onAppear {
-                session.agentSheetOnScreen = true
-                LedgerCrashLog.shared.record("账本助手整屏：出现")
-            }
-        }
-        .onChange(of: session.primaryDestinationID, initial: true) { previous, _ in
+        .onChange(of: session.primaryDestinationID, initial: true) { _, _ in
             LedgerCrashLog.shared.updateContext(ledgerMode: session.isLocal ? "本机" : "远程",
                                                 page: session.primaryDestinationID)
-            routeAgent(previous: previous)
         }
-        .onChange(of: session.agentPresented) { _, _ in routeAgent() }
-        // AI native: the app opens on 账本助手, the way a chat app opens on
-        // its chat. Closing it shows the ledger's tabs underneath.
-        .task { openAgentAtLaunch() }
-        .onChange(of: horizontalSizeClass) { _, _ in routeAgent() }
+        .onChange(of: session.agentPresented, initial: true) { _, _ in routeAgent() }
+        // AI native: a cold launch lands on 账本助手 from its first frame, the
+        // way a chat app opens on its chat, unless 启动时打开 says 账本.
+        // Synchronous, so the launch cover lifts onto the chosen page rather
+        // than onto 概览 switching to it.
+        .onAppear { chooseLaunchPage() }
         .onChange(of: session.isLocal) { _, local in
             LedgerCrashLog.shared.updateContext(ledgerMode: local ? "本机" : "远程",
                                                 page: session.primaryDestinationID)
-            routeAgent()
         }
         .task(id: session.pendingExternalRoute?.id) { await session.applyPendingExternalRoute() }
         // A notification tap that resumed the app waits for an active scene
@@ -659,51 +623,58 @@ private struct MainTabView: View {
         }
     }
 
-    private func openAgentAtLaunch() {
+    private func chooseLaunchPage() {
         guard !Self.launchHandled else { return }
         Self.launchHandled = true
-        // Only where the assistant is the full-screen cover; and not when the
-        // launch came with somewhere else to go (a widget, a notification,
-        // a quick entry) or is a UI test fixture.
-        guard agentOpensAtLaunch, agentFloats, horizontalSizeClass != .regular, !session.agentPresented,
-              session.pendingExternalRoute == nil, session.quickEntry == nil, session.reportRequest == nil,
-              !LedgerAgentLaunch.isFixture else { return }
-        session.agentPresented = true
+        // Not when the launch came with somewhere else to go (a widget, a
+        // notification, a quick entry), nor for a UI test fixture.
+        guard agentIsTab, session.pendingExternalRoute == nil, session.quickEntry == nil,
+              session.reportRequest == nil, !LedgerAgentLaunch.isFixture else { return }
+        let page = LedgerLaunchPage.stored().destination(tabs: session.compactTabDestinations)
+        session.primaryDestinationID = page.rawValue
     }
 
+    /// A local ledger on a phone: 账本助手 first, the chosen tabs, 更多, under
+    /// the app's own icon bar. 账本助手 draws the bar under its composer; the
+    /// other tabs get it under their navigation stack, so it stays on the
+    /// pages they push, as the system bar did.
+    private var iconTabs: some View {
+        let bar = iconBar
+        return LedgerIconTabShell(model: bar) { destination in
+            switch destination {
+            case .agent:
+                NavigationStack { LedgerDestinationView(destination: .agent, isRoot: true) }
+            case .settings:
+                NavigationStack { MoreView(overflowDestination: $moreDestination) }
+                    .ledgerIconTabBar(bar)
+            default:
+                NavigationStack { LedgerDestinationView(destination: destination, isRoot: true) }
+                    .ledgerIconTabBar(bar)
+            }
+        }
+    }
+
+    /// A remote ledger, where the assistant can't run: the system tab bar
+    /// with search's floating button.
     @available(iOS 26.0, *)
     private var nativeTabs: some View {
         TabView(selection: compactSelection) {
             ForEach(barDestinations) { destination in
-                Tab(destination == .transactions ? String(localized: "流水") : destination.compactTitle,
-                    systemImage: destination.systemImage, value: destination) {
+                Tab(destination.barTitle, systemImage: destination.systemImage, value: destination) {
                     NavigationStack { LedgerDestinationView(destination: destination, isRoot: true) }
                 }
             }
             Tab("更多", systemImage: "ellipsis", value: LedgerDestination.settings) {
                 NavigationStack { MoreView(overflowDestination: $moreDestination) }
             }
-            // One button floats beside the tab bar, one tap from every root page:
-            // 账本助手 where it can run, search otherwise.
-            if agentFloats {
-                // Selecting it opens the assistant's sheet (`compactSelection`), so
-                // the tab itself never shows.
-                Tab(value: LedgerDestination.agent, role: Self.searchTabRole) {
-                    Color.clear
-                } label: {
-                    Label { Text(LedgerDestination.agent.compactTitle) } icon: { LedgerTabMark.image }
-                }
-            } else {
-                Tab("搜索", systemImage: "magnifyingglass", value: LedgerDestination.search, role: Self.searchTabRole) {
-                    NavigationStack { SearchTabRoot() }
-                }
+            Tab("搜索", systemImage: "magnifyingglass", value: LedgerDestination.search, role: Self.searchTabRole) {
+                NavigationStack { SearchTabRoot() }
             }
         }
     }
 
     /// iOS 26 detaches a search-role tab by itself. Built with the iOS 27 SDK it stays
-    /// inside the bar, and only the prominent role sets a tab apart. The floating
-    /// button is 账本助手's where it can run, and search's otherwise.
+    /// inside the bar, and only the prominent role sets a tab apart.
     @available(iOS 26.0, *)
     private static var searchTabRole: TabRole {
         if #available(iOS 27.0, *) { .prominent } else { .search }
@@ -715,22 +686,15 @@ private struct MainTabView: View {
                 NavigationStack {
                     LedgerDestinationView(destination: destination, isRoot: true)
                 }
-                .tabItem { Label(destination == .transactions ? String(localized: "流水") : destination.compactTitle, systemImage: destination.systemImage) }
+                .tabItem { Label(destination.barTitle, systemImage: destination.systemImage) }
                 .tag(destination)
             }
             NavigationStack { MoreView(overflowDestination: $moreDestination) }
                 .tabItem { Label("更多", systemImage: "ellipsis") }
                 .tag(LedgerDestination.settings)
-            if agentFloats {
-                // Selecting it opens the assistant's sheet (`compactSelection`).
-                Color.clear
-                    .tabItem { Label { Text(LedgerDestination.agent.compactTitle) } icon: { LedgerTabMark.image } }
-                    .tag(LedgerDestination.agent)
-            } else {
-                NavigationStack { GlobalSearchPage() }
-                    .tabItem { Label("搜索", systemImage: "magnifyingglass") }
-                    .tag(LedgerDestination.search)
-            }
+            NavigationStack { GlobalSearchPage() }
+                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
+                .tag(LedgerDestination.search)
         }
     }
 }

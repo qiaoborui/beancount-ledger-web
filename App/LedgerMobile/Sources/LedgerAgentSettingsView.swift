@@ -25,7 +25,6 @@ private struct LedgerAgentSettingsRoot: View {
     @ObservedObject private var skills = LedgerAgentSkillSettings.shared
     @ObservedObject private var sync = LedgerAgentCloudSync.shared
     @AppStorage(LedgerAgentStepsDisplay.storageKey) private var stepsDisplay = LedgerAgentStepsDisplay.standard
-    @AppStorage(LedgerAgentLaunch.storageKey) private var opensAtLaunch = true
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -69,8 +68,6 @@ private struct LedgerAgentSettingsRoot: View {
                 }
                 .pickerStyle(.menu)
                 .accessibilityIdentifier("ledger-agent-steps-display")
-                Toggle("打开 App 时进入助手", isOn: $opensAtLaunch)
-                    .accessibilityIdentifier("ledger-agent-opens-at-launch")
             } header: { Text("显示") } footer: {
                 Text(stepsDisplay.detail)
             }
