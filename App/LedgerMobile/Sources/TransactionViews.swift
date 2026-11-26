@@ -3601,7 +3601,6 @@ struct CookieFastTransactionEditorBody: View {
     @State private var preparedBookkeeping: PreparedBookkeepingChange?
     /// The entry behind `preparedBookkeeping`, for the saved notice.
     @State private var preparedEntry: LedgerTransactionEntry?
-    @State private var naturalLanguagePresented = false
     @Environment(\.dismiss) private var dismiss
 
     let transaction: LedgerTransaction?
@@ -3892,9 +3891,6 @@ struct CookieFastTransactionEditorBody: View {
                 datePickerSheet
             }
             .sensoryFeedback(.error, trigger: failureFeedback)
-            .fullScreenCover(isPresented: $naturalLanguagePresented) {
-                NaturalLanguageBookkeepingView { dismiss() }
-            }
             .fullScreenCover(item: $preparedBookkeeping) { preview in
                 BookkeepingPreviewView(preview: preview, islandNotice: .entries(preparedEntry.map { [$0] } ?? [])) { _ in dismiss() }
             }
@@ -4413,18 +4409,6 @@ struct CookieFastTransactionEditorBody: View {
 
     private var entryFooter: some View {
         HStack(spacing: 20) {
-            if transaction == nil {
-                Button {
-                    LedgerFeedback.light()
-                    naturalLanguagePresented = true
-                } label: {
-                    linkLabel(String(localized: "用一句话记账"))
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("bookkeeping-natural-entry")
-            }
             Spacer(minLength: 0)
             if !isSplitMode {
                 Button {
@@ -4955,7 +4939,6 @@ struct TransactionEditorView: View {
     @State private var preparedBookkeeping: PreparedBookkeepingChange?
     /// The entry behind `preparedBookkeeping`, for the saved notice.
     @State private var preparedEntry: LedgerTransactionEntry?
-    @State private var naturalLanguagePresented = false
     @Environment(\.dismiss) private var dismiss
 
     enum EditorMode {
@@ -5134,9 +5117,6 @@ struct TransactionEditorView: View {
                 advancedFormView
             }
         }
-        .fullScreenCover(isPresented: $naturalLanguagePresented) {
-            NaturalLanguageBookkeepingView { dismiss() }
-        }
         .fullScreenCover(item: $preparedBookkeeping) { preview in
             BookkeepingPreviewView(preview: preview, islandNotice: .entries(preparedEntry.map { [$0] } ?? [])) { _ in dismiss() }
         }
@@ -5145,29 +5125,6 @@ struct TransactionEditorView: View {
     private var advancedFormView: some View {
         NavigationStack {
             List {
-                if transaction == nil {
-                    Section {
-                        Button {
-                            LedgerFeedback.light()
-                            naturalLanguagePresented = true
-                        } label: {
-                            Label {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("用一句话记账")
-                                        .font(.subheadline.weight(.medium))
-                                        .foregroundStyle(LedgerPalette.ink)
-                                    Text("输入日常口语描述，自动拆分多账户分录与金额")
-                                        .font(.caption2)
-                                        .foregroundStyle(LedgerPalette.secondary)
-                                }
-                            } icon: {
-                                Image(systemName: "sparkles")
-                                    .foregroundStyle(LedgerPalette.cobalt)
-                            }
-                        }
-                        .accessibilityIdentifier("bookkeeping-natural-entry")
-                    }
-                }
                 if let errorMessage {
                     Section { StatusBanner(message: errorMessage) { self.errorMessage = nil } }
                 }

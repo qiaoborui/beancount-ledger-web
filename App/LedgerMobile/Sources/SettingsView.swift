@@ -142,19 +142,6 @@ struct SettingsView: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
             }
             if session.isLocal {
-                if let ledgerID = session.currentLocalLedgerDescriptor?.id {
-                    Section {
-                        SettingsNavRow(title: String(localized: "智能分类"), value: ImportClassificationSettings.shared.isEnabled(for: ledgerID) ? String(localized: "已启用") : String(localized: "未配置")) {
-                            ImportClassificationSettingsView(ledgerID: ledgerID)
-                        }
-                        .accessibilityIdentifier("settings-classification")
-                        SettingsNavRow(title: String(localized: "语义解析"), value: BookkeepingSettings.shared.hasKey ? (BookkeepingSettings.shared.configuration.model.isEmpty ? String(localized: "已配置") : BookkeepingSettings.shared.configuration.model) : String(localized: "未配置"), valueMono: true) {
-                            BookkeepingSettingsView()
-                        }
-                        .accessibilityIdentifier("settings-semantic-parser")
-                    } header: { TerminalSectionLabel(text: String(localized: "AI 与智能记账")).listRowBackground(BalancedPalette.page)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)) }
-                }
                 Section {
                     SettingsNavRow(title: String(localized: "记账提醒"), value: reminders.settings.bookkeepingSummary) {
                         LedgerRemindersSettingsView()

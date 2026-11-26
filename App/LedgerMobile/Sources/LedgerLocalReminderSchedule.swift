@@ -177,13 +177,13 @@ enum LedgerReminderNotification {
     static let plainCategory = "ledger.reminder.plain"
 
     static let recordAction = "ledger.reminder.action.record"
-    static let sentenceAction = "ledger.reminder.action.sentence"
+    static let agentAction = "ledger.reminder.action.agent"
     static let importAction = "ledger.reminder.action.import"
 
     static let urlKey = "ledger.reminder.url"
 
     static let recordURL = URL(string: "ledger://record")!
-    static let sentenceURL = URL(string: "ledger://record?mode=sentence")!
+    static let agentURL = URL(string: "ledger://agent")!
     static let importsURL = URL(string: "ledger://imports")!
 
     static func isReminder(categoryIdentifier: String) -> Bool {
@@ -195,7 +195,7 @@ enum LedgerReminderNotification {
     static func url(forAction action: String, userInfo: [AnyHashable: Any]) -> URL? {
         switch action {
         case recordAction: return recordURL
-        case sentenceAction: return sentenceURL
+        case agentAction: return agentURL
         case importAction: return importsURL
         default:
             guard let text = userInfo[urlKey] as? String, let url = URL(string: text),

@@ -66,7 +66,7 @@ final class LedgerAgentSettings: ObservableObject {
     /// Counts keys saved this launch, so replacing a key starts the quiet
     /// read again as well as saving the first one.
     @Published private var keyGeneration = 0
-    private let keyStore: (String) -> ClassificationKeyStore
+    private let keyStore: (String) -> LedgerKeychainKeyStore
     /// Keys read from the keychain, by provider (nil: none saved). Every key
     /// is written through this object, so it is read once a launch rather
     /// than on the main thread at every send, where a keychain that was slow
@@ -90,7 +90,7 @@ final class LedgerAgentSettings: ObservableObject {
     }
 
     init(defaults: UserDefaults = .standard, catalog: LedgerAgentCatalog = .native,
-         keyStore: @escaping (String) -> ClassificationKeyStore = { .init(service: LedgerAgentSettings.keychainService, account: $0) },
+         keyStore: @escaping (String) -> LedgerKeychainKeyStore = { .init(service: LedgerAgentSettings.keychainService, account: $0) },
          lister: LedgerAgentModelLister = .native) {
         self.defaults = defaults
         self.catalog = catalog

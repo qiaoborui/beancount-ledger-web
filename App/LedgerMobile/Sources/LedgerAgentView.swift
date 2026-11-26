@@ -157,7 +157,9 @@ private struct LedgerAgentChatScreen: View {
     /// When the app last left the screen, for a recap on a long absence.
     @State private var awaySince: Date?
     @State private var settingsPresented = false
-    @State private var bookkeeping: BookkeepingPrefill?
+    /// A Beancount draft from an answer, validated and waiting for 写入.
+    @State private var draftPreview: PreparedBookkeepingChange?
+    @State private var draftPreviewError: String?
     @State private var crashReport: String?
     @State private var choosingFiles = false
     /// The photo library is presented by the view, not from inside the attach
@@ -211,9 +213,24 @@ private struct LedgerAgentChatScreen: View {
     /// the first frames of the swipe and made it stutter.
     @State private var firstAppearance = LedgerAgentFirstAppearance()
 
-    private struct BookkeepingPrefill: Identifiable {
-        let id = UUID()
-        let text: String
+    /// Checks the Beancount draft in an answer against the ledger, the same way
+    /// a pasted .bean file is, and shows the diff before anything is written.
+    private func previewDraft(in message: LedgerAgentMessage) {
+        guard let text = LedgerAgentReplyText.beancountDraft(in: message.text),
+              let repository = session.localRepository, session.phase == .ready, !session.privacyShielded else { return }
+        Task {
+            do {
+                let prepared = try await repository.prepareBeanTransactions(text)
+                guard session.currentLocalLedgerDescriptor?.id == repository.descriptor.id,
+                      session.phase == .ready, !session.privacyShielded else {
+                    await repository.discardPrepared(prepared)
+                    return
+                }
+                draftPreview = prepared
+            } catch {
+                draftPreviewError = error.localizedDescription
+            }
+        }
     }
 
     private enum BranchAction {
@@ -297,8 +314,16 @@ private struct LedgerAgentChatScreen: View {
             photoItems = []
             attach(items.map { .photo($0) })
         }
-        .fullScreenCover(item: $bookkeeping) { prefill in
-            NaturalLanguageBookkeepingView(onSaved: { bookkeeping = nil }, initialInput: prefill.text)
+        .fullScreenCover(item: $draftPreview) { prepared in
+            BookkeepingPreviewView(preview: prepared, islandNotice: .written(count: prepared.entryCount ?? 1)) { _ in
+                draftPreview = nil
+            }
+        }
+        .alert("无法写入这段草稿", isPresented: Binding(get: { draftPreviewError != nil },
+                                                set: { if !$0 { draftPreviewError = nil } })) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(draftPreviewError ?? "")
         }
         .alert(confirming.map { confirmationTitle($0.warning) } ?? "", isPresented: confirmingPresented,
                presenting: confirming) { confirmation in
@@ -811,7 +836,7 @@ private struct LedgerAgentChatScreen: View {
                 undoingSettings: conversation.undoingSettings == message.id,
                 canUndoSettings: conversation.canUndoAppSettings(message),
                 onMemory: { memoryPresented = true },
-                onRecord: { bookkeeping = .init(text: question(before: message)) },
+                onRecord: { previewDraft(in: message) },
                 onAnswer: { send($0, clearsComposer: false) },
                 onAsk: { ask($0) },
                 onUndo: { undo(message) },
@@ -1923,10 +1948,6 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
-    private func question(before answer: LedgerAgentMessage) -> String {
-        guard let index = conversation.messages.firstIndex(where: { $0.id == answer.id }) else { return "" }
-        return conversation.messages[..<index].last { $0.role == .user }?.text ?? ""
-    }
 }
 
 /// A question: right-aligned in a soft sunken bubble (20pt continuous
@@ -2121,7 +2142,7 @@ private struct LedgerAgentAnswer: View, Equatable {
             }
             if let ask = message.ask, asksNow { choices(ask) }
             if LedgerAgentReplyText.beancountDraft(in: message.text) != nil {
-                Button("用「记一笔」录入", action: onRecord).buttonStyle(.balanced(.outline))
+                Button("核对并写入账本", action: onRecord).buttonStyle(.balanced(.outline))
                     .accessibilityIdentifier("ledger-agent-record")
             }
             if let write = message.write { writeRow(write) }

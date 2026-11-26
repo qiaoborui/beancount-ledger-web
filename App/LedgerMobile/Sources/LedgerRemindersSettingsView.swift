@@ -84,7 +84,7 @@ struct LedgerRemindersSettingsView: View {
         } footer: {
             Text(settings.bookkeeping.isEnabled && settings.bookkeeping.repeats.days.isEmpty
                  ? "至少选一天，提醒才会出现。"
-                 : "到点提醒「今天的账记了吗？」，可以直接点「记一笔」或「一句话记账」。")
+                 : "到点提醒「今天的账记了吗？」，可以直接点「记一笔」或「问账本助手」。")
                 .balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
                 .listRowBackground(BalancedPalette.page)
         }

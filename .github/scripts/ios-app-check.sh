@@ -41,8 +41,6 @@ case "$mode" in
     # Unsigned simulator builds have no keychain access group, so these tests
     # fail on every unsigned run regardless of the change.
     skipped_tests=(
-      LedgerMobileTests/BookkeepingPipelineTests/testSemanticCredentialsStayLocalAndChangingEndpointRequiresFreshKey
-      LedgerMobileTests/ImportClassificationTests/testConsentIsPerLedgerAndKeyIsStoredSeparatelyFromPreferences
       LedgerMobileTests/LocalGitBackgroundCredentialTests/testDeviceOnlyCredentialMigratesAccessibilityWithoutChangingToken
       # Timing probes: they print measurements and check no behaviour, and
       # together they took a third of the test phase (18 s and 14 s of 95 s).

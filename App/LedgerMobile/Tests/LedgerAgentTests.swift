@@ -340,7 +340,7 @@ final class LedgerAgentTests: XCTestCase {
         let suite = "LedgerAgentTests-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
-        let keys: (String) -> ClassificationKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
+        let keys: (String) -> LedgerKeychainKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
         @MainActor func stored() -> LedgerAgentSettings { LedgerAgentSettings(defaults: defaults, catalog: .fallback, keyStore: keys) }
 
         // Nothing stored yet: a new install writes tiered.
@@ -382,7 +382,7 @@ final class LedgerAgentTests: XCTestCase {
         let suite = "LedgerAgentTests-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
-        let keys: (String) -> ClassificationKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
+        let keys: (String) -> LedgerKeychainKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
         let settings = LedgerAgentSettings(defaults: defaults, catalog: .fallback, keyStore: keys)
         settings.toggleFavoriteForCurrent()
         XCTAssertTrue(settings.currentIsFavorite)
@@ -410,7 +410,7 @@ final class LedgerAgentTests: XCTestCase {
     func testProviderListAddsModelsTheCatalogLacks() async throws {
         let suite = "LedgerAgentTests-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let keys: (String) -> ClassificationKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
+        let keys: (String) -> LedgerKeychainKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
         addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
         let sent = SentRequest()
         let lister = LedgerAgentModelLister(run: { request in
@@ -440,7 +440,7 @@ final class LedgerAgentTests: XCTestCase {
     func testProviderListWindowsOutliveARelaunch() async throws {
         let suite = "LedgerAgentTests-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let keys: (String) -> ClassificationKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
+        let keys: (String) -> LedgerKeychainKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
         addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
         let calls = SentRequest()
         let lister = LedgerAgentModelLister(run: { request in
@@ -493,7 +493,7 @@ final class LedgerAgentTests: XCTestCase {
     func testCustomEndpointListGivesTheWindowOfASlashedModelID() async throws {
         let suite = "LedgerAgentTests-" + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let keys: (String) -> ClassificationKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
+        let keys: (String) -> LedgerKeychainKeyStore = { .init(service: "LedgerAgentTests-" + suite, account: $0) }
         addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
         let calls = SentRequest()
         let lister = LedgerAgentModelLister(run: { request in

@@ -106,7 +106,7 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
   prompt once the device date leaves the cached month, instead of drawing last
   month as the current one.
 - Add a small and medium 记一笔 widget with buttons for the entry form and
-  一句话记账 (plus the assistant in medium), and today's spending from the
+  the assistant (plus search in medium), and today's spending from the
   cached month's daily series. The buttons stay available on a locked device,
   because the app unlocks before opening the form; the figures are masked.
 - Add a medium 30-day spending trend and a separate 12-week heatmap. Both use
@@ -132,10 +132,9 @@ See [DESIGN.md](DESIGN.md) for the shared navigation, typography, and privacy ru
 
 Financial writes retain preview, validation, and confirmation. Gmail automation,
 the hosted agent workspace, remote server authentication, and server
-administration are outside this local-only product. The optional natural-language
-drafting and Jev account classification call a user-configured HTTPS endpoint
-with a key the user supplies; every ledger read, validation, and write still runs
-on the device. Snapshot backups to a user-chosen folder (normally in iCloud
+administration are outside this local-only product. Every ledger read,
+validation, and write runs on the device; the ledger assistant calls the model
+provider the user configures. Snapshot backups to a user-chosen folder (normally in iCloud
 Drive) are described below.
 
 ## Backup and restore (iCloud Drive)

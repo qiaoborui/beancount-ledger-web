@@ -9,8 +9,8 @@ import UIKit
 final class LedgerQuickActionCenter: ObservableObject {
     static let shared = LedgerQuickActionCenter()
 
-    /// Four items is what the icon menu shows above the system ones.
-    static let menu: [LedgerQuickLink] = [.agent, .record, .sentence, .search]
+    /// The icon menu shows at most four items above the system ones.
+    static let menu: [LedgerQuickLink] = [.agent, .record, .search]
 
     /// A link from the icon menu that the app has not opened yet.
     @Published var pending: URL?

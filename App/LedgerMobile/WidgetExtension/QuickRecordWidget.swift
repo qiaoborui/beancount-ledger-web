@@ -1,7 +1,7 @@
 import SwiftUI
 import WidgetKit
 
-/// 记一笔: the two entry forms one tap away, with what was spent today. The
+/// 记一笔: the entry form and the assistant one tap away, with what was spent today. The
 /// buttons stay usable on a locked device, because the app asks for Face ID
 /// before the form opens; only the figures are masked.
 struct QuickRecordWidget: Widget {
@@ -12,7 +12,7 @@ struct QuickRecordWidget: Widget {
             QuickRecordWidgetView(entry: entry)
         }
         .configurationDisplayName("记一笔")
-        .description("一键记一笔或一句话记账，并查看今天的支出。")
+        .description("一键记一笔或问账本助手，并查看今天的支出。")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
@@ -48,7 +48,7 @@ struct QuickRecordWidgetView: View {
         VStack(alignment: .leading, spacing: 8) {
             LedgerWidgetHeader(title: String(localized: "记一笔"), detail: dayLabel)
             Link(destination: LedgerQuickLink.record.url) { recordButton }
-            Link(destination: LedgerQuickLink.sentence.url) { tile(.sentence).frame(height: 30) }
+            Link(destination: LedgerQuickLink.agent.url) { tile(.agent).frame(height: 30) }
             if let figures {
                 HStack(spacing: 4) {
                     Text("今天支出")
@@ -82,8 +82,8 @@ struct QuickRecordWidgetView: View {
             VStack(spacing: 8) {
                 Link(destination: LedgerQuickLink.record.url) { recordButton }
                 HStack(spacing: 8) {
-                    Link(destination: LedgerQuickLink.sentence.url) { tile(.sentence) }
                     Link(destination: LedgerQuickLink.agent.url) { tile(.agent) }
+                    Link(destination: LedgerQuickLink.search.url) { tile(.search) }
                 }.frame(height: 40)
             }.frame(width: 156)
         }
