@@ -254,9 +254,14 @@ private struct LedgerAgentChatScreen: View {
                 chat
             } else {
                 LedgerAgentIntro { settingsPresented = true }
-                    .safeAreaInset(edge: .bottom, spacing: 0) { iconBar }
             }
         }
+        // The icon bar keeps its room in the safe area, the way a system tab
+        // bar does: the keyboard's inset covers it rather than adding to it,
+        // so the composer rides the keyboard in the system's own animation
+        // and nothing is laid out again halfway through it.
+        .safeAreaPadding(.bottom, barRoom)
+        .overlay { iconBar }
         .background(LedgerAgentPalette.page)
         // The page's bottom safe area: the keyboard's inset while it is up,
         // the home indicator's when it is down. Read here, outside the dock's
@@ -588,12 +593,20 @@ private struct LedgerAgentChatScreen: View {
         }
     }
 
-    /// The shell's icon bar under the composer, while the keyboard is down;
-    /// the keyboard covers where it was and the composer rides on it.
+    /// The room the icon bar takes under the composer; none without one.
+    private var barRoom: CGFloat { tabBar == nil ? 0 : LedgerIconTabBar.height }
+
+    /// The shell's icon bar under the composer. It stays put above the home
+    /// indicator while the keyboard comes up over it, as a system tab bar
+    /// does; it is never added or taken away, which moved the composer.
     @ViewBuilder private var iconBar: some View {
-        if let tabBar, keyboardInset.keyboard == 0 {
-            LedgerIconTabBar(model: tabBar)
-                .transition(.opacity)
+        if let tabBar {
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                LedgerIconTabBar(model: tabBar)
+            }
+            .ignoresSafeArea(.keyboard)
+            .accessibilityHidden(keyboardInset.keyboard > 0)
         }
     }
 
@@ -788,10 +801,7 @@ private struct LedgerAgentChatScreen: View {
                 .padding(.bottom, 10)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                composer
-                iconBar
-            }
+            composer
         }
         // The empty state lies over the page rather than in it, above
         // the composer as it rests and out of the keyboard's way: in the
@@ -804,7 +814,7 @@ private struct LedgerAgentChatScreen: View {
                 // up, rather than moving with the keyboard or lying
                 // under the raised composer.
                 emptyState
-                    .padding(.bottom, Self.emptyStateClearance)
+                    .padding(.bottom, Self.emptyStateClearance - barRoom)
                     .ignoresSafeArea(.keyboard)
                     .opacity(composerFocused ? 0 : 1)
                     .allowsHitTesting(!composerFocused)
