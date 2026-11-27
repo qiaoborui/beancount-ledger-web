@@ -254,6 +254,7 @@ struct SettingsView: View {
         // titles, the way the mockups draw settings.
         .listStyle(.insetGrouped)
         .listSectionSpacing(20)
+        .contentMargins(.top, 12, for: .scrollContent)
         .environment(\.defaultMinListRowHeight, 52)
         .ledgerNavigation(String(localized: "设置"), isRoot: isRoot)
         .onAppear { reportSettings = LedgerReportSettings.load() }
