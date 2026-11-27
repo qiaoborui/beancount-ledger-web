@@ -436,7 +436,7 @@ private struct BalancedTransactionFilterSettle: View {
                         // onto an incorrect (far too small) scale from an early
                         // measurement pass. These strings are short and always fit.
                         Text(session.amountsVisible ? sign + MoneyText.format(minorUnits: abs(row.minorUnits), currency: currency, showsCurrency: false) : "••••••")
-                            .font(.custom(BalancedWeight.text.sansPostscriptName, size: 15, relativeTo: .body))
+                            .font(BalancedWeight.text.font(size: 15, relativeTo: .body))
                             .monospacedDigit().foregroundStyle(BalancedPalette.ink).lineLimit(1).fixedSize()
                             .ledgerRollingAmount(row.minorUnits)
                     }.padding(.vertical, 6)
@@ -449,7 +449,7 @@ private struct BalancedTransactionFilterSettle: View {
                 // Rolls like AmountLabel; BalancedAmount itself is not used because its
                 // `.minimumScaleFactor` mismeasures inside List rows (see above).
                 Text(session.amountsVisible ? sign + MoneyText.format(minorUnits: abs(total), currency: currency, showsCurrency: false) : "••••••")
-                    .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 30, relativeTo: .title))
+                    .font(BalancedWeight.medium.font(size: 30, relativeTo: .title))
                     .tracking(-0.75).monospacedDigit().foregroundStyle(totalColor).lineLimit(1).fixedSize()
                     .ledgerRollingAmount(total)
             }
@@ -472,8 +472,8 @@ private struct BalancedTransactionDayHeader: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            (Text(date).font(.custom(BalancedWeight.semibold.sansPostscriptName, size: 12.5, relativeTo: .caption)).foregroundColor(BalancedPalette.secondary)
-             + Text(" " + weekday).font(.custom(BalancedWeight.regular.sansPostscriptName, size: 12.5, relativeTo: .caption)).foregroundColor(BalancedPalette.meta))
+            (Text(date).font(BalancedWeight.semibold.font(size: 12.5, relativeTo: .caption)).foregroundColor(BalancedPalette.secondary)
+             + Text(" " + weekday).font(BalancedWeight.regular.font(size: 12.5, relativeTo: .caption)).foregroundColor(BalancedPalette.meta))
                 .monospacedDigit()
             if !summary.text.isEmpty {
                 Text(summary.text).balancedFont(size: 12.5).monospacedDigit().foregroundStyle(BalancedPalette.secondary)
@@ -545,7 +545,7 @@ private struct BalancedLedgerTransactionRow: View {
                 // colour; expense and transfers stay ink and carry their meaning
                 // in the sign — batch 1's opposed-pair rule.
                 Text(amountText)
-                    .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 15.5, relativeTo: .body))
+                    .font(BalancedWeight.medium.font(size: 15.5, relativeTo: .body))
                     .monospacedDigit()
                     .foregroundStyle(presentation.kind == .income ? BalancedPalette.income : BalancedPalette.ink)
                     .lineLimit(1).minimumScaleFactor(0.6)
@@ -2542,7 +2542,7 @@ struct TransactionMoneyFlowView: View {
                         } header: { TerminalSectionLabel(text: String(localized: "账户")) }
                         Section {
                             AmountLabel(minorUnits: leg.amount, currency: leg.currency,
-                                font: .custom(BalancedWeight.text.sansPostscriptName, size: 15))
+                                font: BalancedWeight.text.font(size: 15))
                                 .monospacedDigit()
                         } header: { TerminalSectionLabel(text: String(localized: "本笔金额")) }
                     }
@@ -2587,10 +2587,10 @@ struct TransactionMoneyFlowView: View {
                             // ImageRenderer has no LedgerSession environment. Explicit exports
                             // use the same standalone amount presentation as the receipt header.
                             ShareAmountText(minorUnits: leg.amount, currency: leg.currency,
-                                font: .custom(BalancedWeight.medium.sansPostscriptName, size: 14))
+                                font: BalancedWeight.medium.font(size: 14))
                         } else {
                             AmountLabel(minorUnits: leg.amount, currency: leg.currency,
-                                font: .custom(BalancedWeight.medium.sansPostscriptName, size: 14),
+                                font: BalancedWeight.medium.font(size: 14),
                                 color: BalancedPalette.ink)
                         }
                     }
@@ -2698,7 +2698,7 @@ struct TransactionDetailView: View {
                             minorUnits: presentation.minorUnits,
                             currency: presentation.currency,
                             prefix: amountPrefix(presentation.kind),
-                            font: .custom(BalancedWeight.medium.sansPostscriptName, size: 28),
+                            font: BalancedWeight.medium.font(size: 28),
                             color: amountColor(presentation.kind)
                         )
                         .monospacedDigit()
@@ -2793,7 +2793,7 @@ struct TransactionDetailView: View {
                                     minorUnits: abs(posting.amount),
                                     currency: posting.currency ?? presentation.currency,
                                     prefix: posting.amount < 0 ? "−" : "",
-                                    font: .custom(BalancedWeight.text.sansPostscriptName, size: 15),
+                                    font: BalancedWeight.text.font(size: 15),
                                     color: posting.amount >= 0 ? BalancedPalette.ink : BalancedPalette.expense
                                 )
                                 .monospacedDigit()
@@ -4564,12 +4564,7 @@ struct CookieFastTransactionEditorBody: View {
                 .foregroundStyle(isSameDay ? BalancedPalette.page : BalancedPalette.secondary)
                 .padding(.horizontal, 12)
                 .frame(minHeight: 32)
-                .background(isSameDay ? BalancedPalette.ink : Color.clear)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .stroke(BalancedPalette.edge, lineWidth: 1)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                .background(isSameDay ? BalancedPalette.ink : BalancedPalette.sunken, in: Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
     }

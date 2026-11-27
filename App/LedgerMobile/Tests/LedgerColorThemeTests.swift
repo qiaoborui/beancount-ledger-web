@@ -62,18 +62,34 @@ final class LedgerColorThemeTests: XCTestCase {
         XCTAssertEqual(paper.chart.expense, paper.expense)
     }
 
-    func testChoicePersistsAndDefaultsToPaper() throws {
+    func testChoicePersistsAndDefaultsToClean() throws {
         let suite = "LedgerColorThemeTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        XCTAssertEqual(LedgerColorTheme.stored(in: defaults), .paper)
+        XCTAssertEqual(LedgerColorTheme.stored(in: defaults), .clean)
         LedgerColorTheme.slate.store(in: defaults)
         XCTAssertEqual(LedgerColorTheme.stored(in: defaults), .slate)
-        LedgerColorTheme.paper.store(in: defaults)
+        LedgerColorTheme.clean.store(in: defaults)
         XCTAssertNil(defaults.string(forKey: LedgerColorTheme.defaultsKey))
         defaults.set("bogus", forKey: LedgerColorTheme.defaultsKey)
-        XCTAssertEqual(LedgerColorTheme.stored(in: defaults), .paper)
+        XCTAssertEqual(LedgerColorTheme.stored(in: defaults), .clean)
+    }
+
+    /// A scheme saved under the old look does not carry over: everyone starts
+    /// on 素白 once.
+    func testOldSchemeKeyIsIgnored() throws {
+        let suite = "LedgerColorThemeTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set("neutral", forKey: "ledger.appearance.colorTheme")
+        XCTAssertEqual(LedgerColorTheme.stored(in: defaults), .clean)
+    }
+
+    func testCleanTokens() {
+        XCTAssertEqual(LedgerColorTheme.clean.tokens(dark: false).page, 0xFAFAFA)
+        XCTAssertEqual(LedgerColorTheme.clean.tokens(dark: true).page, 0x0B0B0C)
     }
 
     func testArtifactThemeFollowsTheActiveScheme() {

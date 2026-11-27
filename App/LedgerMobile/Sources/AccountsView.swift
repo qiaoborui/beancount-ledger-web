@@ -735,7 +735,7 @@ struct AccountDetailView: View {
             }
             if let balance = session.ledger?.accountBalances.first(where: { $0.account == account && $0.currency == currency }) {
                 Section("当前余额") {
-                    AmountLabel(minorUnits: balance.amount, currency: balance.currency, font: .custom(BalancedWeight.medium.sansPostscriptName, size: 21, relativeTo: .title2))
+                    AmountLabel(minorUnits: balance.amount, currency: balance.currency, font: BalancedWeight.medium.font(size: 21, relativeTo: .title2))
                 }
             }
         }
@@ -1036,7 +1036,7 @@ private struct AccountDetailHero: View {
                     AmountLabel(
                         minorUnits: closingBalance,
                         currency: detail.currency,
-                        font: .custom(BalancedWeight.medium.sansPostscriptName, size: 21, relativeTo: .title2),
+                        font: BalancedWeight.medium.font(size: 21, relativeTo: .title2),
                         color: detail.account.hasPrefix("Liabilities:")
                             ? LedgerPalette.expense
                             : LedgerPalette.gold
@@ -1067,7 +1067,7 @@ private struct AccountDetailHero: View {
                     AmountLabel(
                         minorUnits: openingBalance,
                         currency: detail.currency,
-                        font: .custom(BalancedWeight.text.sansPostscriptName, size: 12, relativeTo: .caption),
+                        font: BalancedWeight.text.font(size: 12, relativeTo: .caption),
                         color: LedgerPalette.olive
                     )
                     .lineLimit(1)
@@ -1081,7 +1081,7 @@ private struct AccountDetailHero: View {
                         minorUnits: periodChange,
                         currency: detail.currency,
                         prefix: periodChange > 0 ? "+" : "",
-                        font: .custom(BalancedWeight.text.sansPostscriptName, size: 12, relativeTo: .caption),
+                        font: BalancedWeight.text.font(size: 12, relativeTo: .caption),
                         color: periodChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
                     )
                     .lineLimit(1)
@@ -1154,7 +1154,7 @@ private struct AccountBalanceTrendPanel: View {
                                 minorUnits: periodChange,
                                 currency: detail.currency,
                                 prefix: periodChange > 0 ? "+" : "",
-                                font: .custom(BalancedWeight.medium.sansPostscriptName, size: 11.5, relativeTo: .caption2),
+                                font: BalancedWeight.medium.font(size: 11.5, relativeTo: .caption2),
                                 color: periodChange >= 0 ? LedgerPalette.income : LedgerPalette.expense
                             )
                             .lineLimit(1)
@@ -1246,7 +1246,7 @@ private struct AccountBalanceTrendPanel: View {
                     AmountLabel(
                         minorUnits: point.balance,
                         currency: detail.currency,
-                        font: .custom(BalancedWeight.medium.sansPostscriptName, size: 11.5, relativeTo: .caption2),
+                        font: BalancedWeight.medium.font(size: 11.5, relativeTo: .caption2),
                         color: LedgerPalette.ink
                     )
                 }
@@ -1346,14 +1346,14 @@ private struct AccountHistoryRow: View {
                     minorUnits: row.change,
                     currency: currency,
                     prefix: row.change > 0 ? "+" : "",
-                    font: .custom(BalancedWeight.medium.sansPostscriptName, size: 13, relativeTo: .footnote),
+                    font: BalancedWeight.medium.font(size: 13, relativeTo: .footnote),
                     color: row.change >= 0 ? LedgerPalette.income : LedgerPalette.expense
                 )
                 .lineLimit(1)
                 AmountLabel(
                     minorUnits: row.balance,
                     currency: currency,
-                    font: .custom(BalancedWeight.text.sansPostscriptName, size: 11.5, relativeTo: .caption2),
+                    font: BalancedWeight.text.font(size: 11.5, relativeTo: .caption2),
                     color: LedgerPalette.secondary
                 )
                 .lineLimit(1)
@@ -1467,7 +1467,7 @@ private struct AccountRowView: View {
                     AmountLabel(
                         minorUnits: balance,
                         currency: row.valuationCurrency,
-                        font: .custom(BalancedWeight.text.sansPostscriptName, size: 16, relativeTo: .body),
+                        font: BalancedWeight.text.font(size: 16, relativeTo: .body),
                         color: BalancedPalette.ink
                     )
                     .lineLimit(1)
@@ -1477,7 +1477,7 @@ private struct AccountRowView: View {
                     AmountLabel(
                         minorUnits: row.periodBalancesAvailable ? row.closingNativeAmount : row.nativeAmount,
                         currency: row.nativeCurrency,
-                        font: .custom(BalancedWeight.text.sansPostscriptName, size: 13, relativeTo: .caption),
+                        font: BalancedWeight.text.font(size: 13, relativeTo: .caption),
                         color: BalancedPalette.meta
                     )
                     .lineLimit(1)
@@ -1486,7 +1486,7 @@ private struct AccountRowView: View {
                         minorUnits: row.periodValuationChange,
                         currency: row.valuationCurrency,
                         prefix: row.periodValuationChange > 0 ? "+" : "",
-                        font: .custom(BalancedWeight.text.sansPostscriptName, size: 13, relativeTo: .caption),
+                        font: BalancedWeight.text.font(size: 13, relativeTo: .caption),
                         color: row.periodValuationChange >= 0 ? BalancedPalette.income : BalancedPalette.expense
                     )
                     .lineLimit(1)

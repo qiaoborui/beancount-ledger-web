@@ -29,7 +29,7 @@ struct TerminalAmount: View {
 
     var body: some View {
         Text(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: showsCurrency) : "••••••")
-            .font(.custom(BalancedWeight.text.sansPostscriptName, size: size, relativeTo: .body))
+            .font(BalancedWeight.text.font(size: size, relativeTo: .body))
             .monospacedDigit()
             .foregroundStyle(color)
             .lineLimit(1)
