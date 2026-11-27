@@ -142,7 +142,7 @@ final class LedgerAgentDrawerController: UIViewController, UIGestureRecognizerDe
     static let springDuration: TimeInterval = 0.5
     static let springDamping: CGFloat = 0.9
     /// The icon bar's row (`LedgerIconTabBar.height`, in the app target).
-    static let iconBarHeight: CGFloat = 44
+    static let iconBarHeight: CGFloat = 56
 
     private let pageHost = UIHostingController(rootView: AnyView(EmptyView()))
     private var drawerHost: UIHostingController<AnyView>?

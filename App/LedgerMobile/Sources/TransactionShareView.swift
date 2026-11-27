@@ -94,7 +94,7 @@ struct SingleTransactionReceiptCard: View {
                     minorUnits: presentation.minorUnits,
                     currency: presentation.currency,
                     prefix: amountPrefix,
-                    font: .custom(BalancedWeight.medium.sansPostscriptName, size: 32),
+                    font: BalancedWeight.medium.font(size: 32),
                     color: amountColor
                 )
                 .lineLimit(1)
@@ -377,7 +377,7 @@ struct CombinedTransactionStatementCard: View {
                     minorUnits: p.minorUnits,
                     currency: p.currency,
                     prefix: sign,
-                    font: .custom(BalancedWeight.medium.sansPostscriptName, size: 15),
+                    font: BalancedWeight.medium.font(size: 15),
                     color: color
                 )
                 .lineLimit(1)

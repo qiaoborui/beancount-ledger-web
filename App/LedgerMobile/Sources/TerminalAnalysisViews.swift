@@ -191,7 +191,7 @@ private struct BalancedAnalysisMetric: View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title).balancedFont(size: 12.5).foregroundStyle(BalancedPalette.meta)
             Text(session.amountsVisible ? prefix + MoneyText.format(minorUnits: abs(minorUnits), currency: currency, showsCurrency: false) : "••••••")
-                .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 22, relativeTo: .title2))
+                .font(BalancedWeight.medium.font(size: 22, relativeTo: .title2))
                 .tracking(-0.44).monospacedDigit().foregroundStyle(color).lineLimit(1).minimumScaleFactor(0.6)
             Text(sub).balancedFont(size: 12).foregroundStyle(BalancedPalette.meta)
         }

@@ -6,6 +6,9 @@ A compact device-local ledger with aligned amounts, visible categories, quiet co
 ## Palette
 Reading pages use systemBackground as one uninterrupted canvas, with semantic label colors and separators. Forms retain the system grouped style. Light mode, dark mode, and increased contrast follow the device. Preserve Ledger cobalt for actions and income, expense, and warning colors for financial meaning.
 
+## 素白 theme (2026-11)
+The default 配色方案 is 素白 (`LedgerColorTheme.clean`): a #FAFAFA canvas (#0B0B0C at night) with grey wells (`sunken`, 22pt corners) instead of cards or hairline boxes, monochrome ink, green only for income. Type is the system face (SF Pro with PingFang) at the Balanced sizes, including 账本助手's replies; IBM Plex remains only in widgets. Selection is an ink capsule (`BalancedMark`), buttons are capsules, the switch is an ink capsule, and the icon bar is a floating 56pt glass capsule. The scheme is stored under `ledger.appearance.theme`, so a scheme picked under the old look does not carry over. Mockups: project files `modern-theme/`.
+
 ## Typography
 Use Apple's system text styles and Dynamic Type. Main row text and amounts use subheadline (15pt at the default setting), category and note use caption (12pt), and the main summary uses title2. Prefer regular/medium text and semibold amounts. Amounts use monospaced digits and adaptive compact notation. Keep full account paths in details/search and as a fallback when account labels are unavailable. Preserve system accessibility scaling.
 

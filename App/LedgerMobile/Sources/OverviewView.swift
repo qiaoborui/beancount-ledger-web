@@ -281,7 +281,7 @@ private struct OverviewPage: View, Equatable {
         }
     }
 
-    private var statFont: Font { .custom(BalancedWeight.medium.sansPostscriptName, size: 18, relativeTo: .title3) }
+    private var statFont: Font { BalancedWeight.medium.font(size: 18, relativeTo: .title3) }
     private var dash: Text { Text("—").font(statFont).foregroundColor(BalancedPalette.meta) }
 
     private func statRow(@ViewBuilder leading: () -> some View, @ViewBuilder trailing: () -> some View) -> some View {
@@ -349,13 +349,13 @@ private struct OverviewPage: View, Equatable {
     /// appears only on a total, at 0.6em in the same face and colour, on the baseline.
     private func amount(_ minorUnits: Int, currency: String, prefix: String = "", size: CGFloat = 15, weight: BalancedWeight = .text,
                         color: Color = BalancedPalette.ink, currencySymbol: Bool = false) -> Text {
-        let font = Font.custom(weight.sansPostscriptName, size: size, relativeTo: size > 20 ? .title : .body)
+        let font = weight.font(size: size, relativeTo: size > 20 ? .title : .body)
         guard session.amountsVisible else { return Text("••••••").font(font).foregroundColor(color) }
         let number = MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: false)
         var text = Text(prefix).font(font).foregroundColor(color)
         if currencySymbol {
             text = text + Text(MoneyText.currencySymbol(for: currency))
-                .font(.custom(weight.sansPostscriptName, size: size * 0.6, relativeTo: .body)).foregroundColor(color)
+                .font(weight.font(size: size * 0.6, relativeTo: .body)).foregroundColor(color)
         }
         text = text + Text(number).font(font).foregroundColor(color)
         return (size > 20 ? text.tracking(-0.025 * size) : text).monospacedDigit()
@@ -706,18 +706,17 @@ private struct OverviewSpendingTrend: View {
                 } label: {
                     Text(String(localized: "\(months) 月")).balancedFont(size: 12).monospacedDigit()
                         .foregroundStyle(isOn ? BalancedPalette.page : BalancedPalette.secondary)
-                        .padding(.horizontal, 10).padding(.vertical, 3)
-                        .background(isOn ? BalancedPalette.ink : Color.clear)
-                        .overlay(alignment: .leading) { if months != OverviewExpenseTrend.windows[0] { BalancedPalette.edge.frame(width: 1) } }
-                        .contentShape(Rectangle())
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(isOn ? BalancedPalette.ink : Color.clear, in: Capsule(style: .continuous))
+                        .contentShape(Capsule(style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text(String(localized: "近 \(months) 月")))
                 .accessibilityAddTraits(isOn ? .isSelected : [])
             }
         }
-        .overlay { RoundedRectangle(cornerRadius: 2).strokeBorder(BalancedPalette.edge, lineWidth: 1) }
-        .clipShape(RoundedRectangle(cornerRadius: 2))
+        .padding(2)
+        .background(BalancedPalette.sunken, in: Capsule(style: .continuous))
         .frame(minHeight: 44).contentShape(Rectangle())
         .padding(.vertical, -12)
     }
@@ -728,9 +727,9 @@ private struct OverviewSpendingTrend: View {
         let inProgress = isInProgress(bar, in: trend)
         let month = LedgerDateLabel.month(number: bar.month)
         let figure: Text = session.amountsVisible
-            ? Text(money(bar.expense)).font(.custom(BalancedWeight.medium.sansPostscriptName, size: 20, relativeTo: .title3))
+            ? Text(money(bar.expense)).font(BalancedWeight.medium.font(size: 20, relativeTo: .title3))
                 .tracking(-0.3).foregroundColor(BalancedPalette.ink)
-            : Text("••••••").font(.custom(BalancedWeight.medium.sansPostscriptName, size: 20, relativeTo: .title3)).foregroundColor(BalancedPalette.ink)
+            : Text("••••••").font(BalancedWeight.medium.font(size: 20, relativeTo: .title3)).foregroundColor(BalancedPalette.ink)
         let caption: String = {
             if let progress = trend.progress, inProgress {
                 return String(localized: "\(month)至今 · 第 \(progress.day)/\(progress.days) 天")

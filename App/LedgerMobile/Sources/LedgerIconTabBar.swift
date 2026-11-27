@@ -1,8 +1,8 @@
 #if os(iOS)
 import SwiftUI
 
-/// The bottom bar of a local ledger, the way the Claude app draws its own: a
-/// 44pt row of icons under the content, no capsule, no glass and no names.
+/// The bottom bar of a local ledger: since the 素白 theme a floating glass
+/// capsule of icons (56pt, inset from the screen edges), no names.
 /// 账本助手 is the first icon, then the chosen tabs and 更多. The selected
 /// icon is drawn in ink with a slightly heavier weight on a soft rounded
 /// ground; the others are a light grey.
@@ -22,8 +22,11 @@ struct LedgerIconTabBar: View {
     @State private var target: LedgerDestination?
     @State private var press: Press?
 
-    static let height: CGFloat = 44
-    private static let inset: CGFloat = 12
+    static let height: CGFloat = 56
+    /// The capsule's distance from the screen edges.
+    private static let margin: CGFloat = 20
+    /// Where the icons start: the capsule's margin plus its own padding.
+    private static let inset: CGFloat = margin + 6
     private static let holdDelay: Duration = .milliseconds(260)
 
     private struct Press {
@@ -40,6 +43,7 @@ struct LedgerIconTabBar: View {
         }
         .padding(.horizontal, Self.inset)
         .frame(height: Self.height)
+        .background { LedgerIconTabBarCapsule().padding(.horizontal, Self.margin) }
         .contentShape(Rectangle())
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .gesture(touch)
@@ -125,12 +129,12 @@ struct LedgerIconTabBar: View {
         let grounded = destination == (target ?? model.selection)
         return glyph(destination, selected: grounded)
             .foregroundStyle(grounded ? BalancedPalette.ink : BalancedPalette.meta.opacity(0.7))
-            .frame(width: 64, height: 36)
-            // Claude's ground: a wide capsule, barely darker than the page,
-            // that fades from one icon to the next.
+            .frame(width: 62, height: 44)
+            // The selected icon sits on a soft pill inside the capsule that
+            // fades from one icon to the next.
             .background {
                 Capsule(style: .continuous)
-                    .fill(BalancedPalette.ink.opacity(0.055))
+                    .fill(BalancedPalette.ink.opacity(0.08))
                     .opacity(grounded ? 1 : 0)
             }
             .animation(.easeOut(duration: 0.2), value: grounded)
@@ -160,6 +164,23 @@ struct LedgerIconTabBar: View {
                 .font(.system(size: 19, weight: selected ? .semibold : .regular))
                 .frame(width: 25, height: 25)
         }
+    }
+}
+
+/// The bar's floating capsule: Liquid Glass on iOS 26, a thin material
+/// before it, with a soft shadow so it lifts off the page.
+private struct LedgerIconTabBarCapsule: View {
+    var body: some View {
+        let shape = Capsule(style: .continuous)
+        Group {
+            if #available(iOS 26.0, *) {
+                Color.clear.glassEffect(.regular, in: shape)
+            } else {
+                shape.fill(.regularMaterial)
+                    .overlay { shape.strokeBorder(BalancedPalette.ink.opacity(0.06), lineWidth: 0.5) }
+            }
+        }
+        .shadow(color: .black.opacity(0.07), radius: 11, y: 6)
     }
 }
 

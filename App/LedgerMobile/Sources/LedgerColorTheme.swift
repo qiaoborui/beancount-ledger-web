@@ -8,6 +8,9 @@ import Foundation
 /// This file is portable (no UIKit) so the package tests can check every
 /// scheme's contrast. `BalancedPalette` turns the tokens into colours.
 enum LedgerColorTheme: String, CaseIterable, Identifiable, Sendable {
+    /// 素白: a near-white canvas with grey wells, monochrome ink, green only
+    /// for income. The default since the 2026-11 modern theme.
+    case clean
     /// The original Balanced ground: warm paper, warm near-black at night.
     case paper
     /// Pure white by day, true black by night, with neutral greys.
@@ -15,13 +18,16 @@ enum LedgerColorTheme: String, CaseIterable, Identifiable, Sendable {
     /// A cool, faintly blue grey.
     case slate
 
-    static let defaultTheme: LedgerColorTheme = .paper
-    static let defaultsKey = "ledger.appearance.colorTheme"
+    static let defaultTheme: LedgerColorTheme = .clean
+    /// A new key for the modern theme, so everyone lands on 素白 once instead
+    /// of keeping a scheme picked under the old look (`ledger.appearance.colorTheme`).
+    static let defaultsKey = "ledger.appearance.theme"
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .clean: String(localized: "素白")
         case .paper: String(localized: "暖纸")
         case .neutral: String(localized: "纯净")
         case .slate: String(localized: "冷灰")
@@ -30,6 +36,7 @@ enum LedgerColorTheme: String, CaseIterable, Identifiable, Sendable {
 
     var detail: String {
         switch self {
+        case .clean: String(localized: "干净的近白，夜间深黑，只用黑白灰")
         case .paper: String(localized: "米白纸感，夜间暖黑")
         case .neutral: String(localized: "纯白背景，夜间纯黑")
         case .slate: String(localized: "偏冷的浅灰，夜间蓝黑")
@@ -38,6 +45,16 @@ enum LedgerColorTheme: String, CaseIterable, Identifiable, Sendable {
 
     func tokens(dark: Bool) -> LedgerThemeTokens {
         switch (self, dark) {
+        case (.clean, false):
+            LedgerThemeTokens(page: 0xFAFAFA, sunken: 0xF0F0F1, ink: 0x0B0B0C, secondary: 0x4A4A4F, meta: 0x6B6B71,
+                              rule: 0xE8E8EA, ruleStrong: 0xD4D4D8, edge: 0x8A8A90, income: 0x0E7A45, expense: 0xC62F35,
+                              card: 0xF0F0F1, well: 0xE5E5E7, selected: 0xE5E5E7,
+                              chart: LedgerChartTokens(accent: 0x0B0B0C, income: 0x14995A, expense: 0xE5484D, series: [0x0B0B0C, 0xE5484D, 0x14995A, 0x3D6FE0, 0xB07612, 0x6B6B71]))
+        case (.clean, true):
+            LedgerThemeTokens(page: 0x0B0B0C, sunken: 0x19191B, ink: 0xF3F3F4, secondary: 0xC2C2C8, meta: 0x8E8E95,
+                              rule: 0x1F1F21, ruleStrong: 0x34343A, edge: 0x707077, income: 0x34D27B, expense: 0xFF6369,
+                              card: 0x19191B, well: 0x262628, selected: 0x252527,
+                              chart: LedgerChartTokens(accent: 0xF3F3F4, income: 0x34D27B, expense: 0xFF6369, series: [0xF3F3F4, 0xFF6369, 0x34D27B, 0x6E9BFF, 0xE3A33B, 0x9A9AA1]))
         case (.paper, false):
             LedgerThemeTokens(page: 0xFBFAF8, sunken: 0xF1EFE9, ink: 0x14100C, secondary: 0x453E36, meta: 0x6F675A,
                               rule: 0xE2DED4, ruleStrong: 0xC8C2B4, edge: 0x88837A, income: 0x0D5346, expense: 0x96401F,

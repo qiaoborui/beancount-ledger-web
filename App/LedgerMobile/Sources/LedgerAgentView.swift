@@ -1122,11 +1122,10 @@ private struct LedgerAgentChatScreen: View {
                 .onDisappear { LedgerLaunchHandoff.greetingMark = nil }
                 .padding(.bottom, -6)
                 .accessibilityHidden(true)
-            Text(BalancedReading.serifified(Self.greeting(at: greetingNow), size: 30, relativeTo: .title))
-                // The reading serif, as claude.ai sets its replies: Source
-                // Serif 4 for Latin, Songti SC for Chinese.
-                .font(BalancedReading.font(.regular, size: 30, relativeTo: .title))
-                .foregroundStyle(LedgerAgentPalette.secondary)
+            Text(Self.greeting(at: greetingNow))
+                .balancedFont(size: 28, weight: .semibold, relativeTo: .title)
+                .tracking(-0.4)
+                .foregroundStyle(LedgerAgentPalette.ink)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
             Text("今天想查点什么？").balancedFont(size: 15)

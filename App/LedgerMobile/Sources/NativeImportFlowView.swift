@@ -609,7 +609,7 @@ struct NativeImportFlowView: View {
                     Text("将写入").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                     Spacer(minLength: 0)
                     Text("\(selectedEntries.count) 笔")
-                        .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 22, relativeTo: .title2))
+                        .font(BalancedWeight.medium.font(size: 22, relativeTo: .title2))
                         .monospacedDigit().foregroundStyle(BalancedPalette.ink).lineLimit(1).fixedSize()
                 }
                 .padding(.top, 14)
@@ -671,7 +671,7 @@ struct NativeImportFlowView: View {
     private func amountText(_ minorUnits: Int, currency: String, suffix: String = "") -> Text {
         let formatted = currency.isEmpty ? "\(minorUnits)\(suffix)" : MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: false) + suffix
         return Text(formatted)
-            .font(.custom(BalancedWeight.text.sansPostscriptName, size: 15, relativeTo: .body))
+            .font(BalancedWeight.text.font(size: 15, relativeTo: .body))
             .monospacedDigit().foregroundColor(BalancedPalette.ink)
     }
 
@@ -683,7 +683,7 @@ struct NativeImportFlowView: View {
         }
         let formatted = totals.map { MoneyText.format(minorUnits: $0.minorUnits, currency: $0.currency) }.joined(separator: " · ")
         return Text(formatted)
-            .font(.custom(BalancedWeight.text.sansPostscriptName, size: 15, relativeTo: .body))
+            .font(BalancedWeight.text.font(size: 15, relativeTo: .body))
             .monospacedDigit().foregroundColor(BalancedPalette.ink)
     }
 
@@ -980,7 +980,7 @@ struct NativeImportFlowView: View {
                     .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 6) {
                         Text(result.count == 0 ? "账单已归档" : "已写入 \(result.count) 条交易")
-                            .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 22, relativeTo: .title2))
+                            .font(BalancedWeight.medium.font(size: 22, relativeTo: .title2))
                             .foregroundStyle(BalancedPalette.ink)
                         Text(completionDetail(result))
                             .balancedFont(size: 13.5).foregroundStyle(BalancedPalette.meta)
@@ -1025,7 +1025,7 @@ struct NativeImportFlowView: View {
                             Text("写入").balancedFont(size: 13).foregroundStyle(BalancedPalette.meta)
                             Spacer(minLength: 0)
                             Text("\(result.count) 笔")
-                                .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 22, relativeTo: .title2))
+                                .font(BalancedWeight.medium.font(size: 22, relativeTo: .title2))
                                 .monospacedDigit().foregroundStyle(BalancedPalette.ink)
                         }
                         .padding(.top, 12)
@@ -1885,7 +1885,7 @@ private struct ImportEntryReviewRow: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         Text(importAmountText(entry))
-                            .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 15, relativeTo: .body))
+                            .font(BalancedWeight.medium.font(size: 15, relativeTo: .body))
                             .monospacedDigit().foregroundStyle(included ? BalancedPalette.ink : BalancedPalette.meta)
                             .lineLimit(1).fixedSize()
                     }
@@ -1949,7 +1949,7 @@ struct ImportPostDateFillRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Text(amountText)
-                    .font(.custom(BalancedWeight.medium.sansPostscriptName, size: 15, relativeTo: .body))
+                    .font(BalancedWeight.medium.font(size: 15, relativeTo: .body))
                     .monospacedDigit().foregroundStyle(included ? BalancedPalette.ink : BalancedPalette.meta)
                     .lineLimit(1).fixedSize()
             }

@@ -53,9 +53,9 @@ extension UIColor {
     }
 }
 
-/// IBM Plex Sans weights bundled with the app. 450 ("Text") is the workhorse —
-/// it reads as a normal weight on Plex and is used for row titles and amounts.
-/// CJK text falls back to PingFang via the system cascade automatically.
+/// The type weights. Since the 素白 theme the app sets everything in the
+/// system face (SF Pro, with PingFang for Chinese) at these weights; the IBM
+/// Plex names stay for the few places that still ask for a face by name.
 enum BalancedWeight {
     case regular
     case text
@@ -68,6 +68,44 @@ enum BalancedWeight {
         case .text: "IBMPlexSans-Text"
         case .medium: "IBMPlexSans-Medm"
         case .semibold: "IBMPlexSans-SmBld"
+        }
+    }
+
+    var systemWeight: Font.Weight {
+        switch self {
+        case .regular, .text: .regular
+        case .medium: .medium
+        case .semibold: .semibold
+        }
+    }
+
+    /// The system face at a design size, scaled for Dynamic Type the way
+    /// `Font.custom(_:size:relativeTo:)` scales a named face.
+    func font(size: CGFloat, relativeTo style: Font.TextStyle = .body) -> Font {
+        .system(size: BalancedTypeScale.scaled(size, relativeTo: style), weight: systemWeight)
+    }
+}
+
+enum BalancedTypeScale {
+    static func scaled(_ size: CGFloat, relativeTo style: Font.TextStyle) -> CGFloat {
+        UIFontMetrics(forTextStyle: style.uiTextStyle).scaledValue(for: size)
+    }
+}
+
+extension Font.TextStyle {
+    var uiTextStyle: UIFont.TextStyle {
+        switch self {
+        case .largeTitle: .largeTitle
+        case .title: .title1
+        case .title2: .title2
+        case .title3: .title3
+        case .headline: .headline
+        case .subheadline: .subheadline
+        case .callout: .callout
+        case .footnote: .footnote
+        case .caption: .caption1
+        case .caption2: .caption2
+        default: .body
         }
     }
 }
@@ -118,12 +156,14 @@ enum BalancedReading {
     static let size: CGFloat = 16
     static let lineSpacing: CGFloat = 6
 
+    /// Since the 素白 theme replies read in the system sans like the rest of
+    /// the app; the serif faces are no longer used.
     static func font(_ weight: BalancedSerifWeight = .regular, size: CGFloat = size, relativeTo: Font.TextStyle = .body) -> Font {
-        .custom(weight.postscriptName, size: size, relativeTo: relativeTo)
+        .system(size: BalancedTypeScale.scaled(size, relativeTo: relativeTo), weight: weight == .semibold ? .semibold : .regular)
     }
 
     static func cjkFont(_ weight: BalancedSerifWeight = .regular, size: CGFloat = size, relativeTo: Font.TextStyle = .body) -> Font {
-        .custom(weight.cjkPostscriptName, size: size, relativeTo: relativeTo)
+        font(weight, size: size, relativeTo: relativeTo)
     }
 
     /// Reading text with the Chinese face on its CJK runs. Keep `.font(font(…))`
@@ -208,7 +248,7 @@ struct BalancedFontModifier: ViewModifier {
     let relativeTo: Font.TextStyle
 
     func body(content: Content) -> some View {
-        content.font(.custom(weight.sansPostscriptName, size: size, relativeTo: relativeTo))
+        content.font(weight.font(size: size, relativeTo: relativeTo))
     }
 }
 
@@ -219,7 +259,7 @@ struct BalancedMonoFontModifier: ViewModifier {
     let relativeTo: Font.TextStyle
 
     func body(content: Content) -> some View {
-        content.font(.custom(weight.postscriptName, size: size, relativeTo: relativeTo))
+        content.font(.system(size: BalancedTypeScale.scaled(size, relativeTo: relativeTo), weight: weight == .medium ? .medium : .regular, design: .monospaced))
     }
 }
 
@@ -261,7 +301,7 @@ struct BalancedAmount: View {
                 scaledCurrencyText(scale: currencyScale)
             } else {
                 Text(session.amountsVisible ? prefix + MoneyText.format(minorUnits: minorUnits, currency: currency, showsCurrency: showsCurrency) : "••••••")
-                    .font(.custom(BalancedWeight.text.sansPostscriptName, size: size, relativeTo: .body))
+                    .font(BalancedWeight.text.font(size: size, relativeTo: .body))
             }
         }
         .monospacedDigit()
@@ -278,15 +318,15 @@ struct BalancedAmount: View {
         var result = Text(verbatim: "")
         if !prefix.isEmpty {
             result = Text(prefix)
-                .font(.custom(BalancedWeight.text.sansPostscriptName, size: size, relativeTo: .body))
+                .font(BalancedWeight.text.font(size: size, relativeTo: .body))
                 .foregroundColor(color)
         }
         return result
             + Text(symbol)
-                .font(.custom(BalancedWeight.text.sansPostscriptName, size: size * scale, relativeTo: .body))
+                .font(BalancedWeight.text.font(size: size * scale, relativeTo: .body))
                 .foregroundColor(BalancedPalette.meta)
             + Text(number)
-                .font(.custom(BalancedWeight.text.sansPostscriptName, size: size, relativeTo: .body))
+                .font(BalancedWeight.text.font(size: size, relativeTo: .body))
                 .foregroundColor(color)
     }
 }
@@ -313,8 +353,9 @@ struct BalancedSectionLabel: View {
     }
 }
 
-/// `.mark` — the shared 2px underline selection device used by tabs, segment
-/// filters and reconciliation status filters. No pills, no filled backgrounds.
+/// `.mark` — the shared selection device used by tabs, segment filters and
+/// reconciliation status filters. Since the 素白 theme a capsule chip: ink
+/// with page-coloured text when selected, a grey well otherwise.
 struct BalancedMark: View {
     let title: String
     let selected: Bool
@@ -322,18 +363,17 @@ struct BalancedMark: View {
 
     var body: some View {
         Text(title)
-            .balancedFont(size: size, weight: .regular)
-            .foregroundStyle(selected ? BalancedPalette.ink : BalancedPalette.meta)
-            .padding(.bottom, 7)
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(selected ? BalancedPalette.ink : Color.clear)
-                    .frame(height: 2)
-            }
+            .balancedFont(size: size - 1, weight: .medium)
+            .foregroundStyle(selected ? BalancedPalette.page : BalancedPalette.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 13)
+            .frame(minHeight: 32)
+            .background(selected ? BalancedPalette.ink : BalancedPalette.sunken, in: Capsule(style: .continuous))
+            .contentShape(Capsule(style: .continuous))
     }
 }
 
-/// `.tag` — a status word with an underline instead of a filled pill.
+/// `.tag` — a status word in a small tinted capsule.
 struct BalancedTag: View {
     enum Kind { case neutral, pending, ok }
     let text: String
@@ -349,10 +389,11 @@ struct BalancedTag: View {
 
     var body: some View {
         Text(text)
-            .balancedFont(size: 12)
+            .balancedFont(size: 12, weight: .medium)
             .foregroundStyle(color)
-            .padding(.bottom, 2)
-            .overlay(alignment: .bottom) { Rectangle().fill(color).frame(height: 1) }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.12), in: Capsule(style: .continuous))
     }
 }
 
@@ -378,16 +419,17 @@ private struct BalancedButtonBody<Label: View>: View {
     @Environment(\.balancedRoundedControls) private var rounded
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: rounded ? 24 : 3, style: .continuous)
+        // Capsules everywhere since the 素白 theme.
+        let shape = Capsule(style: .continuous)
         label
             .balancedFont(size: 15, weight: .medium)
             .foregroundStyle(labelColor)
-            .frame(maxWidth: .infinity, minHeight: rounded ? 46 : 48)
+            .frame(maxWidth: .infinity, minHeight: 48)
             .padding(.horizontal, 18)
             .background(backgroundColor)
             .overlay {
-                if variant == .outline || variant == .risk {
-                    shape.stroke(rounded ? BalancedPalette.ruleStrong : BalancedPalette.edge, lineWidth: 1)
+                if variant == .risk {
+                    shape.stroke(BalancedPalette.ruleStrong, lineWidth: 1)
                 }
             }
             .clipShape(shape)
@@ -405,7 +447,11 @@ private struct BalancedButtonBody<Label: View>: View {
     }
 
     private var backgroundColor: Color {
-        variant == .primary ? BalancedPalette.ink : .clear
+        switch variant {
+        case .primary: BalancedPalette.ink
+        case .outline: BalancedPalette.sunken
+        case .quiet, .risk: .clear
+        }
     }
 }
 
@@ -474,7 +520,8 @@ struct BalancedBand: ViewModifier {
             .padding(.horizontal, 16)
             .padding(.top, lead ? 18 : 14)
             .padding(.bottom, lead ? 16 : 14)
-            .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: rounded ? 22 : 0, style: .continuous))
+            // A rounded grey well everywhere since the 素白 theme.
+            .background(BalancedPalette.sunken, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 }
 
@@ -484,30 +531,27 @@ extension View {
     }
 }
 
-/// `.toggle` — a 44×28 square-cornered (2px) switch with a 1px `--edge`
-/// border; filled `--ink` with a `--bg` thumb when on. Native `Toggle`
-/// binding/accessibility behaviour is unchanged — only the rendering differs.
+/// `.toggle` — an iOS-shaped 51×31 capsule switch: ink track with a page
+/// thumb when on, a grey well when off. Native `Toggle` binding and
+/// accessibility are unchanged; only the rendering differs.
 struct BalancedToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack {
             configuration.label
             Spacer()
             Button {
-                configuration.isOn.toggle()
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { configuration.isOn.toggle() }
             } label: {
                 ZStack(alignment: configuration.isOn ? .trailing : .leading) {
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(configuration.isOn ? BalancedPalette.ink : Color.clear)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                .stroke(configuration.isOn ? BalancedPalette.ink : BalancedPalette.edge, lineWidth: 1)
-                        }
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(configuration.isOn ? BalancedPalette.page : BalancedPalette.meta)
-                        .frame(width: 20, height: 20)
-                        .padding(3)
+                    Capsule(style: .continuous)
+                        .fill(configuration.isOn ? BalancedPalette.ink : BalancedPalette.well)
+                    Circle()
+                        .fill(configuration.isOn ? BalancedPalette.page : Color.white)
+                        .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                        .frame(width: 27, height: 27)
+                        .padding(2)
                 }
-                .frame(width: 44, height: 28)
+                .frame(width: 51, height: 31)
             }
             .buttonStyle(.plain)
         }
@@ -523,7 +567,7 @@ enum BalancedKeyTotalText {
     static func value(minorUnits: Int, currency: String, prefix: String = "", color: Color, amountsVisible: Bool, size: CGFloat = 21, currencyScale: CGFloat = 0.62) -> Text {
         guard amountsVisible else {
             return Text("••••••")
-                .font(.custom(BalancedWeight.medium.sansPostscriptName, size: size, relativeTo: .title2))
+                .font(BalancedWeight.medium.font(size: size, relativeTo: .title2))
                 .foregroundColor(color)
         }
         let symbol = MoneyText.currencySymbol(for: currency)
@@ -531,15 +575,15 @@ enum BalancedKeyTotalText {
         var result = Text(verbatim: "")
         if !prefix.isEmpty {
             result = Text(prefix)
-                .font(.custom(BalancedWeight.medium.sansPostscriptName, size: size, relativeTo: .title2))
+                .font(BalancedWeight.medium.font(size: size, relativeTo: .title2))
                 .foregroundColor(color)
         }
         return result
         + Text(symbol)
-            .font(.custom(BalancedWeight.text.sansPostscriptName, size: size * currencyScale, relativeTo: .title2))
+            .font(BalancedWeight.text.font(size: size * currencyScale, relativeTo: .title2))
             .foregroundColor(BalancedPalette.meta)
         + Text(number)
-            .font(.custom(BalancedWeight.medium.sansPostscriptName, size: size, relativeTo: .title2))
+            .font(BalancedWeight.medium.font(size: size, relativeTo: .title2))
             .foregroundColor(color)
     }
 }

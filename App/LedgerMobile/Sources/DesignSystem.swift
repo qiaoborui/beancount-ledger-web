@@ -517,7 +517,7 @@ struct AmountLabel: View {
     var prefix = ""
     /// Plex Sans 450 ("Text") — proportional with tabular figures. Balanced
     /// reserves mono for account paths and beancount source only.
-    var font: Font = .custom(BalancedWeight.text.sansPostscriptName, size: 15, relativeTo: .subheadline)
+    var font: Font = BalancedWeight.text.font(size: 15, relativeTo: .subheadline)
     var color: Color = LedgerPalette.ink
     var displayMode: MoneyText.DisplayMode = .adaptive
     var showSign = false
